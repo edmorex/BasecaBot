@@ -20,6 +20,7 @@ tokens.*.json
 .DS_Store
 .vscode/
 .idea/
+.claude/
 
 # Webapp builds
 webapps/**/dist/
