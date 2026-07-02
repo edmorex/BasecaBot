@@ -1,0 +1,35 @@
+# Server target: bot + Postgres. Reproduces production locally.
+# For local dev on your Mac you don't need this — SQLite + `npm run dev` is enough.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: basecabot
+      POSTGRES_PASSWORD: basecabot
+      POSTGRES_DB: basecabot
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U basecabot']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Override DATABASE_URL to point at the Postgres service.
+      DATABASE_URL: postgresql://basecabot:basecabot@db:5432/basecabot?schema=public
+    ports:
+      - '8080:8080'
+
+volumes:
+  db-data:

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BasecaWheel — test harness</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; background: #0e0e10; color: #efeff1; }
+      h1 { color: #a970ff; margin-bottom: 0.25rem; }
+      .sub { color: #adadb8; font-size: 0.9rem; margin-top: 0; }
+      .panel { background: #18181b; border: 1px solid #2a2a2d; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+      .row { display: flex; gap: 2rem; flex-wrap: wrap; }
+      .col { flex: 1 1 320px; }
+      input, button { font-size: 1rem; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #3a3a3d; }
+      button { background: #a970ff; color: #fff; border: none; cursor: pointer; }
+      button:hover { background: #9147ff; }
+      button:disabled { background: #3a3a3d; cursor: not-allowed; }
+      .status { font-size: 0.9rem; color: #adadb8; }
+      .status.ok { color: #57e389; }
+      .status.err { color: #ff6b6b; }
+      ul { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+      li { padding: 0.35rem 0.5rem; border-bottom: 1px solid #2a2a2d; display: flex; justify-content: space-between; }
+      .winner { color: #57e389; font-weight: bold; }
+      .wheel-title { font-size: 1.3rem; color: #a970ff; margin: 0.25rem 0 0.75rem; }
+      #log { font-family: ui-monospace, monospace; font-size: 0.8rem; max-height: 260px; overflow-y: auto; background: #0e0e10; border-radius: 6px; padding: 0.5rem; }
+      .log-in { color: #7dd3fc; }
+      .log-out { color: #fbbf24; }
+      .log-sys { color: #adadb8; }
+      .perm { color: #adadb8; font-size: 0.8rem; }
+      label { display: block; margin-bottom: 0.5rem; }
+      .settings input[type='number'] { width: 4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>BasecaWheel — test harness</h1>
+    <p class="sub">Validates the BasecaBot ↔ BasecaWheel WebSocket contract. Not the real app.</p>
+
+    <div class="panel">
+      <label class="status">Hub URL
+        <input id="url" size="60" value="ws://localhost:8080?room=baseca-wheel&secret=change-me" />
+      </label>
+      <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span id="status" class="status">disconnected</span>
+    </div>
+
+    <div class="row">
+      <div class="col panel">
+        <h2>Wheel</h2>
+        <div class="wheel-title">Title: <span id="title">(none)</span></div>
+        <div class="settings status">
+          <label>Enforce permission rules
+            <input type="checkbox" id="enforce" checked />
+          </label>
+          <label>Max <code>add</code> per user
+            <input type="number" id="maxPerUser" value="2" min="0" />
+          </label>
+          <div class="perm">
+            Rules when enforced: <code>title</code>/<code>spin</code>/<code>reset</code> need permission ≥ 3 (mod).
+            <code>add</code> is open to all (up to the per-user limit); <code>clear</code> removes only the caller's own entries.
+          </div>
+        </div>
+        <h3>Entries (<span id="count">0</span>)</h3>
+        <ul id="entries"></ul>
+        <div style="margin-top: 0.75rem">
+          <button id="spinBtn">Spin now (local)</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+
+      <div class="col panel">
+        <h2>Message log</h2>
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let ws = null;
+
+      let title = '';
+      const entries = []; // { text, user }
+      const addCounts = new Map(); // user -> count
+
+      function setStatus(text, cls = '') {
+        $('status').textContent = text;
+        $('status').className = 'status ' + cls;
+      }
+
+      function log(kind, text) {
+        const el = document.createElement('div');
+        el.className = 'log-' + kind;
+        el.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+        $('log').prepend(el);
+      }
+
+      function renderEntries() {
+        $('count').textContent = entries.length;
+        $('entries').innerHTML = entries
+          .map((e) => `<li><span>${escapeHtml(e.text)}</span><span class="perm">${escapeHtml(e.user)}</span></li>`)
+          .join('');
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      }
+
+      function send(type, payload) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type, room: 'baseca-wheel', payload }));
+          log('out', `→ ${type} ${JSON.stringify(payload)}`);
+        }
+      }
+
+      // ── Core actions (the "real" app would implement these) ──────────────────
+      function setTitle(text) {
+        title = text;
+        $('title').textContent = text || '(none)';
+      }
+
+      function addEntry(text, user) {
+        entries.push({ text, user });
+        renderEntries();
+      }
+
+      function spin() {
+        if (entries.length === 0) {
+          send('announce', { text: 'The wheel is empty — add entries with !wheel add' });
+          return;
+        }
+        const winner = entries[Math.floor(Math.random() * entries.length)];
+        log('sys', `spun → winner: ${winner.text} (added by ${winner.user})`);
+        // The winner label is the ENTRY text; tweak to winner.user if you prefer.
+        send('result', { winner: winner.text });
+      }
+
+      // ── Handle bot → wheel commands ──────────────────────────────────────────
+      function handleWheel(payload) {
+        const { command, text, user, permission } = payload;
+        const enforce = $('enforce').checked;
+        const maxPerUser = Number($('maxPerUser').value);
+
+        // title / spin / reset are "manager" actions → require mod (>= 3).
+        // add is open to everyone; clear only affects the caller's own entries.
+        if ((command === 'title' || command === 'spin' || command === 'reset') && enforce && permission < 3) {
+          log('sys', `rejected "${command}" from ${user} (permission ${permission} < 3)`);
+          return;
+        }
+
+        switch (command) {
+          case 'title':
+            setTitle(text);
+            break;
+          case 'add': {
+            const used = addCounts.get(user) || 0;
+            if (enforce && maxPerUser > 0 && used >= maxPerUser) {
+              log('sys', `rejected "add" from ${user} (limit ${maxPerUser} reached)`);
+              send('announce', { text: `@${user} you've hit the entry limit.` });
+              return;
+            }
+            addCounts.set(user, used + 1);
+            addEntry(text, user);
+            break;
+          }
+          case 'spin':
+            spin();
+            break;
+          case 'clear': {
+            // A user clears only their OWN entries (open to everyone).
+            const before = entries.length;
+            for (let i = entries.length - 1; i >= 0; i--) {
+              if (entries[i].user === user) entries.splice(i, 1);
+            }
+            addCounts.delete(user); // let them add again
+            renderEntries();
+            log('sys', `${user} cleared their entries (${before - entries.length} removed)`);
+            break;
+          }
+          case 'reset':
+            // A manager wipes the entire wheel.
+            entries.length = 0;
+            addCounts.clear();
+            setTitle('');
+            renderEntries();
+            log('sys', `${user} reset the whole wheel`);
+            break;
+          default:
+            log('sys', `unknown command: ${command}`);
+        }
+      }
+
+      // ── Connection ────────────────────────────────────────────────────────────
+      $('connect').onclick = () => {
+        if (ws) ws.close();
+        setStatus('connecting…');
+        ws = new WebSocket($('url').value);
+        ws.onopen = () => {
+          setStatus('connected', 'ok');
+          $('connect').disabled = true;
+          $('disconnect').disabled = false;
+          log('sys', 'connected to BasecaBot');
+        };
+        ws.onclose = (ev) => {
+          setStatus(`disconnected (code ${ev.code})`, ev.code >= 4000 ? 'err' : '');
+          $('connect').disabled = false;
+          $('disconnect').disabled = true;
+          if (ev.code === 4001) log('sys', 'bad secret — check WS_HUB_SECRET');
+          if (ev.code === 4002) log('sys', 'missing room in URL');
+        };
+        ws.onerror = () => setStatus('error (is the bot running?)', 'err');
+        ws.onmessage = (ev) => {
+          let msg;
+          try {
+            msg = JSON.parse(ev.data);
+          } catch {
+            return;
+          }
+          log('in', `← ${msg.type} ${JSON.stringify(msg.payload)}`);
+          if (msg.type === 'wheel') handleWheel(msg.payload);
+        };
+      };
+
+      $('disconnect').onclick = () => ws && ws.close();
+      $('spinBtn').onclick = spin;
+      $('clearBtn').onclick = () => {
+        entries.length = 0;
+        addCounts.clear();
+        setTitle('');
+        renderEntries();
+        log('sys', 'cleared wheel');
+      };
+
+      renderEntries();
+    </script>
+  </body>
+</html>

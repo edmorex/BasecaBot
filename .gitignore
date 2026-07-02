@@ -1,0 +1,26 @@
+node_modules/
+dist/
+*.log
+
+# Secrets & local config
+.env
+.env.local
+
+# Local database
+*.db
+*.db-journal
+prisma/*.db
+prisma/*.db-journal
+
+# Auth token cache
+tokens.*.json
+.tokens/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Webapp builds
+webapps/**/dist/
+webapps/**/node_modules/

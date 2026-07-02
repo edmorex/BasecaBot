@@ -1,0 +1,80 @@
+// BasecaBot data model.
+//
+// Uses `env("DATABASE_URL")` so the exact same schema runs on SQLite locally
+// and Postgres on a server — switch by changing DATABASE_URL only.
+// (When moving to Postgres, change provider below to "postgresql".)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// A Twitch user the bot has seen. Keyed by the stable Twitch user id.
+model User {
+  id          String   @id // Twitch user id
+  login       String   @unique
+  displayName String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  points   PointsBalance[]
+  events   EventLog[]
+}
+
+/// Points balance per user, per channel (multi-channel ready).
+model PointsBalance {
+  id      Int    @id @default(autoincrement())
+  userId  String
+  channel String
+  balance Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel])
+  @@index([channel])
+}
+
+/// Admin-defined custom text commands.
+model CustomCommand {
+  id         Int      @id @default(autoincrement())
+  channel    String
+  name       String
+  response   String
+  /// PermissionLevel numeric value (see core/events.ts).
+  permission Int      @default(0)
+  cooldown   Int      @default(0) // seconds
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([channel, name])
+}
+
+/// Per-channel runtime settings, editable without redeploying.
+model Setting {
+  id      Int    @id @default(autoincrement())
+  channel String
+  key     String
+  value   String
+
+  @@unique([channel, key])
+}
+
+/// Audit log of notable events (subs, bits, donations, raids...).
+model EventLog {
+  id        Int      @id @default(autoincrement())
+  channel   String
+  type      String
+  userId    String?
+  amount    Int?
+  meta      String? // JSON blob
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([channel, type])
+  @@index([createdAt])
+}
