@@ -78,6 +78,12 @@
       const $ = (id) => document.getElementById(id);
       let ws = null;
 
+      // When served over HTTPS (production behind Caddy), default to secure wss
+      // via the reverse proxy. Locally (file://) keep the ws://localhost default.
+      if (location.protocol === 'https:') {
+        $('url').value = `wss://${location.host}/ws?room=baseca-wheel&secret=change-me`;
+      }
+
       let title = '';
       const entries = []; // { text, user }
       const addCounts = new Map(); // user -> count

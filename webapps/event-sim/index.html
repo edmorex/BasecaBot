@@ -66,6 +66,12 @@
       const $ = (id) => document.getElementById(id);
       let ws = null;
 
+      // When served over HTTPS (production behind Caddy), default to secure wss
+      // via the reverse proxy. Locally (file://) keep the ws://localhost default.
+      if (location.protocol === 'https:') {
+        $('url').value = `wss://${location.host}/ws?room=event-sim&secret=change-me`;
+      }
+
       // ── Random value helpers ───────────────────────────────────────────────
       const NAMES = ['Ninja_Pango', 'QueenBeeVT', 'saltyPixel', 'DrLoot', 'mossy_kai', 'VoidHopper', 'BitBaron', 'lil_fern', 'CaptainYikes', 'nova_wisp'];
       const MESSAGES = ['Love the stream!', 'First time here 👋', 'LETS GOOO', 'Been watching for months', '', 'Take my money', 'poggers'];

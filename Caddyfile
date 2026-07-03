@@ -1,0 +1,43 @@
+# BasecaBot reverse proxy (Caddy).
+#
+# Caddy terminates TLS with an automatic Let's Encrypt certificate for {$DOMAIN}
+# (once DNS points at this server and ports 80/443 are open), serves the bundled
+# web apps as static sites, and proxies secure WebSocket (wss) traffic to the
+# bot's internal hub. The hub port (8080) is NOT exposed to the internet — only
+# Caddy can reach it, over the private Docker network.
+
+{
+	# Email used for Let's Encrypt registration/expiry notices (optional).
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# ── WebSocket hub ──────────────────────────────────────────────────────────
+	# Web apps connect to:  wss://{$DOMAIN}/ws?room=<room>&secret=<WS_HUB_SECRET>
+	# Caddy auto-detects the Upgrade header and proxies to the bot container.
+	# (In a `handle` block so it shares one ordered routing group with the apps.)
+	handle /ws* {
+		reverse_proxy bot:8080
+	}
+
+	# ── Bundled web apps (static) ──────────────────────────────────────────────
+	# handle_path strips the prefix, so /wheel/ serves baseca-wheel/index.html.
+	handle_path /wheel* {
+		root * /srv/webapps/baseca-wheel
+		file_server
+	}
+	handle_path /sample* {
+		root * /srv/webapps/sample-game
+		file_server
+	}
+	handle_path /events* {
+		root * /srv/webapps/event-sim
+		file_server
+	}
+
+	handle {
+		respond "BasecaBot is running." 200
+	}
+}

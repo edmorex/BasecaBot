@@ -66,16 +66,19 @@ npm run typecheck # tsc --noEmit
 npm run lint
 ```
 
-## Deploy to a server (Postgres)
+## Deploy to a server
+
+Full walkthrough (DNS, HTTPS, first deploy, updates): **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+In short, `docker-compose.yml` runs the bot plus a **Caddy** reverse proxy that terminates
+HTTPS (automatic Let's Encrypt cert for `DOMAIN`), serves the web apps, and proxies secure
+`wss` to the hub. Data lives on persistent volumes (SQLite + refreshed tokens). On the server,
+with `.env` filled in (including `DOMAIN` / `ACME_EMAIL`):
 
 ```bash
-# On the server, with .env filled in:
-docker compose up --build -d
+docker compose up -d --build     # first deploy
+./scripts/deploy.sh              # subsequent deploys (git pull + rebuild + restart)
 ```
-
-`docker-compose.yml` runs Postgres + the bot; `DATABASE_URL` is overridden to Postgres and
-`prisma migrate deploy` runs on start. To switch a non-Docker deploy to Postgres, change the
-`provider` in `prisma/schema.prisma` to `postgresql` and set `DATABASE_URL` accordingly.
 
 ## Roadmap / extension points
 

@@ -1,35 +1,56 @@
-# Server target: bot + Postgres. Reproduces production locally.
-# For local dev on your Mac you don't need this — SQLite + `npm run dev` is enough.
-services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: basecabot
-      POSTGRES_PASSWORD: basecabot
-      POSTGRES_DB: basecabot
-    volumes:
-      - db-data:/var/lib/postgresql/data
-    ports:
-      - '5432:5432'
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U basecabot']
-      interval: 5s
-      timeout: 5s
-      retries: 5
+# BasecaBot production stack (single VPS).
+#
+#   caddy  — TLS termination + static web apps + wss proxy (public: 80/443)
+#   bot    — the bot process + WebSocket hub (private; only Caddy reaches it)
+#
+# Data lives in named volumes so it survives `docker compose up --build` and
+# reboots:
+#   botdata    -> /data          (SQLite database)
+#   bottokens  -> /app/.tokens    (refreshed Twitch tokens)
+#
+# DOMAIN and ACME_EMAIL are read from the .env file in this directory (Compose
+# auto-loads it for ${...} substitution). Secrets/tokens come from the same .env
+# via env_file on the bot service.
+#
+# NOTE: this uses SQLite on a volume — perfect for a single always-on bot with no
+# extra moving parts. Moving to Postgres later is a schema `provider` change plus
+# a fresh migration; see docs/DEPLOYMENT.md.
 
+services:
   bot:
     build: .
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     env_file: .env
     environment:
-      # Override DATABASE_URL to point at the Postgres service.
-      DATABASE_URL: postgresql://basecabot:basecabot@db:5432/basecabot?schema=public
+      # Absolute path on the mounted volume. Overrides the local .env value so
+      # migrations aren't shadowed (prisma/migrations stays baked in the image).
+      DATABASE_URL: file:/data/basecabot.db
+      NODE_ENV: production
+    volumes:
+      - botdata:/data
+      - bottokens:/app/.tokens
+    expose:
+      - '8080' # internal only — Caddy proxies to it; not published to the host
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - bot
     ports:
-      - '8080:8080'
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./webapps:/srv/webapps:ro
+      - caddy_data:/data # persists issued TLS certificates
+      - caddy_config:/config
 
 volumes:
-  db-data:
+  botdata:
+  bottokens:
+  caddy_data:
+  caddy_config:

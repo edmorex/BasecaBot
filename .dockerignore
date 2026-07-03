@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.*
+.tokens
+*.db
+*.db-journal
+prisma/*.db
+webapps
+docs
+*.md
+.claude
+.vscode
+.idea
+.DS_Store

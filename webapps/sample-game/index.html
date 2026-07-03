@@ -46,6 +46,12 @@
       let ws = null;
 
       const $ = (id) => document.getElementById(id);
+
+      // When served over HTTPS (production behind Caddy), default to secure wss
+      // via the reverse proxy. Locally (file://) keep the ws://localhost default.
+      if (location.protocol === 'https:') {
+        $('url').value = `wss://${location.host}/ws?room=sample-game&secret=change-me`;
+      }
       const setStatus = (t) => ($('status').textContent = t);
 
       function render() {
