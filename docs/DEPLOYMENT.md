@@ -244,9 +244,64 @@ Copy those off-server periodically (e.g. `scp` to your laptop, or a cron job).
 
 ---
 
-## Part G — Optional upgrades
+## Part G — CI/CD auto-deploy (GitHub Actions)
 
-**GitLab CI/CD auto-deploy.** Add a pipeline that SSHes into the server and runs `./scripts/deploy.sh` on pushes to `main` (store an SSH key as a masked CI/CD variable). Nice once the manual flow feels routine.
+`.github/workflows/deploy.yml` runs the test suite on every push to `main` and, if it passes,
+SSHes into the VPS and runs `scripts/deploy.sh`. One-time setup:
+
+### G1. Create a dedicated deploy SSH key (on your laptop)
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/basecabot_deploy -N "" -C "github-actions-deploy"
+```
+
+### G2. Authorize it on the server
+
+Append the **public** key to the server user's `authorized_keys`:
+
+```bash
+ssh-copy-id -i ~/.ssh/basecabot_deploy.pub ebures@198.251.74.112
+# or manually: cat ~/.ssh/basecabot_deploy.pub | ssh ebures@198.251.74.112 'cat >> ~/.ssh/authorized_keys'
+```
+
+### G3. Point the server's repo at GitHub
+
+The server may still have the old GitLab remote. Update it (public repo → HTTPS pull needs no auth):
+
+```bash
+ssh ebures@198.251.74.112
+cd ~/BasecaBot
+git remote set-url origin https://github.com/edmorex/BasecaBot.git
+git pull    # confirm it works
+```
+
+### G4. Add GitHub repo secrets
+
+Repo → **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | Value |
+|--------|-------|
+| `SSH_HOST` | `198.251.74.112` (or `bot.edmorex.com`) |
+| `SSH_USER` | `ebures` |
+| `SSH_PRIVATE_KEY` | contents of `~/.ssh/basecabot_deploy` (the **private** key, whole file) |
+| `SSH_KNOWN_HOSTS` | output of `ssh-keyscan bot.edmorex.com` (pins the server's host key) |
+
+> `SSH_KNOWN_HOSTS` avoids host-key prompts *and* protects against a man-in-the-middle on the runner. Generate it with `ssh-keyscan bot.edmorex.com` (or the IP) and paste the output.
+
+### G5. Done
+
+Push to `main` → the **Actions** tab shows *Test* then *Deploy to VPS*. Deploy only runs if tests pass.
+You can also trigger it manually from the Actions tab (**Run workflow**). Manual `./scripts/deploy.sh`
+on the server still works anytime.
+
+> **Future upgrade — build in CI, not on the server.** For faster/safer deploys, build the image in
+> the workflow, push it to GitHub Container Registry (GHCR), and have the server `docker compose pull`
+> instead of `--build`. More setup (registry auth + compose `image:` instead of `build:`); worth it if
+> server builds get slow. The current build-on-server flow is fine to start.
+
+---
+
+## Part H — Optional: Postgres instead of SQLite
 
 **Postgres instead of SQLite.** For higher write volume or multiple bot processes:
 1. Change `provider` in `prisma/schema.prisma` to `postgresql`.

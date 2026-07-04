@@ -1,0 +1,53 @@
+name: CI & Deploy
+
+# Runs the test suite on every push to main; if it passes, SSHes into the VPS
+# and runs scripts/deploy.sh (git pull + docker compose up -d --build). Also
+# runnable on demand from the Actions tab (workflow_dispatch).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never let two deploys overlap; queue them instead of cancelling.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx prisma generate # generates the Prisma client types for typecheck
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test # the SQLite integration test auto-skips (no DB in CI)
+
+  deploy:
+    name: Deploy to VPS
+    needs: test # only deploys if the test job succeeded
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and run the deploy script
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Run the deploy inline (mirrors scripts/deploy.sh, minus the interactive
+          # log-tail) so it never depends on the server's current script version.
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+            "$SSH_USER@$SSH_HOST" \
+            'set -e; cd ~/BasecaBot && git pull --ff-only && docker compose up -d --build --remove-orphans && docker compose ps'

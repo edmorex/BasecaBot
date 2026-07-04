@@ -20,5 +20,11 @@ docker compose up -d --build --remove-orphans
 echo "==> Current status"
 docker compose ps
 
-echo "==> Recent bot logs (Ctrl-C to stop tailing)"
-docker compose logs -f --tail=50 bot
+echo "==> Recent bot logs"
+if [ -t 1 ]; then
+  # Interactive terminal: follow the logs (Ctrl-C to stop).
+  docker compose logs -f --tail=50 bot
+else
+  # Non-interactive (e.g. CI over SSH): print recent logs and exit.
+  docker compose logs --tail=50 bot
+fi
