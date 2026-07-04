@@ -1,16 +1,14 @@
-# BasecaBot production stack (single VPS).
+# BasecaBot — bot service only.
 #
-#   caddy  — TLS termination + static web apps + wss proxy (public: 80/443)
-#   bot    — the bot process + WebSocket hub (private; only Caddy reaches it)
+# TLS/HTTPS and static web-app serving are handled by the separate `edge-server`
+# project, which owns ports 80/443. It reaches this bot over the shared external
+# `edge` Docker network and proxies wss://bot.edmorex.com/ws -> bot:8080.
+# (See docs/DEPLOYMENT.md and docs/edge-server-spec.md.)
 #
 # Data lives in named volumes so it survives `docker compose up --build` and
 # reboots:
 #   botdata    -> /data          (SQLite database)
 #   bottokens  -> /app/.tokens    (refreshed Twitch tokens)
-#
-# DOMAIN and ACME_EMAIL are read from the .env file in this directory (Compose
-# auto-loads it for ${...} substitution). Secrets/tokens come from the same .env
-# via env_file on the bot service.
 #
 # NOTE: this uses SQLite on a volume — perfect for a single always-on bot with no
 # extra moving parts. Moving to Postgres later is a schema `provider` change plus
@@ -30,27 +28,16 @@ services:
       - botdata:/data
       - bottokens:/app/.tokens
     expose:
-      - '8080' # internal only — Caddy proxies to it; not published to the host
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on:
-      - bot
-    ports:
-      - '80:80'
-      - '443:443'
-    environment:
-      DOMAIN: ${DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./webapps:/srv/webapps:ro
-      - caddy_data:/data # persists issued TLS certificates
-      - caddy_config:/config
+      - '8080' # reached by the edge Caddy over the `edge` network; not published
+    networks:
+      - edge
 
 volumes:
   botdata:
   bottokens:
-  caddy_data:
-  caddy_config:
+
+networks:
+  # Shared with the edge-server project. Create once on the host with:
+  #   docker network create edge
+  edge:
+    external: true

@@ -3,25 +3,29 @@
 This guide takes BasecaBot from your laptop to your always-on IONOS Ubuntu server, behind HTTPS, and explains how to keep developing locally and ship future updates.
 
 - **Server:** IONOS VPS, Ubuntu 24.04, `198.251.74.112`
-- **Domain:** your IONOS-registered domain (referred to below as `bot.example.com`)
-- **Runtime:** Docker Compose — two containers:
+- **Domain:** `bot.edmorex.com`
+- **Runtime:** Docker Compose — the bot runs as a **single container** behind a separate, host-wide edge proxy.
+
+> **TLS/HTTPS now lives in the `edge-server` project**, not here. A dedicated Caddy in that project owns ports 80/443, terminates TLS for all domains, serves the web apps, and proxies `wss://bot.edmorex.com/ws` to this bot over the shared external `edge` Docker network. This project just runs the bot + WebSocket hub. See `docs/edge-server-spec.md` for the edge side.
 
 ```
-                Internet
-                   │  :443 / :80
-            ┌──────▼───────┐   TLS + static web apps + wss proxy
-            │    caddy     │   (auto Let's Encrypt cert for your domain)
-            └──────┬───────┘
-                   │ private docker network
-            ┌──────▼───────┐   bot process + WebSocket hub (:8080, NOT public)
-            │     bot      │   SQLite on a persistent volume
-            └──────────────┘
+                Internet  :443 / :80
+                   │
+          ┌────────▼─────────┐   edge-server project (separate compose stack)
+          │   caddy (edge)   │   TLS for all domains + static apps + wss proxy
+          └────────┬─────────┘
+                   │ shared external docker network "edge"
+          ┌────────▼─────────┐   THIS project (docker-compose.yml)
+          │      bot         │   bot process + WebSocket hub (:8080, not public)
+          │                  │   SQLite on a persistent volume
+          └──────────────────┘
 ```
 
 Why this shape:
-- **Caddy** gives you automatic HTTPS with zero cert wrangling, serves the web apps, and proxies `wss://` to the hub. The hub port `8080` is never exposed to the internet.
-- **EventSub runs over WebSocket** (outbound from the bot), so you do **not** need any public webhook URL. HTTPS here is only for serving web apps and the secure `wss` the browsers need.
+- **One edge Caddy** owns 80/443 for the whole host and gives automatic HTTPS. The bot's hub port `8080` is never exposed to the internet — only the edge Caddy reaches it, over the private `edge` network.
+- **EventSub runs over WebSocket** (outbound from the bot), so you do **not** need any public webhook URL. HTTPS is only for serving web apps and the secure `wss` the browsers need.
 - **SQLite on a Docker volume** keeps the server simple — one bot process doesn't need Postgres. (Upgrading to Postgres later is covered at the end.)
+- **DNS, the firewall, and cert issuance are handled once, in `edge-server`** (Part A below is the original single-stack setup — most of it is already done; the DNS record for `bot` and the firewall ports remain relevant).
 
 ---
 
@@ -131,22 +135,24 @@ Leave `DATABASE_URL` as-is — Compose overrides it to the volume path (`file:/d
 
 ### B3. Launch
 
+The bot joins the shared `edge` network (created by the `edge-server` project). Make sure that network exists (`docker network create edge`), then:
+
 ```bash
 docker compose up -d --build
 ```
 
-First run will: build the image, run `prisma migrate deploy` (creates the SQLite DB on the volume), start the bot, and start Caddy — which requests a TLS certificate for `DOMAIN`. Give it ~30–60s.
+First run will: build the image, run `prisma migrate deploy` (creates the SQLite DB on the volume), and start the bot on the `edge` network. The `edge-server` Caddy proxies `wss://bot.edmorex.com/ws` to it and serves the web apps — see `docs/edge-server-spec.md` §7 for the one-time edge wiring (uncomment the `bot.edmorex.com` block, mount this repo's `webapps/`).
 
 ### B4. Verify
 
 ```bash
-docker compose ps                    # both services "running"
+docker compose ps                    # bot "running"
 docker compose logs -f bot           # look for "chat connected" and "EventSub listening"
 ```
 
 Then:
-- Visit `https://bot.example.com/` → "BasecaBot is running." with a valid padlock.
-- Visit `https://bot.example.com/wheel/` → the BasecaWheel harness loads; click Connect (the URL now auto-fills `wss://bot.example.com/ws?...` — just set the secret to your `WS_HUB_SECRET`).
+- Visit `https://bot.edmorex.com/` → "BasecaBot is running." with a valid padlock (served by the edge Caddy).
+- Visit `https://bot.edmorex.com/wheel/` → the BasecaWheel harness loads; click Connect (the URL auto-fills `wss://bot.edmorex.com/ws?...` — just set the secret to your `WS_HUB_SECRET`).
 - In your Twitch chat, type `!points` → the bot replies.
 
 Deployment done. 🎉

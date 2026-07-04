@@ -70,10 +70,12 @@ npm run lint
 
 Full walkthrough (DNS, HTTPS, first deploy, updates): **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
-In short, `docker-compose.yml` runs the bot plus a **Caddy** reverse proxy that terminates
-HTTPS (automatic Let's Encrypt cert for `DOMAIN`), serves the web apps, and proxies secure
-`wss` to the hub. Data lives on persistent volumes (SQLite + refreshed tokens). On the server,
-with `.env` filled in (including `DOMAIN` / `ACME_EMAIL`):
+In short, `docker-compose.yml` runs the bot as a **single container** on the shared external
+`edge` Docker network. HTTPS/TLS and static web-app serving are handled by the separate
+**`edge-server`** project (a host-wide Caddy that owns 80/443 and proxies `wss://bot.edmorex.com/ws`
+to the hub — see [docs/edge-server-spec.md](docs/edge-server-spec.md)). Data lives on persistent
+volumes (SQLite + refreshed tokens). On the server, with `.env` filled in and the `edge` network
+created (`docker network create edge`):
 
 ```bash
 docker compose up -d --build     # first deploy

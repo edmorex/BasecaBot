@@ -13,7 +13,9 @@ echo "==> Pulling latest code"
 git pull --ff-only
 
 echo "==> Rebuilding and restarting containers"
-docker compose up -d --build
+# --remove-orphans cleans up containers no longer in the compose file
+# (e.g. the old bundled `caddy` service now handled by the edge-server project).
+docker compose up -d --build --remove-orphans
 
 echo "==> Current status"
 docker compose ps
