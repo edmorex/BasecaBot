@@ -301,6 +301,73 @@ on the server still works anytime.
 
 ---
 
+## Part I — Web dashboard ("Login with Twitch")
+
+The bot runs an HTTP server (port `HTTP_PORT`, default `8090`) serving the `bot.edmorex.com`
+landing page, the OAuth flow, and a small JSON API. Wiring it up is four steps:
+
+### I1. Register the OAuth redirect URI (Twitch console)
+
+<https://dev.twitch.tv/console/apps> → your app → **OAuth Redirect URLs** → add:
+
+```
+https://bot.edmorex.com/auth/callback
+```
+
+(Keep the existing `http://localhost:3000` for token generation; an app can have several.)
+
+### I2. Add `moderation:read` to the broadcaster token
+
+The dashboard's **Moderator** row uses Helix, which needs `moderation:read` on the broadcaster
+token (the other rows use scopes you already have). Regenerate the broadcaster token with:
+
+```
+channel:read:subscriptions bits:read moderator:read:followers moderation:read
+```
+
+and update `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`. Without it the
+bot still runs — the Moderator row just shows false. (To pick up new tokens, clear the token cache:
+`docker compose down && docker volume rm basecabot_bottokens && docker compose up -d`.)
+
+### I3. Set the web env vars (server `.env`)
+
+```dotenv
+PUBLIC_URL=https://bot.edmorex.com
+SESSION_SECRET=<openssl rand -hex 32>
+# HTTP_PORT=8090   # default; only set to override
+```
+
+`PUBLIC_URL` must exactly match the domain in the redirect URI. `SESSION_SECRET` keeps logins valid
+across restarts (if unset, an ephemeral one is generated and users re-login after each deploy).
+
+### I4. Point Caddy at the HTTP server (edge-server project)
+
+In the `edge-server` `Caddyfile`, the `bot.edmorex.com` block's catch-all `handle` must proxy to the
+bot's HTTP server instead of returning a static string. Replace:
+
+```caddyfile
+	handle {
+		respond "BasecaBot is running." 200
+	}
+```
+
+with:
+
+```caddyfile
+	# Dashboard, OAuth, and JSON API (everything not matched above).
+	handle {
+		reverse_proxy bot:8090
+	}
+```
+
+Leave the `/ws`, `/wheel`, `/sample`, `/events` blocks as they are — they're matched first. Then
+`docker compose up -d` in `edge-server` to reload.
+
+Verify: visit `https://bot.edmorex.com/` → "Login with Twitch" → after authorizing you're back on the
+page showing your avatar, name, and the permission grid.
+
+---
+
 ## Part H — Optional: Postgres instead of SQLite
 
 **Postgres instead of SQLite.** For higher write volume or multiple bot processes:

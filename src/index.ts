@@ -9,10 +9,13 @@ import { UsersService } from './services/users.js';
 import { PointsService } from './services/points.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
+import { WebServer } from './web/webServer.js';
+import { ChannelRelationshipService } from './web/auth/channelRelationship.js';
 import { createAuthProvider } from './adapters/twitch/auth.js';
 import { TwitchChatAdapter } from './adapters/twitch/chatAdapter.js';
 import { TwitchEventSubAdapter } from './adapters/twitch/eventSubAdapter.js';
 import { pluginRegistry } from './plugins/index.js';
+import { ApiClient } from '@twurple/api';
 
 const log = scopedLogger('bootstrap');
 
@@ -35,6 +38,7 @@ async function main(): Promise<void> {
 
   // ── Twitch auth + chat client ──────────────────────────────────────────────
   const authProvider = await createAuthProvider(config);
+  const api = new ApiClient({ authProvider });
   const chatAdapter = new TwitchChatAdapter(authProvider, bus, users, config);
   const chat = new TwurpleChatService(chatAdapter.client);
 
@@ -47,6 +51,15 @@ async function main(): Promise<void> {
     channel: config.twitch.channels[0] ?? 'unknown',
   });
   ws.start();
+
+  // ── Web dashboard + "Login with Twitch" ────────────────────────────────────
+  const broadcasterUser = await api.users.getUserByName(config.twitch.broadcasterUsername);
+  if (!broadcasterUser) {
+    log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
+  }
+  const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
+  const webServer = new WebServer(config, relationships);
+  webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
   const ctx: ServiceContext = {
@@ -66,7 +79,7 @@ async function main(): Promise<void> {
 
   // ── Connect to Twitch ────────────────────────────────────────────────────
   await chatAdapter.connect();
-  const eventSub = new TwitchEventSubAdapter(authProvider, bus, config);
+  const eventSub = new TwitchEventSubAdapter(api, bus, config);
   await eventSub.start();
 
   log.info('BasecaBot is running');
@@ -77,6 +90,7 @@ async function main(): Promise<void> {
     await plugins.stopAll();
     await eventSub.stop();
     await chatAdapter.disconnect();
+    await webServer.stop();
     await ws.stop();
     await storage.disconnect();
     process.exit(0);

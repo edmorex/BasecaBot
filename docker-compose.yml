@@ -28,7 +28,8 @@ services:
       - botdata:/data
       - bottokens:/app/.tokens
     expose:
-      - '8080' # reached by the edge Caddy over the `edge` network; not published
+      - '8080' # WebSocket hub — reached by the edge Caddy over the `edge` network
+      - '8090' # HTTP server (dashboard + OAuth + API) — also via the edge Caddy
     networks:
       - edge
 

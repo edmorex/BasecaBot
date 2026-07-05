@@ -1,5 +1,9 @@
 import 'dotenv/config';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { scopedLogger } from './logger.js';
+
+const cfgLog = scopedLogger('config');
 
 /** Split a comma-separated env var into a trimmed, non-empty, lowercased list. */
 function csv(value: string | undefined): string[] {
@@ -29,6 +33,15 @@ const EnvSchema = z.object({
   // events from the WebSocket hub. Keep OFF in production (it can fabricate
   // subs/donations that award points).
   EVENT_SIM_ENABLED: z.string().optional(),
+  // ── Web dashboard / "Login with Twitch" ──────────────────────────────────
+  // Port for the bot's HTTP server (dashboard + auth + API). Behind Caddy.
+  HTTP_PORT: z.coerce.number().int().positive().default(8090),
+  // Public base URL the dashboard is reached at (no trailing slash). Used to
+  // build the OAuth redirect URI and to decide Secure-cookie flags.
+  PUBLIC_URL: z.string().url().default('http://localhost:8090'),
+  // Secret used to sign session cookies (HMAC). If unset, an ephemeral random
+  // one is generated (sessions won't survive restarts — set it in production).
+  SESSION_SECRET: z.string().optional(),
 });
 
 export interface AppConfig {
@@ -48,6 +61,15 @@ export interface AppConfig {
   ws: { port: number; secret: string };
   disabledPlugins: string[];
   eventSim: { enabled: boolean };
+  web: {
+    httpPort: number;
+    publicUrl: string;
+    sessionSecret: string;
+    /** Absolute OAuth redirect URI, derived from publicUrl. */
+    oauthRedirectUri: string;
+    /** Whether cookies should be marked Secure (publicUrl is https). */
+    secureCookies: boolean;
+  };
 }
 
 /**
@@ -66,6 +88,13 @@ export function loadConfig(): AppConfig {
   const admins = new Set(csv(env.BOT_ADMINS));
   admins.add(broadcaster); // broadcaster is always an admin
 
+  const publicUrl = env.PUBLIC_URL.replace(/\/+$/, ''); // strip trailing slash
+  let sessionSecret = env.SESSION_SECRET;
+  if (!sessionSecret) {
+    sessionSecret = randomBytes(32).toString('hex');
+    cfgLog.warn('SESSION_SECRET not set — using an ephemeral secret; logins will not survive restarts. Set SESSION_SECRET in production.');
+  }
+
   return {
     twitch: {
       clientId: env.TWITCH_CLIENT_ID,
@@ -83,5 +112,12 @@ export function loadConfig(): AppConfig {
     ws: { port: env.WS_HUB_PORT, secret: env.WS_HUB_SECRET },
     disabledPlugins: csv(env.DISABLED_PLUGINS),
     eventSim: { enabled: env.EVENT_SIM_ENABLED === 'true' },
+    web: {
+      httpPort: env.HTTP_PORT,
+      publicUrl,
+      sessionSecret,
+      oauthRedirectUri: `${publicUrl}/auth/callback`,
+      secureCookies: publicUrl.startsWith('https://'),
+    },
   };
 }

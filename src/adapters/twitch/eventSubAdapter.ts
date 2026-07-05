@@ -1,6 +1,5 @@
-import { ApiClient } from '@twurple/api';
+import type { ApiClient } from '@twurple/api';
 import { EventSubWsListener } from '@twurple/eventsub-ws';
-import type { AuthProvider } from '@twurple/auth';
 import type { EventBus } from '../../core/eventBus.js';
 import type { AppConfig } from '../../services/config.js';
 import { PermissionLevel, type EventUser } from '../../core/events.js';
@@ -20,14 +19,13 @@ export class TwitchEventSubAdapter {
   private listener?: EventSubWsListener;
 
   constructor(
-    private readonly authProvider: AuthProvider,
+    private readonly api: ApiClient,
     private readonly bus: EventBus,
     private readonly config: AppConfig,
   ) {}
 
   async start(): Promise<void> {
-    const api = new ApiClient({ authProvider: this.authProvider });
-    const broadcaster = await api.users.getUserByName(this.config.twitch.broadcasterUsername);
+    const broadcaster = await this.api.users.getUserByName(this.config.twitch.broadcasterUsername);
     if (!broadcaster) {
       log.error({ user: this.config.twitch.broadcasterUsername }, 'broadcaster not found; EventSub disabled');
       return;
@@ -35,7 +33,7 @@ export class TwitchEventSubAdapter {
     const channel = broadcaster.name.toLowerCase();
     const id = broadcaster.id;
 
-    const listener = new EventSubWsListener({ apiClient: api });
+    const listener = new EventSubWsListener({ apiClient: this.api });
     this.listener = listener;
 
     listener.onChannelSubscription(id, (e) =>
