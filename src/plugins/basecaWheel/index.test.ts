@@ -70,10 +70,10 @@ describe('basecaWheel plugin', () => {
     });
   });
 
-  it('forwards reset with empty text and the caller identity/permission', async () => {
-    await bus.publish(chat('!wheel reset', user({ displayName: 'Mod', permission: PermissionLevel.Moderator })));
+  it('forwards clearall with empty text and the caller identity/permission', async () => {
+    await bus.publish(chat('!wheel clearall', user({ displayName: 'Mod', permission: PermissionLevel.Moderator })));
     expect(broadcast).toHaveBeenCalledWith('baseca-wheel', 'wheel', {
-      command: 'reset',
+      command: 'clearall',
       text: '',
       user: 'Mod',
       permission: PermissionLevel.Moderator, // 3
