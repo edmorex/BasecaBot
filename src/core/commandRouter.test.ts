@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventBus } from './eventBus.js';
 import { CommandRouter } from './commandRouter.js';
-import { PermissionLevel, type ChatEvent, type EventUser } from './events.js';
+import { PermissionLevel, type ChatEvent, type CommandEvent, type EventUser } from './events.js';
 import type { ChatService } from '../services/chat.js';
 
 const noopChat: ChatService = {
@@ -81,5 +81,55 @@ describe('CommandRouter dispatch', () => {
     router.setFallback(fallback);
     await bus.publish(chat('!doesnotexist'));
     expect(fallback).toHaveBeenCalledOnce();
+  });
+});
+
+describe('CommandRouter.registerGroup', () => {
+  let bus: EventBus;
+  let router: CommandRouter;
+
+  beforeEach(() => {
+    bus = new EventBus();
+    router = new CommandRouter(bus, noopChat);
+  });
+
+  it('dispatches to the matching subcommand with the token stripped', async () => {
+    const title = vi.fn();
+    router.registerGroup('wheel', { subcommands: { title: { handler: title }, spin: { handler: vi.fn() } } });
+    await bus.publish(chat('!wheel title Movie Night'));
+    expect(title).toHaveBeenCalledOnce();
+    const e = title.mock.calls[0]![0] as CommandEvent;
+    expect(e.argString).toBe('Movie Night');
+    expect(e.args).toEqual(['Movie', 'Night']);
+  });
+
+  it('prints usage/description when the subcommand is missing or invalid', async () => {
+    const say = vi.spyOn(noopChat, 'say');
+    router.registerGroup('wheel', { description: 'Wheel help.', subcommands: { spin: { handler: vi.fn() } } });
+    await bus.publish(chat('!wheel bogus'));
+    expect(say).toHaveBeenCalledWith('test', 'Wheel help.');
+    say.mockRestore();
+  });
+
+  it('enforces per-subcommand permission and cooldown', async () => {
+    const spin = vi.fn();
+    router.registerGroup('wheel', {
+      subcommands: { spin: { handler: spin, permission: PermissionLevel.Moderator, cooldownSeconds: 60 } },
+    });
+    await bus.publish(chat('!wheel spin', user({ permission: PermissionLevel.Viewer })));
+    expect(spin).not.toHaveBeenCalled(); // permission
+    await bus.publish(chat('!wheel spin', user({ permission: PermissionLevel.Moderator })));
+    await bus.publish(chat('!wheel spin', user({ permission: PermissionLevel.Moderator })));
+    expect(spin).toHaveBeenCalledOnce(); // cooldown blocked the second
+  });
+
+  it('lists subcommands as their own entries with cooldowns', async () => {
+    router.registerGroup('wheel', {
+      description: 'Wheel.',
+      subcommands: { add: { description: 'Add.', cooldownSeconds: 1, globalCooldownSeconds: 2, handler: vi.fn() } },
+    });
+    const list = router.list();
+    expect(list.find((c) => c.name === 'wheel')).toMatchObject({ description: 'Wheel.' });
+    expect(list.find((c) => c.name === 'wheel add')).toMatchObject({ description: 'Add.', userCooldown: 1, globalCooldown: 2 });
   });
 });

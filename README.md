@@ -15,7 +15,7 @@ Web apps (games) ◀────── WebSocket hub ◀──────┘
 - **Core** (`src/core/`): `eventBus`, `commandRouter`, `pluginManager`, `serviceContext`, canonical `events`.
 - **Services** (`src/services/`): `users`, `points`, `chat`, `storage` (Prisma), `config`, `logger`.
 - **Adapters** (`src/adapters/`): Twitch chat + EventSub (donation adapter is a future stub).
-- **Plugins** (`src/plugins/`): `points`, `commands`, `moderation`, `events`, `sampleGame`.
+- **Plugins** (`src/plugins/`): `points`, `commands`, `events`, `sampleGame`, `basecaWheel`.
 - **Web** (`src/web/wsHub.ts`): WebSocket hub for web apps. Companion demo in `webapps/sample-game/`.
 
 **Adding a feature** = add a folder under `src/plugins/`, export a `Plugin`, and register it in `src/plugins/index.ts`. No kernel changes.
@@ -46,8 +46,7 @@ Required Twitch setup (two accounts, two tokens):
 | `!points` / `!p` | everyone | Show your balance (`!points top` for leaderboard) |
 | `!give <user> <n>` | everyone | Transfer points |
 | `!addpoints <user> <n>` | mod | Grant/deduct points |
-| `!addcom` / `!delcom` | mod | Manage custom text commands |
-| `!permit <user>` | mod | Allow one link |
+| `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`removealias`/`remove` on a `!trigger` or `"phrase"` |
 | `!startgame` / `!endgame` / `!vote <x>` | mod / everyone | Sample web-app game |
 
 ## Try the web-app loop

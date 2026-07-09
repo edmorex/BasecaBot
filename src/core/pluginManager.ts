@@ -27,11 +27,18 @@ export class PluginManager {
         continue;
       }
       try {
+        // Tag any commands the plugin registers with its name so the dashboard
+        // can group built-in commands by plugin. Registrations happen during
+        // init (which we await fully before the next plugin), so the group stays
+        // correct even across awaits inside init.
+        this.ctx.commands.setCurrentGroup(plugin.name);
         await plugin.init(this.ctx);
         this.active.push(plugin);
         log.info({ plugin: plugin.name, version: plugin.version }, 'plugin initialized');
       } catch (err) {
         log.error({ err, plugin: plugin.name }, 'plugin init failed; skipping');
+      } finally {
+        this.ctx.commands.setCurrentGroup(undefined);
       }
     }
 

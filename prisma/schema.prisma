@@ -14,15 +14,59 @@ datasource db {
 }
 
 /// A Twitch user the bot has seen. Keyed by the stable Twitch user id.
+///
+/// Identity model:
+///  - `login` is the Twitch account name; the canonical username is "@" + login.
+///  - `displayName` is the human-readable name used in generated output. It
+///    starts as the Twitch display name and syncs from Twitch on every touch
+///    UNTIL the user customizes it (`displayNameLocked` = true), after which the
+///    bot never overwrites it.
+///  - `aliases` are additional names the user can be referenced by in commands.
+///
+/// Extensibility: add first-class structured fields (e.g. `birthday DateTime?`,
+/// `pronouns String?`) as nullable columns here; use `UserPreference` (key/value)
+/// for feature opt-in/outs and other loosely-structured flags.
 model User {
-  id          String   @id // Twitch user id
-  login       String   @unique
-  displayName String
-  firstSeenAt DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
+  id                String   @id // Twitch user id
+  login             String   @unique
+  displayName       String
+  displayNameLocked Boolean  @default(false) // true once the user edits it
+  avatarUrl         String? // Twitch profile_image_url, captured at login
+  firstSeenAt       DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
 
-  points   PointsBalance[]
-  events   EventLog[]
+  points      PointsBalance[]
+  events      EventLog[]
+  aliases     UserAlias[]
+  preferences UserPreference[]
+}
+
+/// An alternate name a user can be referenced by (in addition to their canonical
+/// username and display name). `normalized` is the lowercased form and is unique
+/// across ALL users so a name resolves to at most one user.
+model UserAlias {
+  id         Int      @id @default(autoincrement())
+  userId     String
+  alias      String // as entered, for display
+  normalized String   @unique // lowercased, for lookup + uniqueness
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Loosely-structured per-user preferences / feature opt-in-outs. The extension
+/// point for future settings that don't warrant their own column.
+model UserPreference {
+  id     Int    @id @default(autoincrement())
+  userId String
+  key    String
+  value  String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
 }
 
 /// Points balance per user, per channel (multi-channel ready).
@@ -38,19 +82,53 @@ model PointsBalance {
   @@index([channel])
 }
 
-/// Admin-defined custom text commands.
+/// Admin-defined custom command. Two kinds:
+///  - 'trigger': invoked by `!word`. Has one primary trigger word (`name`) plus
+///    any number of alias words — all stored in CommandTrigger.
+///  - 'phrase':  fires when its `name` text appears anywhere in a chat message
+///    (case-insensitive substring). Phrases have no aliases.
 model CustomCommand {
-  id         Int      @id @default(autoincrement())
-  channel    String
-  name       String
-  response   String
+  id             Int      @id @default(autoincrement())
+  channel        String
+  kind           String   @default("trigger") // 'trigger' | 'phrase'
+  /// Primary trigger word (no '!'), or the phrase text.
+  name           String
+  /// Message sent to chat. Null/empty => silent (fires but says nothing).
+  response       String?
+  description    String   @default("Custom response command.")
+  /// Optional user-defined grouping label (e.g. People, Pets, Facts). Null = ungrouped.
+  group          String?
   /// PermissionLevel numeric value (see core/events.ts).
-  permission Int      @default(0)
-  cooldown   Int      @default(0) // seconds
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  permission     Int      @default(0)
+  /// Seconds before anyone can retrigger (0 = none). Takes priority over user.
+  globalCooldown Int      @default(0)
+  /// Seconds before the same user can retrigger (0 = none). Never < global.
+  userCooldown   Int      @default(0)
+  enabled        Boolean  @default(true)
+  usageCount     Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  @@unique([channel, name])
+  triggers CommandTrigger[]
+
+  @@unique([channel, kind, name])
+  @@index([channel, kind, enabled])
+}
+
+/// A trigger word (primary or alias) that maps to a trigger-kind CustomCommand.
+/// `word` is normalized (lowercase, no '!') and unique per channel, so trigger
+/// words never collide across commands.
+model CommandTrigger {
+  id        Int     @id @default(autoincrement())
+  channel   String
+  word      String
+  isPrimary Boolean @default(false)
+  commandId Int
+
+  command CustomCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, word])
+  @@index([commandId])
 }
 
 /// Per-channel runtime settings, editable without redeploying.

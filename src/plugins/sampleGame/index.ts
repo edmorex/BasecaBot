@@ -55,7 +55,7 @@ export function sampleGamePlugin(): Plugin {
             option,
           });
         },
-        { description: 'Cast a vote in the current game.', cooldownSeconds: 1 },
+        { description: 'Cast a vote in the current game.', usage: '<option>', cooldownSeconds: 1 },
       );
 
       // Handle messages coming back FROM the web app.

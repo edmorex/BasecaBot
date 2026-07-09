@@ -21,12 +21,65 @@ export interface CommandOptions {
   aliases?: string[];
   /** Human-readable description for help output. */
   description?: string;
+  /** Argument signature shown after the command name, e.g. `<user> <amount>`. */
+  usage?: string;
+  /** Grouping label (usually the registering plugin) for help/dashboard sections. */
+  group?: string;
 }
 
-interface RegisteredCommand extends Required<Omit<CommandOptions, 'aliases' | 'description'>> {
+/** One subcommand of a primary command (e.g. `title` of `!wheel title`). */
+export interface SubcommandSpec {
+  description?: string;
+  /** Argument signature shown after the command, e.g. `<text>`. */
+  usage?: string;
+  /** Defaults to the group's permission. */
+  permission?: PermissionLevel;
+  /** Per-user cooldown, seconds (0 = none). */
+  cooldownSeconds?: number;
+  /** Global cooldown, seconds (0 = none). */
+  globalCooldownSeconds?: number;
+  /** Handler; receives the event with the subcommand token stripped from args/argString. */
+  handler: CommandHandler;
+}
+
+/** Options for a primary command that dispatches to named subcommands. */
+export interface GroupOptions {
+  /** Usage/description printed when no valid subcommand is given, and shown in help. */
+  description?: string;
+  /** Default permission for the primary and its subcommands. */
+  permission?: PermissionLevel;
+  aliases?: string[];
+  group?: string;
+  subcommands: Record<string, SubcommandSpec>;
+  /** Custom handler for missing/invalid subcommand (defaults to printing `description`). */
+  onUnknown?: CommandHandler;
+}
+
+/** Shared cooldown state shape for commands and subcommands. */
+interface Cooldownable {
+  cooldownSeconds: number;
+  globalCooldownSeconds: number;
+  perUserLastRun: Map<string, number>;
+  lastGlobalRun: number;
+}
+
+interface RegisteredSubcommand extends Cooldownable {
+  name: string;
+  description: string;
+  usage?: string;
+  permission: PermissionLevel;
+  handler: CommandHandler;
+}
+
+interface RegisteredCommand extends Required<Omit<CommandOptions, 'aliases' | 'description' | 'group' | 'usage'>> {
   name: string;
   handler: CommandHandler;
   description: string;
+  usage?: string;
+  group?: string;
+  /** Present when registered via registerGroup. */
+  subcommands?: Map<string, RegisteredSubcommand>;
+  onUnknown?: CommandHandler;
   perUserLastRun: Map<string, number>;
   lastGlobalRun: number;
 }
@@ -43,6 +96,8 @@ export class CommandRouter {
   private readonly commands = new Map<string, RegisteredCommand>();
   private readonly aliasIndex = new Map<string, string>();
   private fallback: CommandHandler | undefined;
+  /** Group applied to subsequent register() calls (set by PluginManager per plugin). */
+  private currentGroup: string | undefined;
 
   constructor(
     private readonly bus: EventBus,
@@ -63,6 +118,8 @@ export class CommandRouter {
       cooldownSeconds: options.cooldownSeconds ?? 0,
       globalCooldownSeconds: options.globalCooldownSeconds ?? 0,
       description: options.description ?? '',
+      usage: options.usage,
+      group: options.group ?? this.currentGroup,
       perUserLastRun: new Map(),
       lastGlobalRun: 0,
     };
@@ -71,6 +128,69 @@ export class CommandRouter {
       this.aliasIndex.set(alias.toLowerCase(), key);
     }
     log.debug({ command: key }, 'registered command');
+  }
+
+  /**
+   * Register a primary command that dispatches to named subcommands
+   * (`!name <sub> …`). Each subcommand is documented and enforces its own
+   * permission + cooldowns. Calling the primary with no/invalid subcommand runs
+   * `onUnknown` (default: print the description/usage).
+   */
+  registerGroup(name: string, options: GroupOptions): void {
+    const key = name.toLowerCase();
+    const defaultPerm = options.permission ?? PermissionLevel.Viewer;
+    const subcommands = new Map<string, RegisteredSubcommand>();
+    for (const [subName, spec] of Object.entries(options.subcommands)) {
+      subcommands.set(subName.toLowerCase(), {
+        name: subName.toLowerCase(),
+        description: spec.description ?? '',
+        usage: spec.usage,
+        permission: spec.permission ?? defaultPerm,
+        cooldownSeconds: spec.cooldownSeconds ?? 0,
+        globalCooldownSeconds: spec.globalCooldownSeconds ?? 0,
+        handler: spec.handler,
+        perUserLastRun: new Map(),
+        lastGlobalRun: 0,
+      });
+    }
+    const cmd: RegisteredCommand = {
+      name: key,
+      handler: (e) => this.dispatchSubcommand(key, e),
+      permission: defaultPerm,
+      cooldownSeconds: 0,
+      globalCooldownSeconds: 0,
+      description: options.description ?? '',
+      group: options.group ?? this.currentGroup,
+      subcommands,
+      onUnknown: options.onUnknown,
+      perUserLastRun: new Map(),
+      lastGlobalRun: 0,
+    };
+    this.commands.set(key, cmd);
+    for (const alias of options.aliases ?? []) this.aliasIndex.set(alias.toLowerCase(), key);
+    log.debug({ command: key, subcommands: subcommands.size }, 'registered command group');
+  }
+
+  private async dispatchSubcommand(primaryKey: string, e: CommandEvent): Promise<void> {
+    const cmd = this.commands.get(primaryKey);
+    if (!cmd?.subcommands) return;
+    const subName = e.args[0]?.toLowerCase();
+    const sub = subName ? cmd.subcommands.get(subName) : undefined;
+
+    if (!sub) {
+      if (cmd.onUnknown) return void cmd.onUnknown(e);
+      const usage = cmd.description || `Usage: !${cmd.name} <${[...cmd.subcommands.keys()].join('|')}>`;
+      await this.chat.say(e.channel, usage);
+      return;
+    }
+    if (!this.checkPermission(e.user, sub.permission)) return;
+    if (!this.checkCooldown(sub, e.user.id)) return;
+
+    // Hand the subcommand its own view: the subcommand token stripped off.
+    const firstSpace = e.argString.indexOf(' ');
+    const rest = firstSpace === -1 ? '' : e.argString.slice(firstSpace + 1).trim();
+    const derived: CommandEvent = { ...e, args: e.args.slice(1), argString: rest };
+    await sub.handler(derived);
   }
 
   unregister(name: string): void {
@@ -86,13 +206,39 @@ export class CommandRouter {
     this.fallback = handler;
   }
 
-  /** List registered commands (for help/introspection). */
-  list(): { name: string; description: string; permission: PermissionLevel }[] {
-    return [...this.commands.values()].map((c) => ({
-      name: c.name,
-      description: c.description,
-      permission: c.permission,
-    }));
+  /**
+   * Tag subsequent `register()` calls with a group (the registering plugin).
+   * The PluginManager sets this around each plugin's init so the dashboard can
+   * group built-in commands by plugin. Pass undefined to clear.
+   */
+  setCurrentGroup(group: string | undefined): void {
+    this.currentGroup = group;
+  }
+
+  /**
+   * List registered commands for help/introspection, including subcommands as
+   * their own entries (`"wheel title"`) and each command's cooldowns.
+   */
+  list(): {
+    name: string; description: string; usage?: string; permission: PermissionLevel; group?: string;
+    globalCooldown: number; userCooldown: number;
+  }[] {
+    const out = [];
+    for (const c of this.commands.values()) {
+      out.push({
+        name: c.name, description: c.description, usage: c.usage, permission: c.permission, group: c.group,
+        globalCooldown: c.globalCooldownSeconds, userCooldown: c.cooldownSeconds,
+      });
+      if (c.subcommands) {
+        for (const s of c.subcommands.values()) {
+          out.push({
+            name: `${c.name} ${s.name}`, description: s.description, usage: s.usage, permission: s.permission, group: c.group,
+            globalCooldown: s.globalCooldownSeconds, userCooldown: s.cooldownSeconds,
+          });
+        }
+      }
+    }
+    return out;
   }
 
   /** Parse a raw message into a CommandEvent, or undefined if it isn't a command. */
@@ -149,7 +295,7 @@ export class CommandRouter {
     return user.permission >= required;
   }
 
-  private checkCooldown(cmd: RegisteredCommand, userId: string): boolean {
+  private checkCooldown(cmd: Cooldownable, userId: string): boolean {
     const now = Date.now();
     if (cmd.globalCooldownSeconds > 0 && now - cmd.lastGlobalRun < cmd.globalCooldownSeconds * 1000) {
       return false;

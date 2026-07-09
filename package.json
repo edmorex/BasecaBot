@@ -8,6 +8,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "preview:web": "tsx watch src/web/preview.ts",
+    "preview:mod": "PREVIEW_USER=mod tsx watch src/web/preview.ts",
+    "preview:viewer": "PREVIEW_USER=viewer tsx watch src/web/preview.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

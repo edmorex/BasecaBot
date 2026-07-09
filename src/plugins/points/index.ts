@@ -31,7 +31,7 @@ export function pointsPlugin(): Plugin {
           const balance = await ctx.points.getBalance(e.user.id, e.channel);
           await ctx.chat.say(e.channel, `@${e.user.displayName} you have ${balance} ${CURRENCY}.`);
         },
-        { aliases: ['p'], description: `Check your ${CURRENCY} (or "!points top").`, cooldownSeconds: 3 },
+        { aliases: ['p'], description: `Check your ${CURRENCY} (or "!points top").`, usage: '[top]', cooldownSeconds: 3 },
       );
 
       ctx.commands.register(
@@ -59,7 +59,7 @@ export function pointsPlugin(): Plugin {
             }
           }
         },
-        { description: `Give ${CURRENCY} to another user.`, cooldownSeconds: 3 },
+        { description: `Give ${CURRENCY} to another user.`, usage: '<user> <amount>', cooldownSeconds: 3 },
       );
 
       ctx.commands.register(
@@ -79,7 +79,7 @@ export function pointsPlugin(): Plugin {
           const balance = await ctx.points.award(recipient.id, e.channel, amount);
           await ctx.chat.say(e.channel, `${recipient.displayName} now has ${balance} ${CURRENCY}.`);
         },
-        { permission: PermissionLevel.Moderator, description: `(Mod) Grant/deduct ${CURRENCY}.` },
+        { permission: PermissionLevel.Moderator, description: `(Mod) Grant/deduct ${CURRENCY}.`, usage: '<user> <amount>' },
       );
 
       // ── Passive & earned accrual ──────────────────────────────────────────

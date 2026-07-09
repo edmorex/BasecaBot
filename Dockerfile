@@ -24,7 +24,8 @@ RUN npm install --omit=dev
 COPY prisma ./prisma
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
+COPY public ./public
 
-EXPOSE 8080
+EXPOSE 8080 8090
 # Apply migrations then start (works for SQLite and Postgres alike).
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

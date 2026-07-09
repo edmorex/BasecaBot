@@ -4,12 +4,6 @@ import type { ServiceContext } from '../../core/serviceContext.js';
 /** WebSocket room name the BasecaWheel web app connects to. */
 const ROOM = 'baseca-wheel';
 
-/** Subcommands the wheel understands. */
-const SUBCOMMANDS = new Set(['title', 'add', 'spin', 'clear', 'reset']);
-
-/** Subcommands that carry no text (action only). */
-const NO_TEXT_SUBCOMMANDS = new Set(['spin', 'clear', 'reset']);
-
 /**
  * The command sent to the BasecaWheel web app over the WebSocket hub. Emitted as
  * a single message type ('wheel'); the specific action is in `command`.
@@ -51,41 +45,33 @@ export function basecaWheelPlugin(): Plugin {
     version: '0.1.0',
 
     init(ctx: ServiceContext) {
-      ctx.commands.register(
-        'wheel',
-        async (e) => {
-          const sub = e.args[0]?.toLowerCase();
-          if (!sub || !SUBCOMMANDS.has(sub)) {
-            await ctx.chat.say(
-              e.channel,
-              'Usage: !wheel title <text> | !wheel add <entry> | !wheel spin | !wheel clear | !wheel reset',
-            );
-            return;
-          }
+      // Forward a subcommand to the web app. The web app enforces real per-user
+      // submission limits / action permissions; the bot just relays with the
+      // caller's identity + permission level.
+      const forward = (e: { channel: string; argString: string; user: { displayName: string; permission: number } }, command: string, text: string) => {
+        const payload: WheelCommandPayload = { command, text, user: e.user.displayName, permission: e.user.permission };
+        ctx.ws.broadcast(ROOM, 'wheel', payload);
+        ctx.logger.debug({ payload }, 'forwarded wheel command');
+      };
+      // A subcommand that needs text: require it, else print usage.
+      const withText = (command: string) => async (e: { channel: string; argString: string; user: { displayName: string; permission: number } }) => {
+        const text = e.argString.trim();
+        if (!text) return void ctx.chat.say(e.channel, `Usage: !wheel ${command} [text]`);
+        forward(e, command, text);
+      };
+      const action = (command: string) => async (e: { channel: string; argString: string; user: { displayName: string; permission: number } }) =>
+        forward(e, command, '');
 
-          // Everything after the subcommand is the payload text (empty for action-only subcommands).
-          const text = NO_TEXT_SUBCOMMANDS.has(sub) ? '' : e.argString.slice(e.args[0]!.length).trim();
-          if (!NO_TEXT_SUBCOMMANDS.has(sub) && !text) {
-            await ctx.chat.say(e.channel, `Usage: !wheel ${sub} <text>`);
-            return;
-          }
-
-          const payload: WheelCommandPayload = {
-            command: sub,
-            text,
-            user: e.user.displayName,
-            permission: e.user.permission,
-          };
-          ctx.ws.broadcast(ROOM, 'wheel', payload);
-          ctx.logger.debug({ payload }, 'forwarded wheel command');
+      ctx.commands.registerGroup('wheel', {
+        description: 'BasecaWheel — subcommands: title, add, spin, clear, reset.',
+        subcommands: {
+          title: { description: 'Set the title of the wheel.', usage: '<text>', handler: withText('title') },
+          add: { description: 'Add an entrant to the wheel.', usage: '<text>', cooldownSeconds: 1, handler: withText('add') },
+          spin: { description: 'Spin the wheel.', globalCooldownSeconds: 2, handler: action('spin') },
+          clear: { description: "Clear your own entrant(s) from the wheel.", cooldownSeconds: 1, handler: action('clear') },
+          reset: { description: 'Reset the wheel to no entrants.', handler: action('reset') },
         },
-        {
-          description: 'Control the BasecaWheel: !wheel title|add|spin|clear|reset',
-          // Light throttle to avoid flooding the hub; the web app enforces real
-          // per-user submission limits.
-          cooldownSeconds: 1,
-        },
-      );
+      });
 
       // Optional messages coming back FROM the wheel web app.
       ctx.bus.on('wsMessage', async (e) => {

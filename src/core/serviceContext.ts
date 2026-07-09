@@ -3,6 +3,7 @@ import type { CommandRouter } from './commandRouter.js';
 import type { ChatService } from '../services/chat.js';
 import type { UsersService } from '../services/users.js';
 import type { PointsService } from '../services/points.js';
+import type { CustomCommandService } from '../services/customCommands.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
 import type { AppConfig } from '../services/config.js';
@@ -24,6 +25,8 @@ export interface ServiceContext {
   readonly users: UsersService;
   /** The points economy. */
   readonly points: PointsService;
+  /** Custom command storage + matching (triggers & phrases). */
+  readonly customCommands: CustomCommandService;
   /** Raw persistence (Prisma) for plugin-specific tables/queries. */
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */

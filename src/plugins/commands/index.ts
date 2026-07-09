@@ -1,69 +1,206 @@
 import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
+import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
+import {
+  CommandError,
+  parseTarget,
+  describeTarget,
+  restrictKeywordToLevel,
+} from '../../services/customCommands.js';
+
+/** Substitute the simple variables supported in custom-command responses. */
+function render(response: string, vars: { user: string; channel: string; args: string }): string {
+  return response
+    .replaceAll('{user}', vars.user)
+    .replaceAll('{channel}', vars.channel)
+    .replaceAll('{args}', vars.args);
+}
 
 /**
- * Admin-defined custom text commands. Managed at runtime via !addcom / !delcom /
- * !editcom and served through the CommandRouter's fallback resolver, so any
- * unknown `!name` is looked up in the DB.
+ * Custom commands: the mod-facing `!command …` manager (each subcommand
+ * registered so the dashboard can document it), plus the runtime that serves
+ * custom commands — `!trigger` words (via the CommandRouter fallback) and
+ * "phrase" matches (by scanning chat). Enable state, permissions, global/user
+ * cooldowns, and usage counts are enforced/tracked by the CustomCommandService.
  *
- * Supports simple variable substitution in responses: {user}, {channel}, {args}.
+ * Responses support {user}, {channel}, {args}. An empty response is a silent
+ * command: it still fires (usage++, cooldowns) but says nothing.
  */
 export function commandsPlugin(): Plugin {
   return {
     name: 'commands',
-    version: '0.1.0',
+    version: '0.3.0',
 
     init(ctx: ServiceContext) {
-      const prisma = ctx.storage.prisma;
+      const svc = ctx.customCommands;
+      const say = (channel: string, msg: string) => ctx.chat.say(channel, msg);
 
-      ctx.commands.register(
-        'addcom',
-        async (e) => {
-          const name = e.args[0]?.toLowerCase().replace(/^!/, '');
-          const response = e.argString.slice(e.args[0]?.length ?? 0).trim();
-          if (!name || !response) {
-            await ctx.chat.say(e.channel, 'Usage: !addcom <name> <response>');
-            return;
+      // Parse the leading `!trigger` or `"phrase"` target from a subcommand's args.
+      const target = (e: CommandEvent) => {
+        const parsed = parseTarget(e.argString);
+        if (!parsed) throw new CommandError('Specify a target as !trigger or "phrase".');
+        return parsed;
+      };
+      // Wrap a subcommand handler so CommandErrors are shown to the user in chat.
+      const guard =
+        (fn: (e: CommandEvent) => Promise<void>) =>
+        async (e: CommandEvent): Promise<void> => {
+          try {
+            await fn(e);
+          } catch (err) {
+            if (err instanceof CommandError) await say(e.channel, err.message);
+            else throw err;
           }
-          await prisma.customCommand.upsert({
-            where: { channel_name: { channel: e.channel, name } },
-            create: { channel: e.channel, name, response },
-            update: { response },
-          });
-          await ctx.chat.say(e.channel, `Command !${name} saved.`);
-        },
-        { permission: PermissionLevel.Moderator, description: '(Mod) Add/update a custom command.' },
-      );
+        };
 
-      ctx.commands.register(
-        'delcom',
-        async (e) => {
-          const name = e.args[0]?.toLowerCase().replace(/^!/, '');
-          if (!name) {
-            await ctx.chat.say(e.channel, 'Usage: !delcom <name>');
-            return;
-          }
-          await prisma.customCommand
-            .delete({ where: { channel_name: { channel: e.channel, name } } })
-            .then(() => ctx.chat.say(e.channel, `Command !${name} deleted.`))
-            .catch(() => ctx.chat.say(e.channel, `No command !${name} found.`));
+      // ── Mod manager: !command <sub> [!trigger or "phrase"] … ────────────────
+      ctx.commands.registerGroup('command', {
+        description:
+          'Manage custom commands (mods+). Subcommands: add, response, setgroup, cooldown, restrict, setcount, enable, disable, addalias, removealias, remove — target a !trigger or "phrase".',
+        permission: PermissionLevel.Moderator,
+        aliases: ['cmd'],
+        subcommands: {
+          add: {
+            description: 'Add a command: !command add [!trigger or "phrase"] [message].',
+            usage: '<!trigger or "phrase"> [message]',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.create(e.channel, t.target, { response: t.rest });
+              await say(e.channel, `Added ${describeTarget(t.target)}.`);
+            }),
+          },
+          response: {
+            description: 'Update a command’s response message.',
+            usage: '<!trigger or "phrase"> [message]',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.setResponse(e.channel, t.target, t.rest);
+              await say(e.channel, `Updated response for ${describeTarget(t.target)}.`);
+            }),
+          },
+          setgroup: {
+            description: 'Set the group of the command (e.g. People, Pets, Facts).',
+            usage: '<!trigger or "phrase"> <group>',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.setGroup(e.channel, t.target, t.rest);
+              await say(
+                e.channel,
+                t.rest.trim()
+                  ? `Set group for ${describeTarget(t.target)} to "${t.rest.trim()}".`
+                  : `Cleared group for ${describeTarget(t.target)}.`,
+              );
+            }),
+          },
+          setcount: {
+            description: 'Set a command’s usage count.',
+            usage: '<!trigger or "phrase"> [count]',
+            handler: guard(async (e) => {
+              const t = target(e);
+              const count = Number.parseInt(t.rest, 10);
+              if (!Number.isFinite(count)) throw new CommandError('Provide a numeric count.');
+              await svc.setUsageCount(e.channel, t.target, count);
+              await say(e.channel, `Set usage count for ${describeTarget(t.target)} to ${Math.max(0, count)}.`);
+            }),
+          },
+          cooldown: {
+            description: 'Set cooldowns. If only one value is given it sets the global cooldown.',
+            usage: '<!trigger or "phrase"> <globalSecs> [userSecs]',
+            handler: guard(async (e) => {
+              const t = target(e);
+              const parts = t.rest.split(/\s+/).filter(Boolean);
+              const g = Number.parseInt(parts[0] ?? '', 10);
+              if (!Number.isFinite(g)) throw new CommandError('Usage: !command cooldown [target] [globalSecs] [userSecs?]');
+              const u = parts[1] !== undefined ? Number.parseInt(parts[1], 10) : undefined;
+              await svc.setCooldown(e.channel, t.target, g, u);
+              await say(e.channel, `Updated cooldowns for ${describeTarget(t.target)}.`);
+            }),
+          },
+          restrict: {
+            description: 'Update the permission level required to use a command.',
+            usage: '<!trigger or "phrase"> <Level>',
+            handler: guard(async (e) => {
+              const t = target(e);
+              const level = restrictKeywordToLevel(t.rest);
+              if (level === null) throw new CommandError('Restrict to one of: All, Sub, VIP, Mod, Broadcaster, Admin.');
+              await svc.setPermission(e.channel, t.target, level);
+              await say(e.channel, `Restricted ${describeTarget(t.target)} to ${t.rest.trim()}.`);
+            }),
+          },
+          enable: {
+            description: 'Enable a command.',
+            usage: '<!trigger or "phrase">',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.setEnabled(e.channel, t.target, true);
+              await say(e.channel, `Enabled ${describeTarget(t.target)}.`);
+            }),
+          },
+          disable: {
+            description: 'Disable a command (keeps it in the database).',
+            usage: '<!trigger or "phrase">',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.setEnabled(e.channel, t.target, false);
+              await say(e.channel, `Disabled ${describeTarget(t.target)}.`);
+            }),
+          },
+          addalias: {
+            description: 'Add a trigger alias to a command.',
+            usage: '<!trigger or "phrase"> <!alias>',
+            handler: guard(async (e) => {
+              const t = target(e);
+              if (!t.rest) throw new CommandError('Provide an alias like !alias.');
+              await svc.addAlias(e.channel, t.target, t.rest);
+              await say(e.channel, `Added alias to ${describeTarget(t.target)}.`);
+            }),
+          },
+          removealias: {
+            description: 'Remove a trigger alias from a command.',
+            usage: '<!trigger or "phrase"> <!alias>',
+            handler: guard(async (e) => {
+              const t = target(e);
+              if (!t.rest) throw new CommandError('Provide the alias to remove.');
+              await svc.removeAlias(e.channel, t.target, t.rest);
+              await say(e.channel, `Removed alias from ${describeTarget(t.target)}.`);
+            }),
+          },
+          remove: {
+            description: 'Remove a command entirely.',
+            usage: '<!trigger or "phrase">',
+            handler: guard(async (e) => {
+              const t = target(e);
+              await svc.remove(e.channel, t.target);
+              await say(e.channel, `Removed ${describeTarget(t.target)}.`);
+            }),
+          },
         },
-        { permission: PermissionLevel.Moderator, description: '(Mod) Delete a custom command.' },
-      );
+      });
 
-      // Fallback: resolve unknown commands against the DB.
+      // ── Trigger runtime: unknown `!word` -> custom trigger command ──────────
       ctx.commands.setFallback(async (e) => {
-        const cmd = await prisma.customCommand.findUnique({
-          where: { channel_name: { channel: e.channel, name: e.name } },
-        });
+        const cmd = await svc.findByTrigger(e.channel, e.name);
         if (!cmd) return;
-        if (e.user.permission < cmd.permission) return;
-        const response = cmd.response
-          .replaceAll('{user}', e.user.displayName)
-          .replaceAll('{channel}', e.channel)
-          .replaceAll('{args}', e.argString);
-        await ctx.chat.say(e.channel, response);
+        if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) return;
+        svc.recordUse(cmd, e.user.id);
+        if (cmd.response) {
+          await say(e.channel, render(cmd.response, { user: e.user.displayName, channel: e.channel, args: e.argString }));
+        }
+      });
+
+      // ── Phrase runtime: fire on phrases appearing in normal chat ────────────
+      ctx.bus.on('chat', async (e) => {
+        if (e.user.login === ctx.config.twitch.botUsername) return; // ignore the bot itself
+        const matches = svc.matchPhrases(e.channel, e.message);
+        for (const cmd of matches) {
+          if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) continue;
+          svc.recordUse(cmd, e.user.id);
+          if (cmd.response) {
+            await say(e.channel, render(cmd.response, { user: e.user.displayName, channel: e.channel, args: e.message }));
+          }
+          break; // at most one phrase fires per message, to avoid chat spam
+        }
       });
     },
   };
