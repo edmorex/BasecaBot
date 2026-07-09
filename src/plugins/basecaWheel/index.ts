@@ -13,9 +13,9 @@ const ROOM = 'baseca-wheel';
  * accept (per the BasecaWheel integration spec).
  */
 interface WheelCommandPayload {
-  /** 'title' | 'add' | 'spin' | 'clear' | 'reset' */
+  /** 'title' | 'add' | 'spin' | 'clear' | 'clearall' */
   command: string;
-  /** The title text (title), entry text (add), or '' (spin/clear/reset). */
+  /** The title text (title), entry text (add), or '' (spin/clear/clearall). */
   text: string;
   /** Display name of the user who sent the command. */
   user: string;
@@ -30,7 +30,7 @@ interface WheelCommandPayload {
  *   !wheel add <text>     -> forward { command: 'add',   text }
  *   !wheel spin           -> forward { command: 'spin',  text: '' }
  *   !wheel clear          -> forward { command: 'clear', text: '' }  (clear own entries)
- *   !wheel reset          -> forward { command: 'reset', text: '' }  (wipe whole wheel)
+ *   !wheel clearall       -> forward { command: 'clearall', text: '' }  (wipe whole wheel)
  *
  * The web app connects to the hub at:
  *   ws://<host>:<WS_HUB_PORT>?room=baseca-wheel&secret=<WS_HUB_SECRET>
@@ -63,13 +63,13 @@ export function basecaWheelPlugin(): Plugin {
         forward(e, command, '');
 
       ctx.commands.registerGroup('wheel', {
-        description: 'BasecaWheel — subcommands: title, add, spin, clear, reset.',
+        description: 'BasecaWheel Usage: !wheel <command> [text] — commands: add <text>, clear, spin, title <text>, clearall',
         subcommands: {
-          title: { description: 'Set the title of the wheel.', usage: '<text>', handler: withText('title') },
+          title: { description: 'Set the title of the wheel.', usage: '<text>', globalCooldownSeconds: 2, handler: withText('title') },
           add: { description: 'Add an entrant to the wheel.', usage: '<text>', cooldownSeconds: 1, handler: withText('add') },
-          spin: { description: 'Spin the wheel.', globalCooldownSeconds: 2, handler: action('spin') },
-          clear: { description: "Clear your own entrant(s) from the wheel.", cooldownSeconds: 1, handler: action('clear') },
-          reset: { description: 'Reset the wheel to no entrants.', handler: action('reset') },
+          spin: { description: 'Spin the wheel.', globalCooldownSeconds: 1, cooldownSeconds: 5, handler: action('spin') },
+          clear: { description: "Clear your own entrant(s) from the wheel.", cooldownSeconds: 2, handler: action('clear') },
+          clearall: { description: 'Clear the wheel of all entrants.', cooldownSeconds: 5, handler: action('clearall') },
         },
       });
 
@@ -82,7 +82,7 @@ export function basecaWheelPlugin(): Plugin {
             if (payload.text) await ctx.chat.say(e.channel, payload.text);
             break;
           case 'result':
-            await ctx.chat.say(e.channel, `🎡 The wheel landed on ${payload.winner ?? 'nobody'}!`);
+            await ctx.chat.say(e.channel, `BasecaWheel has decided! The winner is ${payload.winner ?? 'nobody'}!`);
             break;
           default:
             ctx.logger.debug({ messageType: e.messageType }, 'unhandled wheel ws message');
