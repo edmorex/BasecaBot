@@ -239,7 +239,7 @@ export class WebServer {
       enabled: true, usageCount: 0, aliases: [] as string[],
     }));
     const customs = (await this.customCommands.listForDashboard(this.channel)).map((c) => ({
-      kind: c.kind, name: c.name, access: c.permission, description: c.description, group: c.group,
+      kind: c.kind, name: c.name, access: c.permission, group: c.group,
       response: c.response, globalCooldown: c.globalCooldown, userCooldown: c.userCooldown,
       enabled: c.enabled, usageCount: c.usageCount, aliases: c.aliases,
     }));

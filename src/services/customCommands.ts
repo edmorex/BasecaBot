@@ -24,8 +24,6 @@ interface RuntimeCommand {
   enabled: boolean;
 }
 
-const DEFAULT_DESCRIPTION = 'Custom response command.';
-
 /** `!command restrict` keyword <-> PermissionLevel. */
 const RESTRICT_TO_LEVEL: Record<string, number> = {
   all: PermissionLevel.Viewer,
@@ -177,7 +175,7 @@ export class CustomCommandService {
   async create(
     channel: string,
     target: TargetRef,
-    opts: { response?: string | null; description?: string; permission?: number; globalCooldown?: number; userCooldown?: number } = {},
+    opts: { response?: string | null; permission?: number; globalCooldown?: number; userCooldown?: number } = {},
   ) {
     const name = target.kind === 'trigger' ? normalizeWord(target.name) : target.name.trim();
     if (!name) throw new CommandError('Command name/phrase cannot be empty.');
@@ -195,7 +193,6 @@ export class CustomCommandService {
       data: {
         channel, kind: target.kind, name,
         response: emptyToNull(opts.response),
-        description: opts.description?.trim() || DEFAULT_DESCRIPTION,
         permission: clampLevel(opts.permission ?? 0),
         globalCooldown, userCooldown,
       },
@@ -284,7 +281,6 @@ export class CustomCommandService {
       kind: r.kind as CommandKind,
       name: r.name,
       response: r.response,
-      description: r.description,
       group: r.group,
       permission: r.permission,
       globalCooldown: r.globalCooldown,

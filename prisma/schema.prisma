@@ -95,7 +95,6 @@ model CustomCommand {
   name           String
   /// Message sent to chat. Null/empty => silent (fires but says nothing).
   response       String?
-  description    String   @default("Custom response command.")
   /// Optional user-defined grouping label (e.g. People, Pets, Facts). Null = ungrouped.
   group          String?
   /// PermissionLevel numeric value (see core/events.ts).
