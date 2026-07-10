@@ -103,6 +103,8 @@ const SHARED_STYLE = /* css */ `
   button:hover, .btn:hover { background: var(--purple-dark); }
   button.secondary { background: #3a3a3d; }
   button.secondary:hover { background: #4a4a4d; }
+  button.pink { background: var(--pink); color: #1a1220; font-weight: 600; }
+  button.pink:hover { background: #ff8ad4; }
   button.danger { background: #b0341d; }
   button.danger:hover { background: #d13f24; }
   input[type=text] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.95rem; font-family: inherit; }
@@ -133,8 +135,11 @@ const SHARED_STYLE = /* css */ `
   .no { color: var(--off); font-weight: 700; }
   .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .chip { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 0.3rem 0.7rem; }
-  .chip button { background: none; padding: 0; color: var(--muted); font-size: 1rem; line-height: 1; }
+  .chip button { background: none; padding: 0; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
   .chip button:hover { color: #ff6b6b; background: none; }
+  .radio-row { display: flex; flex-wrap: nowrap; gap: 0.4rem 0.8rem; overflow-x: auto; }
+  .radio-row label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
+  .radio-row input { accent-color: var(--pink); }
   .rowline { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
   .toast { margin-top: 0.5rem; font-size: 0.9rem; min-height: 1.2em; }
   .toast.err { color: #ff6b6b; }

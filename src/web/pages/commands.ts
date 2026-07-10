@@ -10,9 +10,12 @@ import { renderLayout } from '../layout.js';
  */
 export function commandsPage(): string {
   const body = /* html */ `
-    <div class="page-head">
-      <h1>Commands</h1>
-      <p class="muted" id="cmd-sub">Loading…</p>
+    <div class="page-head" style="display:flex; align-items:flex-end; justify-content:space-between; gap:1rem">
+      <div>
+        <h1>Commands</h1>
+        <p class="muted" id="cmd-sub" style="margin:0; padding:0">Loading…</p>
+      </div>
+      <button type="button" class="pink" id="new-cmd-btn" style="display:none; flex:none">+ New Command</button>
     </div>
     <div class="md-layout">
       <nav class="md-side card" id="cmd-side"></nav>
@@ -20,30 +23,58 @@ export function commandsPage(): string {
     </div>
     <div class="pager-wrap" id="cmd-pager"></div>
 
-    <dialog id="edit-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
-      <h2 style="margin-top:0">Edit <code id="edit-name"></code></h2>
+    <dialog id="edit-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+      <h2 id="edit-title" style="margin-top:0">Edit <code id="edit-name"></code></h2>
+      <div id="edit-create-fields">
+        <label class="muted">Type</label>
+        <div class="radio-row" style="margin:.35rem 0 .8rem">
+          <label><input type="radio" name="edit-kind" value="trigger" checked /> Trigger (<code>!word</code>)</label>
+          <label><input type="radio" name="edit-kind" value="phrase" /> Phrase (matches chat)</label>
+        </div>
+        <label class="muted" id="edit-trigger-label">Trigger word</label>
+        <input type="text" id="edit-trigger" maxlength="60" placeholder="e.g. hello" style="width:100%; margin:.35rem 0 .8rem" />
+      </div>
       <label class="muted">Response <span class="muted">(blank = silent)</span></label>
       <input type="text" id="edit-response" style="width:100%; margin:.35rem 0 .8rem" />
       <label class="muted">Group <span class="muted">(blank = ungrouped)</span></label>
       <input type="text" id="edit-group" maxlength="30" style="width:100%; margin:.35rem 0 .8rem" />
-      <div class="rowline" style="gap:1rem">
-        <div style="flex:1">
-          <label class="muted">Access</label>
-          <select id="edit-permission" style="width:100%; margin-top:.35rem; padding:.5rem; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px">
-            <option value="0">Everyone</option><option value="1">Subscriber</option><option value="2">VIP</option>
-            <option value="3">Moderator</option><option value="4">Broadcaster</option><option value="5">Admin</option>
-          </select>
-        </div>
-        <label style="display:flex; align-items:center; gap:.4rem; margin-top:1.4rem"><input type="checkbox" id="edit-enabled" /> Enabled</label>
+      <label class="muted">Access</label>
+      <div id="edit-permission" class="radio-row" style="margin:.35rem 0 .8rem">
+        <label><input type="radio" name="edit-perm" value="0" /> Everyone</label>
+        <label><input type="radio" name="edit-perm" value="1" /> Subscriber</label>
+        <label><input type="radio" name="edit-perm" value="2" /> VIP</label>
+        <label><input type="radio" name="edit-perm" value="3" /> Moderator</label>
+        <label><input type="radio" name="edit-perm" value="4" /> Broadcaster</label>
+        <label><input type="radio" name="edit-perm" value="5" /> Admin</label>
       </div>
+      <label style="display:flex; align-items:center; gap:.4rem"><input type="checkbox" id="edit-enabled" /> Enabled</label>
       <div class="rowline" style="gap:1rem; margin-top:.8rem">
         <div style="flex:1"><label class="muted">Global cooldown (s)</label><input type="text" inputmode="numeric" id="edit-global" style="width:100%; margin-top:.35rem" /></div>
         <div style="flex:1"><label class="muted">User cooldown (s)</label><input type="text" inputmode="numeric" id="edit-user" style="width:100%; margin-top:.35rem" /></div>
       </div>
+      <div id="edit-alias-section" style="margin-top:.8rem">
+        <label class="muted">Aliases</label>
+        <div class="chips" id="edit-aliases" style="margin-top:.35rem"></div>
+        <div class="rowline" style="margin-top:.5rem">
+          <input type="text" id="edit-alias-input" maxlength="30" placeholder="!alias" style="flex:1" />
+          <button type="button" class="secondary" id="edit-alias-btn">Add alias</button>
+        </div>
+        <div class="toast err" id="edit-alias-toast"></div>
+      </div>
       <div class="toast err" id="edit-toast" style="margin-top:.6rem"></div>
       <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
         <button type="button" class="secondary" id="edit-cancel">Cancel</button>
-        <button type="button" id="edit-save">Save</button>
+        <button type="button" class="pink" id="edit-save">Save</button>
+      </div>
+    </dialog>
+
+    <dialog id="del-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+      <h2 style="margin-top:0">Delete <code id="del-name"></code>?</h2>
+      <p class="muted" id="del-msg"></p>
+      <div class="toast err" id="del-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="del-cancel">Cancel</button>
+        <button type="button" class="pink" id="del-confirm">Delete</button>
       </div>
     </dialog>`;
 
@@ -108,6 +139,7 @@ export function commandsPage(): string {
         state.groups=Object.keys(g).sort().map(function(k){ return { group:k, cmds:g[k].sort(byName) }; });
         if(!viewExists(state.view)) state.view='all';
         document.getElementById('cmd-sub').textContent=all.length+' command'+(all.length===1?'':'s')+' across '+state.groups.length+' plugin'+(state.groups.length===1?'':'s')+' + '+state.customs.length+' custom.'+(state.canManage?' You can manage custom commands.':'');
+        document.getElementById('new-cmd-btn').style.display = state.canManage ? '' : 'none';
         renderSide(); renderMain();
       }catch(e){ document.getElementById('cmd-sub').textContent='Could not load commands: '+e.message; }
     }
@@ -124,13 +156,13 @@ export function commandsPage(): string {
 
     function renderSide(){
       var side=document.getElementById('cmd-side');
-      var html='<button class="item'+(state.view==='all'?' active':'')+'" data-view="all">All Custom Commands <span class="count">'+state.customs.length+'</span></button>';
+      var html='<div class="label">Custom Commands</div><button class="item'+(state.view==='all'?' active':'')+'" data-view="all">Show All <span class="count">'+state.customs.length+'</span></button>';
       if(state.customGroups.length){
         html+='<div class="subgroups">'+state.customGroups.map(function(g){ var v='group:'+g.name;
           return '<button class="item'+(state.view===v?' active':'')+'" data-view="'+esc(v)+'">'+esc(g.name)+' <span class="count">'+g.count+'</span></button>';
         }).join('')+'</div>';
       }
-      if(state.groups.length) html+='<div class="label">Plugins</div>';
+      if(state.groups.length) html+='<div class="label">Built-in Commands</div>';
       html+=state.groups.map(function(s){ var v='plugin:'+s.group;
         return '<button class="item'+(state.view===v?' active':'')+'" data-view="'+esc(v)+'">'+esc(pretty(s.group))+' <span class="count">'+s.cmds.length+'</span></button>';
       }).join('');
@@ -249,29 +281,110 @@ export function commandsPage(): string {
 
     var dlg=document.getElementById('edit-dlg');
     var editing=null;
+    var mode='edit'; // 'edit' | 'create'
+    function setPermRadio(v){
+      Array.prototype.forEach.call(document.querySelectorAll('input[name=edit-perm]'), function(r){ r.checked = (+r.value === (v||0)); });
+    }
+    function getPermRadio(){ var el=document.querySelector('input[name=edit-perm]:checked'); return el ? +el.value : 0; }
+    function editAliasToast(msg, ok){ var t=document.getElementById('edit-alias-toast'); t.textContent=msg||''; t.className='toast '+(ok?'ok':'err'); }
+    function renderEditAliases(){
+      var box=document.getElementById('edit-aliases');
+      var aliases=editing.aliases||[];
+      if(!aliases.length){ box.innerHTML='<span class="muted">No aliases.</span>'; return; }
+      box.innerHTML=aliases.map(function(a){ return '<span class="chip">!'+esc(a)+' <button type="button" title="Remove" data-alias="'+esc(a)+'">×</button></span>'; }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('button[data-alias]'), function(b){ b.onclick=function(){ removeEditAlias(b.getAttribute('data-alias')); }; });
+    }
+    // Re-fetch after an alias change so the table + modal reflect it, keeping the modal open.
+    async function reloadEditing(){
+      await load();
+      var found=state.customs.filter(function(c){return c.kind===editing.kind && c.name===editing.name;})[0];
+      if(found){ editing=found; renderEditAliases(); }
+    }
+    async function addEditAlias(){
+      var inp=document.getElementById('edit-alias-input');
+      if(!inp.value.trim()) return;
+      try{ await api('POST','/api/commands/alias',{ kind:editing.kind, name:editing.name, alias:inp.value }); inp.value=''; editAliasToast('Added.',true); await reloadEditing(); }
+      catch(e){ editAliasToast(e.message,false); }
+    }
+    async function removeEditAlias(a){
+      try{ await api('POST','/api/commands/alias/delete',{ alias:a }); editAliasToast('Removed.',true); await reloadEditing(); }
+      catch(e){ editAliasToast(e.message,false); }
+    }
+    document.getElementById('edit-alias-btn').onclick=addEditAlias;
+    document.getElementById('edit-alias-input').onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); addEditAlias(); } };
+
+    // The scalar fields shared by create + edit.
+    function commonFields(){
+      return {
+        response:document.getElementById('edit-response').value,
+        group:document.getElementById('edit-group').value,
+        permission:getPermRadio(),
+        enabled:document.getElementById('edit-enabled').checked,
+        globalCooldown:parseInt(document.getElementById('edit-global').value,10)||0,
+        userCooldown:parseInt(document.getElementById('edit-user').value,10)||0
+      };
+    }
+    function getKindRadio(){ var el=document.querySelector('input[name=edit-kind]:checked'); return el ? el.value : 'trigger'; }
+    function updateTriggerLabel(){
+      var isPhrase=getKindRadio()==='phrase';
+      document.getElementById('edit-trigger-label').textContent = isPhrase ? 'Phrase' : 'Trigger word';
+      document.getElementById('edit-trigger').placeholder = isPhrase ? 'e.g. good game' : 'e.g. hello';
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('input[name=edit-kind]'), function(r){ r.onchange=updateTriggerLabel; });
+
+    function openNew(){
+      mode='create'; editing=null;
+      document.getElementById('edit-title').textContent='New Command';
+      document.getElementById('edit-create-fields').style.display='';
+      document.getElementById('edit-alias-section').style.display='none'; // add aliases after creating
+      document.getElementById('edit-response').value='';
+      document.getElementById('edit-group').value='';
+      setPermRadio(0);
+      document.getElementById('edit-enabled').checked=true;
+      document.getElementById('edit-global').value='0';
+      document.getElementById('edit-user').value='0';
+      var trig=document.querySelector('input[name=edit-kind][value=trigger]'); if(trig) trig.checked=true;
+      document.getElementById('edit-trigger').value='';
+      updateTriggerLabel();
+      document.getElementById('edit-toast').textContent='';
+      document.getElementById('edit-save').textContent='Create';
+      if(dlg.showModal) dlg.showModal(); else dlg.setAttribute('open','');
+      document.getElementById('edit-trigger').focus();
+    }
+
     function openEdit(i){
-      var c=state.customs[i]; if(!c) return; editing=c;
-      document.getElementById('edit-name').textContent = c.kind==='phrase' ? '“'+c.name+'”' : '!'+c.name;
+      var c=state.customs[i]; if(!c) return; mode='edit'; editing=c;
+      document.getElementById('edit-title').innerHTML='Edit <code>'+(c.kind==='phrase'?('“'+esc(c.name)+'”'):('!'+esc(c.name)))+'</code>';
+      document.getElementById('edit-create-fields').style.display='none';
       document.getElementById('edit-response').value=c.response||'';
       document.getElementById('edit-group').value=c.group||'';
-      document.getElementById('edit-permission').value=String(c.access||0);
+      setPermRadio(c.access||0);
       document.getElementById('edit-enabled').checked=!!c.enabled;
       document.getElementById('edit-global').value=String(c.globalCooldown||0);
       document.getElementById('edit-user').value=String(c.userCooldown||0);
+      // Aliases only apply to trigger commands.
+      var aliasSection=document.getElementById('edit-alias-section');
+      aliasSection.style.display = c.kind==='phrase' ? 'none' : '';
+      if(c.kind!=='phrase') renderEditAliases();
+      editAliasToast('');
       document.getElementById('edit-toast').textContent='';
+      document.getElementById('edit-save').textContent='Save';
       if(dlg.showModal) dlg.showModal(); else dlg.setAttribute('open','');
     }
+    document.getElementById('new-cmd-btn').onclick=openNew;
     document.getElementById('edit-cancel').onclick=function(){ dlg.close ? dlg.close() : dlg.removeAttribute('open'); };
     document.getElementById('edit-save').onclick=async function(){
+      var f=commonFields();
+      if(mode==='create'){
+        var kind=getKindRadio();
+        var name=document.getElementById('edit-trigger').value;
+        if(!name.trim()){ document.getElementById('edit-toast').textContent = kind==='phrase' ? 'Enter the phrase text.' : 'Enter a trigger word.'; return; }
+        try{ await api('POST','/api/commands/create', Object.assign({ kind:kind, name:name }, f)); dlg.close?dlg.close():dlg.removeAttribute('open'); await load(); }
+        catch(e){ document.getElementById('edit-toast').textContent=e.message; }
+        return;
+      }
       if(!editing) return;
-      var payload={ kind:editing.kind, name:editing.name,
-        response:document.getElementById('edit-response').value,
-        group:document.getElementById('edit-group').value,
-        permission:parseInt(document.getElementById('edit-permission').value,10)||0,
-        enabled:document.getElementById('edit-enabled').checked,
-        globalCooldown:parseInt(document.getElementById('edit-global').value,10)||0,
-        userCooldown:parseInt(document.getElementById('edit-user').value,10)||0 };
-      try{ await api('POST','/api/commands',payload); dlg.close?dlg.close():dlg.removeAttribute('open'); await load(); }
+      try{ await api('POST','/api/commands', Object.assign({ kind:editing.kind, name:editing.name }, f)); dlg.close?dlg.close():dlg.removeAttribute('open'); await load(); }
       catch(e){ document.getElementById('edit-toast').textContent=e.message; }
     };
     async function toggleEnabled(i){
@@ -279,12 +392,23 @@ export function commandsPage(): string {
       try{ await api('POST','/api/commands',{ kind:c.kind, name:c.name, enabled:!c.enabled }); await load(); }
       catch(e){ alert(e.message); }
     }
-    async function delCommand(i){
-      var c=state.customs[i]; if(!c) return;
-      if(!confirm('Delete '+(c.kind==='phrase'?('phrase \\''+c.name+'\\''):('!'+c.name))+'?')) return;
-      try{ await api('POST','/api/commands/delete',{ kind:c.kind, name:c.name }); await load(); }
-      catch(e){ alert('Delete failed: '+e.message); }
-    }`;
+    var delDlg=document.getElementById('del-dlg');
+    var deleting=null;
+    function delCommand(i){
+      var c=state.customs[i]; if(!c) return; deleting=c;
+      document.getElementById('del-name').textContent = c.kind==='phrase' ? '“'+c.name+'”' : '!'+c.name;
+      var hasAliases = c.kind!=='phrase' && c.aliases && c.aliases.length;
+      var aliasNote = hasAliases ? ' and its alias'+(c.aliases.length>1?'es':'')+' ('+c.aliases.map(function(a){return '!'+a;}).join(', ')+')' : '';
+      document.getElementById('del-msg').textContent = 'This permanently removes the command'+aliasNote+'.';
+      document.getElementById('del-toast').textContent='';
+      if(delDlg.showModal) delDlg.showModal(); else delDlg.setAttribute('open','');
+    }
+    document.getElementById('del-cancel').onclick=function(){ delDlg.close?delDlg.close():delDlg.removeAttribute('open'); };
+    document.getElementById('del-confirm').onclick=async function(){
+      if(!deleting) return;
+      try{ await api('POST','/api/commands/delete',{ kind:deleting.kind, name:deleting.name }); delDlg.close?delDlg.close():delDlg.removeAttribute('open'); await load(); }
+      catch(e){ document.getElementById('del-toast').textContent='Delete failed: '+e.message; }
+    };`;
 
   return renderLayout({ title: 'BasecaBot — Commands', active: 'commands', body, script, wide: true });
 }

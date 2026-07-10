@@ -46,7 +46,7 @@ Required Twitch setup (two accounts, two tokens):
 | `!points` / `!p` | everyone | Show your balance (`!points top` for leaderboard) |
 | `!give <user> <n>` | everyone | Transfer points |
 | `!addpoints <user> <n>` | mod | Grant/deduct points |
-| `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`removealias`/`remove` on a `!trigger` or `"phrase"` |
+| `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`remove` on a `!trigger` or `"phrase"` |
 | `!startgame` / `!endgame` / `!vote <x>` | mod / everyone | Sample web-app game |
 
 ## Try the web-app loop

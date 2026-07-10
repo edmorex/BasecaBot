@@ -100,16 +100,48 @@ run('CustomCommandService (integration)', () => {
     expect(row.group).toBeNull();
   });
 
+  it('blocks trigger commands/aliases that shadow built-ins (phrases allowed)', async () => {
+    svc.useReservedWords((w) => w === 'wheel' || w === 'points');
+    try {
+      await expect(svc.create(CH, trig('wheel'), { response: 'x' })).rejects.toBeInstanceOf(CommandError);
+      await expect(svc.create(CH, trig('WHEEL'), { response: 'x' })).rejects.toBeInstanceOf(CommandError); // normalized
+
+      // A phrase with the same text is fine — it isn't a `!` command.
+      await svc.create(CH, phrase('wheel'), { response: 'ok' });
+      expect(await svc.resolve(CH, phrase('wheel'))).not.toBeNull();
+
+      // Aliases are blocked too.
+      await svc.create(CH, trig('game'), { response: 'g' });
+      await expect(svc.addAlias(CH, trig('game'), '!points')).rejects.toBeInstanceOf(CommandError);
+    } finally {
+      svc.useReservedWords(() => false); // don't leak into other tests (shared svc)
+    }
+  });
+
   it('treats an empty response as silent', async () => {
     await svc.create(CH, trig('silent'), { response: '' });
     expect((await svc.findByTrigger(CH, 'silent'))?.response).toBeNull();
   });
 
-  it('removes a command and its triggers', async () => {
+  it('remove by an alias trigger removes only that alias', async () => {
+    await svc.create(CH, trig('hello'), { response: 'hi' });
+    await svc.addAlias(CH, trig('hello'), '!hi');
+    await svc.addAlias(CH, trig('hello'), '!yo');
+
+    const res = await svc.remove(CH, trig('hi'));
+    expect(res).toEqual({ type: 'alias', alias: '!hi', command: '!hello' });
+    expect(await svc.findByTrigger(CH, 'hi')).toBeNull(); // alias gone
+    expect((await svc.findByTrigger(CH, 'hello'))?.name).toBe('hello'); // command remains
+    expect((await svc.findByTrigger(CH, 'yo'))?.name).toBe('hello'); // other alias remains
+  });
+
+  it('remove by the primary removes the command and reports its aliases', async () => {
     await svc.create(CH, trig('bye'), { response: 'cya' });
     await svc.addAlias(CH, trig('bye'), '!cya');
-    await svc.remove(CH, trig('bye'));
+
+    const res = await svc.remove(CH, trig('bye'));
+    expect(res).toMatchObject({ type: 'command', label: '!bye', aliases: ['!cya'] });
     expect(await svc.findByTrigger(CH, 'bye')).toBeNull();
-    expect(await svc.findByTrigger(CH, 'cya')).toBeNull();
+    expect(await svc.findByTrigger(CH, 'cya')).toBeNull(); // alias cascaded
   });
 });

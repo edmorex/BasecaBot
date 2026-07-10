@@ -147,6 +147,31 @@ const server = createServer(async (req, res) => {
     if (p === '/api/me/display-name') { me.user.displayName = String(body.displayName ?? me.user.displayName); return json(200, { displayName: me.user.displayName }); }
     if (p === '/api/me/aliases') { me.aliases.push(String(body.alias ?? '')); return json(200, { aliases: me.aliases }); }
     if (p === '/api/me/aliases/delete') { me.aliases = me.aliases.filter((a) => a.toLowerCase() !== String(body.alias ?? '').toLowerCase()); return json(200, { aliases: me.aliases }); }
+    if (p === '/api/commands/create') {
+      const kind = body.kind === 'phrase' ? 'phrase' : 'trigger';
+      const name = kind === 'trigger' ? String(body.name ?? '').replace(/^!/, '').toLowerCase().trim() : String(body.name ?? '').trim();
+      if (name) {
+        commands.push(mk({
+          kind, name, access: Number(body.permission) || 0,
+          response: body.response == null ? null : String(body.response),
+          group: body.group ? String(body.group) : null,
+          enabled: body.enabled !== false,
+          globalCooldown: Number(body.globalCooldown) || 0, userCooldown: Number(body.userCooldown) || 0,
+        }));
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/commands/alias') {
+      const norm = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
+      const cmd = commands.find((c) => c.kind === body.kind && c.name === body.name) as { aliases: string[] } | undefined;
+      if (cmd && norm && !cmd.aliases.includes(norm)) cmd.aliases.push(norm);
+      return json(200, { ok: true });
+    }
+    if (p === '/api/commands/alias/delete') {
+      const norm = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
+      commands.forEach((c) => { const cc = c as { aliases?: string[] }; if (cc.aliases) cc.aliases = cc.aliases.filter((x) => x !== norm); });
+      return json(200, { ok: true });
+    }
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });
     res.writeHead(404); return res.end('Not Found');
   }

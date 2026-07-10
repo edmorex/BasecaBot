@@ -82,6 +82,16 @@ describe('CommandRouter dispatch', () => {
     await bus.publish(chat('!doesnotexist'));
     expect(fallback).toHaveBeenCalledOnce();
   });
+
+  it('reports registered commands and aliases via isRegistered', () => {
+    router.register('points', vi.fn(), { aliases: ['p'] });
+    router.registerGroup('wheel', { subcommands: { spin: { handler: vi.fn() } } });
+    expect(router.isRegistered('points')).toBe(true);
+    expect(router.isRegistered('POINTS')).toBe(true); // case-insensitive
+    expect(router.isRegistered('p')).toBe(true); // alias
+    expect(router.isRegistered('wheel')).toBe(true); // command group
+    expect(router.isRegistered('nope')).toBe(false);
+  });
 });
 
 describe('CommandRouter.registerGroup', () => {

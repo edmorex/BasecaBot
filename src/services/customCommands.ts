@@ -12,6 +12,11 @@ export interface TargetRef {
   name: string;
 }
 
+/** Outcome of `remove` — either a whole command (with the aliases it took) or a single alias. */
+export type RemoveResult =
+  | { type: 'command'; label: string; aliases: string[] }
+  | { type: 'alias'; alias: string; command: string };
+
 /** Minimal shape used at runtime for matching + cooldown/permission checks. */
 interface RuntimeCommand {
   id: number;
@@ -77,10 +82,18 @@ export class CustomCommandService {
   private readonly lastGlobal = new Map<number, number>();
   private readonly lastUser = new Map<number, Map<string, number>>();
 
+  /** Whether a word is a reserved built-in command/alias. Injected from bootstrap. */
+  private isReserved: (word: string) => boolean = () => false;
+
   constructor(private readonly storage: Storage) {}
 
   private get db() {
     return this.storage.prisma;
+  }
+
+  /** Provide the check that blocks trigger words colliding with built-in commands. */
+  useReservedWords(isReserved: (word: string) => boolean): void {
+    this.isReserved = isReserved;
   }
 
   /** Load the phrase cache. Call once at startup. */
@@ -180,6 +193,9 @@ export class CustomCommandService {
     const name = target.kind === 'trigger' ? normalizeWord(target.name) : target.name.trim();
     if (!name) throw new CommandError('Command name/phrase cannot be empty.');
     if (target.kind === 'trigger' && /\s/.test(name)) throw new CommandError('Trigger words cannot contain spaces.');
+    if (target.kind === 'trigger' && this.isReserved(name)) {
+      throw new CommandError(`!${name} is a built-in command and can't be a custom command.`);
+    }
 
     if (await this.resolve(channel, { kind: target.kind, name })) {
       throw new CommandError(`A command ${describeTarget({ kind: target.kind, name })} already exists.`);
@@ -242,10 +258,33 @@ export class CustomCommandService {
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { usageCount: Math.max(0, Math.floor(count)) } });
   }
 
-  async remove(channel: string, target: TargetRef) {
+  /**
+   * Remove a command or a single alias.
+   *  - Trigger word that is an **alias** -> removes just that alias.
+   *  - Trigger word that is the **primary** (or a phrase) -> removes the whole
+   *    command and all its aliases (returned so the caller can report them).
+   */
+  async remove(channel: string, target: TargetRef): Promise<RemoveResult> {
+    if (target.kind === 'trigger') {
+      const word = normalizeWord(target.name);
+      const trigger = await this.db.commandTrigger.findUnique({
+        where: { channel_word: { channel, word } },
+        include: { command: { include: { triggers: true } } },
+      });
+      if (!trigger) throw new CommandError(`No command !${word} found.`);
+      if (!trigger.isPrimary) {
+        await this.db.commandTrigger.delete({ where: { id: trigger.id } });
+        return { type: 'alias', alias: `!${word}`, command: `!${trigger.command.name}` };
+      }
+      const aliases = trigger.command.triggers.filter((t) => !t.isPrimary).map((t) => `!${t.word}`);
+      await this.db.customCommand.delete({ where: { id: trigger.command.id } }); // cascades triggers
+      await this.reloadPhrases();
+      return { type: 'command', label: `!${trigger.command.name}`, aliases };
+    }
     const cmd = await this.resolveOrThrow(channel, target);
-    await this.db.customCommand.delete({ where: { id: cmd.id } }); // cascades triggers
+    await this.db.customCommand.delete({ where: { id: cmd.id } });
     await this.reloadPhrases();
+    return { type: 'command', label: describeTarget(target), aliases: [] };
   }
 
   async addAlias(channel: string, target: TargetRef, aliasWord: string) {
@@ -253,16 +292,17 @@ export class CustomCommandService {
     if (cmd.kind !== 'trigger') throw new CommandError('Only trigger commands can have aliases.');
     const word = normalizeWord(aliasWord);
     if (!word || /\s/.test(word)) throw new CommandError('An alias must be a single word.');
+    if (this.isReserved(word)) throw new CommandError(`!${word} is a built-in command and can't be used as an alias.`);
     if (await this.wordTaken(channel, word)) throw new CommandError(`The trigger !${word} is already in use.`);
     await this.db.commandTrigger.create({ data: { channel, word, isPrimary: false, commandId: cmd.id } });
   }
 
-  async removeAlias(channel: string, target: TargetRef, aliasWord: string) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  /** Remove a single alias by its word (must be a non-primary alias, not a command). */
+  async removeAlias(channel: string, aliasWord: string) {
     const word = normalizeWord(aliasWord);
     const trigger = await this.db.commandTrigger.findUnique({ where: { channel_word: { channel, word } } });
-    if (!trigger || trigger.commandId !== cmd.id) throw new CommandError(`!${word} is not an alias of that command.`);
-    if (trigger.isPrimary) throw new CommandError('Cannot remove the primary trigger; remove the command instead.');
+    if (!trigger) throw new CommandError(`No alias !${word} found.`);
+    if (trigger.isPrimary) throw new CommandError(`!${word} is a primary command, not an alias.`);
     await this.db.commandTrigger.delete({ where: { id: trigger.id } });
   }
 

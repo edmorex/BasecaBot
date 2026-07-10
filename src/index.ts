@@ -46,6 +46,8 @@ async function main(): Promise<void> {
   const chat = new TwurpleChatService(chatAdapter.client);
 
   const commands = new CommandRouter(bus, chat);
+  // Block custom commands/aliases from shadowing built-in (plugin) commands.
+  customCommands.useReservedWords((word) => commands.isRegistered(word));
 
   // ── WebSocket hub (web-app integration) ────────────────────────────────────
   const ws = new WsHub(bus, {

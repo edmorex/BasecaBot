@@ -207,6 +207,17 @@ export class CommandRouter {
   }
 
   /**
+   * Whether `name` resolves to a registered (built-in) command or alias
+   * (case-insensitive). Used to stop custom commands/aliases from shadowing a
+   * built-in — the router resolves built-ins before the custom fallback, so such
+   * a custom trigger could never fire.
+   */
+  isRegistered(name: string): boolean {
+    const key = name.toLowerCase();
+    return this.commands.has(key) || this.aliasIndex.has(key);
+  }
+
+  /**
    * Tag subsequent `register()` calls with a group (the registering plugin).
    * The PluginManager sets this around each plugin's init so the dashboard can
    * group built-in commands by plugin. Pass undefined to clear.

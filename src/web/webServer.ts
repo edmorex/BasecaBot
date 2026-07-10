@@ -132,8 +132,14 @@ export class WebServer {
           return this.postAlias(req, res, 'remove');
         case '/api/commands':
           return this.postCommand(req, res);
+        case '/api/commands/create':
+          return this.createCommand(req, res);
         case '/api/commands/delete':
           return this.deleteCommand(req, res);
+        case '/api/commands/alias':
+          return this.addCommandAlias(req, res);
+        case '/api/commands/alias/delete':
+          return this.removeCommandAlias(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -276,6 +282,27 @@ export class WebServer {
     this.json(res, 200, { ok: true });
   }
 
+  /** Create a new custom command (dashboard "New Command"). */
+  private async createCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    const target = this.targetFromBody(body);
+    try {
+      await this.customCommands.create(this.channel, target, {
+        response: body.response == null ? null : String(body.response),
+        permission: Number(body.permission) || 0,
+        globalCooldown: Number(body.globalCooldown) || 0,
+        userCooldown: Number(body.userCooldown) || 0,
+      });
+      if (body.group != null && String(body.group).trim()) await this.customCommands.setGroup(this.channel, target, String(body.group));
+      if (body.enabled === false) await this.customCommands.setEnabled(this.channel, target, false);
+    } catch (e) {
+      if (e instanceof CommandError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
   private async deleteCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
     const target = this.targetFromBody(await this.readJson(req));
@@ -283,6 +310,31 @@ export class WebServer {
       await this.customCommands.remove(this.channel, target);
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(404, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async addCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    const target = this.targetFromBody(body);
+    try {
+      await this.customCommands.addAlias(this.channel, target, String(body.alias ?? ''));
+    } catch (e) {
+      if (e instanceof CommandError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async removeCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.customCommands.removeAlias(this.channel, String(body.alias ?? ''));
+    } catch (e) {
+      if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;
     }
     this.json(res, 200, { ok: true });

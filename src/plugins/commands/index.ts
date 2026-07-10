@@ -57,7 +57,7 @@ export function commandsPlugin(): Plugin {
       // ── Mod manager: !command <sub> [!trigger or "phrase"] … ────────────────
       ctx.commands.registerGroup('command', {
         description:
-          'Manage custom commands (mods+). Subcommands: add, response, setgroup, cooldown, restrict, setcount, enable, disable, addalias, removealias, remove — target a !trigger or "phrase".',
+          'Manage custom commands (mods+). Subcommands: add, response, setgroup, cooldown, restrict, setcount, enable, disable, addalias, remove — target a !trigger or "phrase".',
         permission: PermissionLevel.Moderator,
         aliases: ['cmd'],
         subcommands: {
@@ -148,7 +148,7 @@ export function commandsPlugin(): Plugin {
           },
           addalias: {
             description: 'Add a trigger alias to a command.',
-            usage: '<!trigger or "phrase"> <!alias>',
+            usage: '<!trigger> <!alias>',
             handler: guard(async (e) => {
               const t = target(e);
               if (!t.rest) throw new CommandError('Provide an alias like !alias.');
@@ -156,23 +156,19 @@ export function commandsPlugin(): Plugin {
               await say(e.channel, `Added alias to ${describeTarget(t.target)}.`);
             }),
           },
-          removealias: {
-            description: 'Remove a trigger alias from a command.',
-            usage: '<!trigger or "phrase"> <!alias>',
-            handler: guard(async (e) => {
-              const t = target(e);
-              if (!t.rest) throw new CommandError('Provide the alias to remove.');
-              await svc.removeAlias(e.channel, t.target, t.rest);
-              await say(e.channel, `Removed alias from ${describeTarget(t.target)}.`);
-            }),
-          },
           remove: {
-            description: 'Remove a command entirely.',
-            usage: '<!trigger or "phrase">',
+            description: 'Remove a command (and all its aliases), or just one alias if an alias trigger is given.',
+            usage: '<!trigger or !alias or "phrase">',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.remove(e.channel, t.target);
-              await say(e.channel, `Removed ${describeTarget(t.target)}.`);
+              const res = await svc.remove(e.channel, t.target);
+              if (res.type === 'alias') {
+                await say(e.channel, `Removed alias ${res.alias} from ${res.command}.`);
+              } else if (res.aliases.length) {
+                await say(e.channel, `Removed ${res.label} and its alias${res.aliases.length > 1 ? 'es' : ''}: ${res.aliases.join(', ')}.`);
+              } else {
+                await say(e.channel, `Removed ${res.label}.`);
+              }
             }),
           },
         },
