@@ -126,7 +126,7 @@ const server = createServer(async (req, res) => {
   const json = (status: number, obj: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
 
   if (req.method === 'GET') {
-    if (p === '/') return loggedOut ? html(welcomePage()) : (res.writeHead(302, { Location: '/user' }), res.end());
+    if (p === '/') return html(welcomePage());
     if (p === '/user') return html(userPage());
     if (p === '/commands') return html(commandsPage());
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);

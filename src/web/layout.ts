@@ -14,8 +14,6 @@ export interface LayoutOptions {
   body: string;
   /** Optional page script (runs after the shell script; may define window.onMe). */
   script?: string;
-  /** Hide the nav's user area (e.g. the logged-out welcome page). */
-  hideNavUser?: boolean;
   /** Use a wider content column (for data-heavy pages like Commands). */
   wide?: boolean;
 }
@@ -103,8 +101,8 @@ const SHARED_STYLE = /* css */ `
   button:hover, .btn:hover { background: var(--purple-dark); }
   button.secondary { background: #3a3a3d; }
   button.secondary:hover { background: #4a4a4d; }
-  button.pink { background: var(--pink); color: #1a1220; font-weight: 600; }
-  button.pink:hover { background: #ff8ad4; }
+  button.pink, a.pink, .btn.pink { background: var(--pink); color: #1a1220; font-weight: 600; }
+  button.pink:hover, a.pink:hover, .btn.pink:hover { background: #ff8ad4; }
   button.danger { background: #b0341d; }
   button.danger:hover { background: #d13f24; }
   input[type=text] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.95rem; font-family: inherit; }
@@ -161,21 +159,17 @@ const SHELL_SCRIPT = /* js */ `
   (async () => {
     let me = null;
     try { const r = await fetch('/api/me', { credentials: 'same-origin' }); if (r.ok) me = await r.json(); } catch {}
-    const nav = document.getElementById('nav-user');
-    if (nav) {
-      if (me) {
-        nav.innerHTML = '<img src="' + esc(me.user.avatar) + '" alt=""><span>' + esc(me.user.displayName) + '</span>';
-        nav.style.display = '';
-      } else { nav.style.display = 'none'; }
+    const navRight = document.getElementById('nav-right');
+    if (navRight) {
+      navRight.innerHTML = me
+        ? '<a class="nav-user" id="nav-user" href="/user"><img src="' + esc(me.user.avatar) + '" alt=""><span>' + esc(me.user.displayName) + '</span></a>'
+        : '<a class="btn pink" href="/auth/login">Login with Twitch</a>';
     }
     if (typeof window.onMe === 'function') window.onMe(me);
   })();
 `;
 
 export function renderLayout(opts: LayoutOptions): string {
-  const navUser = opts.hideNavUser
-    ? ''
-    : `<a class="nav-user" id="nav-user" href="/user" style="display:none"></a>`;
   const commandsActive = opts.active === 'commands' ? ' active' : '';
   const mainClass = opts.wide ? ' class="wide"' : '';
 
@@ -197,7 +191,7 @@ export function renderLayout(opts: LayoutOptions): string {
         <a href="/commands" class="${commandsActive.trim()}">Commands</a>
       </nav>
       <span class="spacer"></span>
-      ${navUser}
+      <span id="nav-right"></span>
     </header>
     <main${mainClass}>${opts.body}</main>
     <script>${SHELL_SCRIPT}</script>

@@ -98,13 +98,12 @@ export class WebServer {
     if (method === 'GET') {
       switch (p) {
         case '/':
-          return this.getSession(req)
-            ? this.redirect(res, '/user')
-            : this.html(res, welcomePage());
+          return this.html(res, welcomePage());
         case '/user':
           return this.requireSession(req, res) ? this.html(res, userPage()) : undefined;
         case '/commands':
-          return this.requireSession(req, res) ? this.html(res, commandsPage()) : undefined;
+          // Public: logged-out visitors browse read-only (viewer access).
+          return this.html(res, commandsPage());
         case '/auth/login':
           return this.handleLogin(res);
         case '/auth/callback':
