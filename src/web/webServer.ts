@@ -7,6 +7,9 @@ import type { UsersService } from '../services/users.js';
 import { AliasError } from '../services/users.js';
 import type { CustomCommandService, TargetRef } from '../services/customCommands.js';
 import { CommandError } from '../services/customCommands.js';
+import type { ListsService } from '../services/lists.js';
+import { ListError } from '../services/lists.js';
+import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
 import { buildAuthorizeUrl, exchangeCodeForToken, fetchAuthedUser } from './auth/twitchOAuth.js';
@@ -23,10 +26,12 @@ import type { SessionData } from './auth/types.js';
 import { welcomePage } from './pages/welcome.js';
 import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
+import { listsPage } from './pages/lists.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
+const LEVEL_LABELS = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -63,6 +68,7 @@ export class WebServer {
     private readonly users: UsersService,
     private readonly customCommands: CustomCommandService,
     private readonly commands: CommandRouter,
+    private readonly lists: ListsService,
   ) {
     this.channel = config.twitch.channels[0] ?? 'unknown';
   }
@@ -104,6 +110,9 @@ export class WebServer {
         case '/commands':
           // Public: logged-out visitors browse read-only (viewer access).
           return this.html(res, commandsPage());
+        case '/lists':
+          // Public: logged-out visitors browse read-only (viewer access).
+          return this.html(res, listsPage());
         case '/auth/login':
           return this.handleLogin(res);
         case '/auth/callback':
@@ -114,6 +123,8 @@ export class WebServer {
           return this.getMe(req, res);
         case '/api/commands':
           return this.getCommands(res);
+        case '/api/lists':
+          return this.getLists(res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -139,6 +150,18 @@ export class WebServer {
           return this.addCommandAlias(req, res);
         case '/api/commands/alias/delete':
           return this.removeCommandAlias(req, res);
+        case '/api/lists/create':
+          return this.createList(req, res);
+        case '/api/lists/update':
+          return this.updateList(req, res);
+        case '/api/lists/delete':
+          return this.deleteList(req, res);
+        case '/api/lists/entries/add':
+          return this.addListEntry(req, res);
+        case '/api/lists/entries/update':
+          return this.updateListEntry(req, res);
+        case '/api/lists/entries/delete':
+          return this.deleteListEntry(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -334,6 +357,124 @@ export class WebServer {
       await this.customCommands.removeAlias(this.channel, String(body.alias ?? ''));
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── Lists API ─────────────────────────────────────────────────────────────────
+
+  /** Every list with its entries (public read — logged-out sees viewer access). */
+  private async getLists(res: ServerResponse): Promise<void> {
+    const lists = await this.lists.listAllForDashboard(this.channel);
+    this.json(res, 200, { lists });
+  }
+
+  /** Map a session's channel relationship to a numeric PermissionLevel. */
+  private sessionLevel(session: SessionData): number {
+    const r = session.relationship;
+    if (r.botAdmin) return PermissionLevel.Admin;
+    if (r.broadcaster) return PermissionLevel.Broadcaster;
+    if (r.moderator) return PermissionLevel.Moderator;
+    if (r.subscriber) return PermissionLevel.Subscriber;
+    return PermissionLevel.Viewer;
+  }
+
+  /**
+   * Require mod+ to manage a list, and — if the list is restricted above
+   * Moderator (Broadcaster/Admin) — require that level too. Throws on an unknown
+   * list (ListError, converted to 400 by the caller).
+   */
+  private async requireListManage(req: IncomingMessage, listName: string): Promise<SessionData> {
+    const session = this.requireManager(req);
+    const level = await this.lists.addPermission(this.channel, listName);
+    if (level > PermissionLevel.Moderator && this.sessionLevel(session) < level) {
+      throw new HttpError(403, `This list is restricted to ${LEVEL_LABELS[level]}+.`);
+    }
+    return session;
+  }
+
+  private async createList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = this.requireManager(req);
+    const body = await this.readJson(req);
+    const name = String(body.name ?? '').trim();
+    const actor = { id: session.user.id, displayName: session.user.displayName };
+    try {
+      await this.lists.create(this.channel, name, body.displayName == null ? undefined : String(body.displayName), actor);
+      if (body.description != null && String(body.description).trim()) await this.lists.setDescription(this.channel, name, String(body.description));
+      if (body.permission != null) await this.lists.setPermission(this.channel, name, Number(body.permission) || PermissionLevel.Moderator);
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async updateList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.readJson(req);
+    const name = String(body.name ?? '').trim();
+    try {
+      await this.requireListManage(req, name);
+      if ('displayName' in body) await this.lists.setDisplayName(this.channel, name, String(body.displayName ?? ''));
+      if ('description' in body) await this.lists.setDescription(this.channel, name, String(body.description ?? ''));
+      if ('permission' in body) await this.lists.setPermission(this.channel, name, Number(body.permission) || 0);
+      if (body.newName != null && String(body.newName).trim()) await this.lists.rename(this.channel, name, String(body.newName));
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async deleteList(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.readJson(req);
+    const name = String(body.name ?? '').trim();
+    try {
+      await this.requireListManage(req, name);
+      await this.lists.remove(this.channel, name);
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async addListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = this.requireApiSession(req);
+    const body = await this.readJson(req);
+    const name = String(body.list ?? '').trim();
+    try {
+      const level = await this.lists.addPermission(this.channel, name);
+      if (this.sessionLevel(session) < level) throw new HttpError(403, `Only ${LEVEL_LABELS[level]}+ can add to this list.`);
+      await this.lists.addEntry(this.channel, name, String(body.text ?? ''), { id: session.user.id, displayName: session.user.displayName });
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async updateListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.readJson(req);
+    const name = String(body.list ?? '').trim();
+    try {
+      await this.requireListManage(req, name);
+      await this.lists.updateEntry(this.channel, name, Number(body.id), String(body.text ?? ''));
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async deleteListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.readJson(req);
+    const name = String(body.list ?? '').trim();
+    try {
+      await this.requireListManage(req, name);
+      await this.lists.removeEntry(this.channel, name, Number(body.id));
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
     }
     this.json(res, 200, { ok: true });

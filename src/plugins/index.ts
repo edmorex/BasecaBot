@@ -1,6 +1,7 @@
 import type { PluginFactory } from './types.js';
 import { pointsPlugin } from './points/index.js';
 import { commandsPlugin } from './commands/index.js';
+import { listsPlugin } from './lists/index.js';
 import { eventsPlugin } from './events/index.js';
 import { sampleGamePlugin } from './sampleGame/index.js';
 import { basecaWheelPlugin } from './basecaWheel/index.js';
@@ -14,6 +15,7 @@ import { eventSimulatorPlugin } from './eventSimulator/index.js';
 export const pluginRegistry: PluginFactory[] = [
   pointsPlugin,
   commandsPlugin,
+  listsPlugin,
   eventsPlugin,
   sampleGamePlugin,
   basecaWheelPlugin,

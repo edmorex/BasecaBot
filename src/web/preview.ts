@@ -4,6 +4,7 @@ import path from 'node:path';
 import { welcomePage } from './pages/welcome.js';
 import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
+import { listsPage } from './pages/lists.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
 import type { CommandHandler, CommandOptions, GroupOptions } from '../core/commandRouter.js';
@@ -75,6 +76,7 @@ async function collectBuiltins() {
     bus: { on: () => noop, onAny: () => noop, publish: asyncNoop },
     chat: { say: asyncNoop, reply: asyncNoop, whisper: asyncNoop },
     customCommands: {},
+    lists: {},
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -113,6 +115,31 @@ const mockCustoms = [
 ];
 const commands = [...builtins, ...mockCustoms];
 
+// Mock named lists (exercises the sidebar, entries table, and permission gating).
+interface MockEntry { id: number; text: string; addedByName: string | null; addedAt: string }
+interface MockList { name: string; displayName: string | null; description: string | null; permission: number; createdByName: string | null; createdAt: string; entries: MockEntry[] }
+let mockEntryId = 1000;
+const iso = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString();
+const entry = (text: string, by: string, daysAgo: number): MockEntry => ({ id: mockEntryId++, text, addedByName: by, addedAt: iso(daysAgo) });
+const mockLists: MockList[] = [
+  {
+    name: 'quotes', displayName: 'Funny Quotes', description: 'Memorable things said on stream.', permission: 3,
+    createdByName: 'Baseca', createdAt: iso(40),
+    entries: [entry('"I meant to do that." — Baseca, falling off a cliff', 'ModMandy', 30), entry('"gg ez" (narrator: it was not ez)', 'ViewerVince', 12), entry('"Trust me, I\'m an engineer."', 'Baseca', 3)],
+  },
+  {
+    name: 'songs', displayName: 'Song Requests', description: 'Community song suggestions — subs and up can add.', permission: 1,
+    createdByName: 'ModMandy', createdAt: iso(20),
+    entries: [entry('Darude - Sandstorm', 'ViewerVince', 5), entry('Rick Astley - Never Gonna Give You Up', 'ModMandy', 4)],
+  },
+  {
+    name: 'secrets', displayName: 'Broadcaster Notes', description: 'Only the broadcaster can touch this one.', permission: 4,
+    createdByName: 'Baseca', createdAt: iso(2),
+    entries: [entry('Remember to plug the merch at the end.', 'Baseca', 2)],
+  },
+];
+const listByName = (n: string) => mockLists.find((l) => l.name === String(n).toLowerCase().replace(/^!/, '').trim());
+
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
@@ -129,8 +156,10 @@ const server = createServer(async (req, res) => {
     if (p === '/') return html(welcomePage());
     if (p === '/user') return html(userPage());
     if (p === '/commands') return html(commandsPage());
+    if (p === '/lists') return html(listsPage());
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
+    if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p.startsWith('/assets/')) {
       const name = p.slice('/assets/'.length);
       try {
@@ -173,6 +202,48 @@ const server = createServer(async (req, res) => {
       return json(200, { ok: true });
     }
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });
+
+    // ── Lists (mock CRUD) ──────────────────────────────────────────────────
+    if (p === '/api/lists/create') {
+      const name = String(body.name ?? '').toLowerCase().replace(/^!/, '').trim();
+      if (name && !listByName(name)) {
+        mockLists.push({ name, displayName: body.displayName ? String(body.displayName) : null, description: body.description ? String(body.description) : null,
+          permission: Number(body.permission) || 3, createdByName: me.user.displayName, createdAt: iso(0), entries: [] });
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/lists/update') {
+      const l = listByName(String(body.name ?? ''));
+      if (l) {
+        if ('displayName' in body) l.displayName = String(body.displayName ?? '') || null;
+        if ('description' in body) l.description = String(body.description ?? '') || null;
+        if ('permission' in body) l.permission = Number(body.permission) || 0;
+        if (body.newName != null && String(body.newName).trim()) l.name = String(body.newName).toLowerCase().replace(/^!/, '').trim();
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/lists/delete') {
+      const i = mockLists.findIndex((l) => l.name === String(body.name ?? '').toLowerCase().replace(/^!/, '').trim());
+      if (i >= 0) mockLists.splice(i, 1);
+      return json(200, { ok: true });
+    }
+    if (p === '/api/lists/entries/add') {
+      const l = listByName(String(body.list ?? ''));
+      if (l && String(body.text ?? '').trim()) l.entries.push(entry(String(body.text).trim(), me.user.displayName, 0));
+      return json(200, { ok: true });
+    }
+    if (p === '/api/lists/entries/update') {
+      const l = listByName(String(body.list ?? ''));
+      const en = l && l.entries.find((x) => x.id === Number(body.id));
+      if (en && String(body.text ?? '').trim()) en.text = String(body.text).trim();
+      return json(200, { ok: true });
+    }
+    if (p === '/api/lists/entries/delete') {
+      const l = listByName(String(body.list ?? ''));
+      if (l) l.entries = l.entries.filter((x) => x.id !== Number(body.id));
+      return json(200, { ok: true });
+    }
+
     res.writeHead(404); return res.end('Not Found');
   }
   res.writeHead(405); res.end('Method Not Allowed');

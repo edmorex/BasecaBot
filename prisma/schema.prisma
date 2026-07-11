@@ -35,10 +35,12 @@ model User {
   firstSeenAt       DateTime @default(now())
   lastSeenAt        DateTime @default(now())
 
-  points      PointsBalance[]
-  events      EventLog[]
-  aliases     UserAlias[]
-  preferences UserPreference[]
+  points       PointsBalance[]
+  events       EventLog[]
+  aliases      UserAlias[]
+  preferences  UserPreference[]
+  createdLists List[]           @relation("ListCreator")
+  listEntries  ListEntry[]      @relation("ListEntryAuthor")
 }
 
 /// An alternate name a user can be referenced by (in addition to their canonical
@@ -128,6 +130,45 @@ model CommandTrigger {
 
   @@unique([channel, word])
   @@index([commandId])
+}
+
+/// A named, mod-managed collection of text entries (per channel). Referenced by
+/// a single case-insensitive word (`name`); `displayName` is an optional longer
+/// label for display. `addPermission` is the PermissionLevel required to add an
+/// entry via `!list add` (default Moderator). If it is higher than Moderator
+/// (Broadcaster/Admin), mods are also blocked from managing the list.
+model List {
+  id            Int      @id @default(autoincrement())
+  channel       String
+  name          String // reference word (lowercase, no spaces)
+  displayName   String? // optional human-friendly name
+  description   String?
+  addPermission Int      @default(3) // PermissionLevel (see core/events.ts); default Moderator
+  createdById   String? // Twitch user id of the creator
+  createdByName String? // creator display name, snapshotted
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  creator User?       @relation("ListCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  entries ListEntry[]
+
+  @@unique([channel, name])
+  @@index([channel])
+}
+
+/// One entry in a List. Records who added it and when.
+model ListEntry {
+  id          Int      @id @default(autoincrement())
+  listId      Int
+  text        String
+  addedById   String? // Twitch user id of who added it
+  addedByName String? // adder display name, snapshotted
+  createdAt   DateTime @default(now())
+
+  list    List  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  addedBy User? @relation("ListEntryAuthor", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@index([listId])
 }
 
 /// Per-channel runtime settings, editable without redeploying.

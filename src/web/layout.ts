@@ -9,7 +9,7 @@
 export interface LayoutOptions {
   title: string;
   /** Which nav item to highlight. */
-  active?: 'commands' | 'user' | '';
+  active?: 'commands' | 'lists' | 'user' | '';
   /** Page body markup (inside <main>). */
   body: string;
   /** Optional page script (runs after the shell script; may define window.onMe). */
@@ -171,6 +171,7 @@ const SHELL_SCRIPT = /* js */ `
 
 export function renderLayout(opts: LayoutOptions): string {
   const commandsActive = opts.active === 'commands' ? ' active' : '';
+  const listsActive = opts.active === 'lists' ? ' active' : '';
   const mainClass = opts.wide ? ' class="wide"' : '';
 
   return /* html */ `<!doctype html>
@@ -189,6 +190,7 @@ export function renderLayout(opts: LayoutOptions): string {
       </a>
       <nav class="links">
         <a href="/commands" class="${commandsActive.trim()}">Commands</a>
+        <a href="/lists" class="${listsActive.trim()}">Lists</a>
       </nav>
       <span class="spacer"></span>
       <span id="nav-right"></span>
