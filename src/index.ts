@@ -76,6 +76,7 @@ async function main(): Promise<void> {
     customCommands,
     storage,
     ws,
+    api,
     config,
     logger: logger.child({ scope: 'plugin' }),
   };

@@ -8,6 +8,7 @@ import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
 import type { AppConfig } from '../services/config.js';
 import type { Logger } from '../services/logger.js';
+import type { ApiClient } from '@twurple/api';
 
 /**
  * The single object injected into every plugin's `init`. Plugins interact with
@@ -31,6 +32,8 @@ export interface ServiceContext {
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */
   readonly ws: WsHub;
+  /** Twitch Helix API client (e.g. to check whether the channel is live). */
+  readonly api: ApiClient;
   /** Validated app configuration. */
   readonly config: AppConfig;
   /** Logger scoped to the plugin. */

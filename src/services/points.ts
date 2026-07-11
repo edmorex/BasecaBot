@@ -43,6 +43,24 @@ export class PointsService {
     return this.getBalance(userId, channel);
   }
 
+  /**
+   * Award points but never push the balance above `cap` (an accrual cap). A
+   * balance already at/above the cap is left unchanged; otherwise it rises to at
+   * most `cap`. Atomic; safe for the periodic payout loop.
+   */
+  async awardCapped(userId: string, channel: string, amount: number, cap: number): Promise<number> {
+    await this.storage.prisma.$executeRaw`
+      INSERT INTO "PointsBalance" ("userId", "channel", "balance")
+      VALUES (${userId}, ${channel}, MIN(${cap}, MAX(0, ${amount})))
+      ON CONFLICT ("userId", "channel")
+      DO UPDATE SET "balance" = CASE
+        WHEN "balance" >= ${cap} THEN "balance"
+        ELSE MIN(${cap}, "balance" + ${amount})
+      END
+    `;
+    return this.getBalance(userId, channel);
+  }
+
   /** Spend points atomically; throws InsufficientPointsError if too poor. */
   async spend(userId: string, channel: string, amount: number): Promise<number> {
     if (amount < 0) throw new Error('spend amount must be non-negative');

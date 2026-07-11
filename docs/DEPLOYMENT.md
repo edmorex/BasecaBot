@@ -316,18 +316,24 @@ https://bot.edmorex.com/auth/callback
 
 (Keep the existing `http://localhost:3000` for token generation; an app can have several.)
 
-### I2. Add `moderation:read` to the broadcaster token
+### I2. Broadcaster-token scopes (dashboard + points payouts)
 
-The dashboard's **Moderator** row uses Helix, which needs `moderation:read` on the broadcaster
-token (the other rows use scopes you already have). Regenerate the broadcaster token with:
+A few Helix features need scopes on the **broadcaster** token beyond the EventSub read scopes.
+Regenerate the broadcaster token with the full set:
 
 ```
-channel:read:subscriptions bits:read moderator:read:followers moderation:read
+channel:read:subscriptions bits:read moderator:read:followers moderation:read moderator:read:chatters channel:read:vips
 ```
 
-and update `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`. Without it the
-bot still runs — the Moderator row just shows false. (To pick up new tokens, clear the token cache:
-`docker compose down && docker volume rm basecabot_bottokens && docker compose up -d`.)
+- `moderation:read` — dashboard's **Moderator** row (without it, that row just shows false).
+- `moderator:read:chatters` — **required for point payouts.** The points plugin lists everyone
+  connected to chat (incl. lurkers) every 5 min via Get Chatters; without this scope the call
+  throws and **no points are awarded**.
+- `channel:read:vips` — lets VIPs (who aren't also subs/mods) get the higher 30-point tier;
+  without it they fall back to the 25-point tier.
+
+Update `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`, then clear the token
+cache so the new token is used: `docker compose down && docker volume rm basecabot_bottokens && docker compose up -d`.
 
 ### I3. Set the web env vars (server `.env`)
 

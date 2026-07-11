@@ -34,9 +34,11 @@ Required Twitch setup (two accounts, two tokens):
 2. Get an OAuth access+refresh token for the **bot account** (BasecaBot) with scopes
    `chat:read chat:edit` → `TWITCH_BOT_ACCESS_TOKEN` / `TWITCH_BOT_REFRESH_TOKEN`.
 3. Get an OAuth access+refresh token for the **broadcaster account** (your channel) with scopes
-   `channel:read:subscriptions bits:read moderator:read:followers` →
+   `channel:read:subscriptions bits:read moderator:read:followers moderation:read moderator:read:chatters channel:read:vips` →
    `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`.
-   (Subs/bits/follows EventSub can only be authorized by the channel owner, hence the second token.)
+   (Subs/bits/follows EventSub can only be authorized by the channel owner, hence the second token.
+   `moderator:read:chatters` + `channel:read:vips` let the points plugin pay out everyone in chat,
+   incl. lurkers, and give VIPs the higher tier; `moderation:read` powers the dashboard mod check.)
 4. Fill `TWITCH_CHANNELS`, `TWITCH_BROADCASTER_USERNAME`, and `BOT_ADMINS` in `.env`.
 
 ## Commands (out of the box)

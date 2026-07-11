@@ -11,8 +11,8 @@ export function welcomePage(): string {
   const body = /* html */ `
     <div class="card" style="text-align:center">
       <h1>Welcome to BasecaBot</h1>
-      <p class="muted">Browse the channel's commands and tools below. Sign in with Twitch for your
-      profile and (soon) more personalized features — no account required just to look around.</p>
+      <p class="muted">Browse the channel's tools above. Sign in with Twitch to access your 
+      profile and additional features. No account required just to look around.</p>
       <div id="welcome-cta" style="margin-top:1.5rem">
         <a class="btn" href="/auth/login">Login with Twitch</a>
       </div>

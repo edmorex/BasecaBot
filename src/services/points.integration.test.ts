@@ -56,6 +56,21 @@ run('PointsService (integration)', () => {
     await expect(points.spend(USER_B, CHANNEL, 5)).rejects.toBeInstanceOf(InsufficientPointsError);
   });
 
+  it('awardCapped stops at the cap and never reduces an over-cap balance', async () => {
+    await points.award(USER_A, CHANNEL, -1_000_000); // reset to 0
+    // Accrue toward the cap.
+    await points.awardCapped(USER_A, CHANNEL, 25, 3000);
+    expect(await points.getBalance(USER_A, CHANNEL)).toBe(25);
+    // Near the cap: only rises to the cap, not past it.
+    await points.award(USER_A, CHANNEL, 2975); // now 3000
+    await points.awardCapped(USER_A, CHANNEL, 25, 3000);
+    expect(await points.getBalance(USER_A, CHANNEL)).toBe(3000);
+    // Already above the cap (e.g. via a gift): capped award leaves it untouched.
+    await points.award(USER_A, CHANNEL, 500); // 3500
+    await points.awardCapped(USER_A, CHANNEL, 25, 3000);
+    expect(await points.getBalance(USER_A, CHANNEL)).toBe(3500);
+  });
+
   it('transfers atomically', async () => {
     await points.award(USER_A, CHANNEL, -1_000_000); // reset A to 0
     await points.award(USER_A, CHANNEL, 30);
