@@ -9,7 +9,7 @@
 export interface LayoutOptions {
   title: string;
   /** Which nav item to highlight. */
-  active?: 'commands' | 'lists' | 'user' | '';
+  active?: 'commands' | 'lists' | 'quotes' | 'user' | '';
   /** Page body markup (inside <main>). */
   body: string;
   /** Optional page script (runs after the shell script; may define window.onMe). */
@@ -172,6 +172,7 @@ const SHELL_SCRIPT = /* js */ `
 export function renderLayout(opts: LayoutOptions): string {
   const commandsActive = opts.active === 'commands' ? ' active' : '';
   const listsActive = opts.active === 'lists' ? ' active' : '';
+  const quotesActive = opts.active === 'quotes' ? ' active' : '';
   const mainClass = opts.wide ? ' class="wide"' : '';
 
   return /* html */ `<!doctype html>
@@ -191,6 +192,7 @@ export function renderLayout(opts: LayoutOptions): string {
       <nav class="links">
         <a href="/commands" class="${commandsActive.trim()}">Commands</a>
         <a href="/lists" class="${listsActive.trim()}">Lists</a>
+        <a href="/quotes" class="${quotesActive.trim()}">Quotes</a>
       </nav>
       <span class="spacer"></span>
       <span id="nav-right"></span>

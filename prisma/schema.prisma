@@ -41,6 +41,7 @@ model User {
   preferences  UserPreference[]
   createdLists List[]           @relation("ListCreator")
   listEntries  ListEntry[]      @relation("ListEntryAuthor")
+  quotes       Quote[]          @relation("QuoteCreator")
 }
 
 /// An alternate name a user can be referenced by (in addition to their canonical
@@ -169,6 +170,25 @@ model ListEntry {
   addedBy User? @relation("ListEntryAuthor", fields: [addedById], references: [id], onDelete: SetNull)
 
   @@index([listId])
+}
+
+/// A saved quote. `id` is the quote number shown in chat. Records who is quoted
+/// (`quotedUser`, a login/name without '@'), the game being played when it was
+/// captured, the quote date (`quoteDate`, "YYYY-MM-DD"), and who added it.
+model Quote {
+  id            Int      @id @default(autoincrement())
+  channel       String
+  text          String
+  quotedUser    String // the person quoted (login/name, no '@')
+  game          String? // game/category at capture time
+  quoteDate     String // "YYYY-MM-DD"
+  createdById   String? // Twitch user id of who added it ("Quoted By")
+  createdByName String? // adder display name, snapshotted
+  createdAt     DateTime @default(now())
+
+  creator User? @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([channel])
 }
 
 /// Per-channel runtime settings, editable without redeploying.

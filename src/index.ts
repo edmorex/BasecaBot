@@ -9,6 +9,7 @@ import { UsersService } from './services/users.js';
 import { PointsService } from './services/points.js';
 import { CustomCommandService } from './services/customCommands.js';
 import { ListsService } from './services/lists.js';
+import { QuotesService } from './services/quotes.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
 import { WebServer } from './web/webServer.js';
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
   const customCommands = new CustomCommandService(storage);
   await customCommands.init(); // load the phrase-matching cache
   const lists = new ListsService(storage);
+  const quotes = new QuotesService(storage);
 
   // ── Twitch auth + chat client ──────────────────────────────────────────────
   const authProvider = await createAuthProvider(config);
@@ -65,7 +67,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -77,6 +79,7 @@ async function main(): Promise<void> {
     points,
     customCommands,
     lists,
+    quotes,
     storage,
     ws,
     api,

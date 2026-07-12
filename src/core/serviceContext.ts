@@ -5,6 +5,7 @@ import type { UsersService } from '../services/users.js';
 import type { PointsService } from '../services/points.js';
 import type { CustomCommandService } from '../services/customCommands.js';
 import type { ListsService } from '../services/lists.js';
+import type { QuotesService } from '../services/quotes.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
 import type { AppConfig } from '../services/config.js';
@@ -31,6 +32,8 @@ export interface ServiceContext {
   readonly customCommands: CustomCommandService;
   /** Named lists (mod-managed collections of text entries). */
   readonly lists: ListsService;
+  /** Saved quotes (random/search recall + management). */
+  readonly quotes: QuotesService;
   /** Raw persistence (Prisma) for plugin-specific tables/queries. */
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */

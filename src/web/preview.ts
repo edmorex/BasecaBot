@@ -5,6 +5,7 @@ import { welcomePage } from './pages/welcome.js';
 import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
+import { quotesPage } from './pages/quotes.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
 import type { CommandHandler, CommandOptions, GroupOptions } from '../core/commandRouter.js';
@@ -77,6 +78,7 @@ async function collectBuiltins() {
     chat: { say: asyncNoop, reply: asyncNoop, whisper: asyncNoop },
     customCommands: {},
     lists: {},
+    quotes: {},
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -140,6 +142,21 @@ const mockLists: MockList[] = [
 ];
 const listByName = (n: string) => mockLists.find((l) => l.name === String(n).toLowerCase().replace(/^!/, '').trim());
 
+// Mock quotes (exercises the searchable table + pagination).
+interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
+const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+const GAMES = ['Just Chatting', 'Elden Ring', 'Minecraft', 'VALORANT', null];
+const SAID_BY = ['Baseca', 'ViewerVince', 'ModMandy', 'SubSam'];
+const mockQuotes: MockQuote[] = Array.from({ length: 63 }, (_, i) => ({
+  id: i + 1,
+  text: i === 0 ? 'I meant to do that.' : i === 1 ? 'gg ez (it was not ez)' : `Sample quote number ${i + 1} that someone said on stream.`,
+  user: SAID_BY[i % SAID_BY.length]!,
+  game: GAMES[i % GAMES.length] ?? null,
+  date: dISO((i * 5) % 400),
+  quotedByName: SAID_BY[(i + 1) % SAID_BY.length]!,
+  createdAt: new Date(Date.now() - i * 86400000).toISOString(),
+}));
+
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
@@ -157,9 +174,11 @@ const server = createServer(async (req, res) => {
     if (p === '/user') return html(userPage());
     if (p === '/commands') return html(commandsPage());
     if (p === '/lists') return html(listsPage());
+    if (p === '/quotes') return html(quotesPage());
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
     if (p === '/api/lists') return json(200, { lists: mockLists });
+    if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p.startsWith('/assets/')) {
       const name = p.slice('/assets/'.length);
       try {
@@ -241,6 +260,23 @@ const server = createServer(async (req, res) => {
     if (p === '/api/lists/entries/delete') {
       const l = listByName(String(body.list ?? ''));
       if (l) l.entries = l.entries.filter((x) => x.id !== Number(body.id));
+      return json(200, { ok: true });
+    }
+
+    // ── Quotes (mock CRUD) ─────────────────────────────────────────────────
+    if (p === '/api/quotes/update') {
+      const q = mockQuotes.find((x) => x.id === Number(body.id));
+      if (q) {
+        if ('text' in body) q.text = String(body.text ?? '');
+        if ('user' in body) q.user = String(body.user ?? '').replace(/^@/, '');
+        if ('game' in body) q.game = String(body.game ?? '').trim() || null;
+        if ('date' in body) { const parts = String(body.date ?? '').split(/[^0-9]+/).filter(Boolean); if (parts.length === 3) q.date = parts[0] + '-' + parts[1]!.padStart(2, '0') + '-' + parts[2]!.padStart(2, '0'); }
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/quotes/delete') {
+      const i = mockQuotes.findIndex((x) => x.id === Number(body.id));
+      if (i >= 0) mockQuotes.splice(i, 1);
       return json(200, { ok: true });
     }
 

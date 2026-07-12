@@ -9,6 +9,8 @@ import type { CustomCommandService, TargetRef } from '../services/customCommands
 import { CommandError } from '../services/customCommands.js';
 import type { ListsService } from '../services/lists.js';
 import { ListError } from '../services/lists.js';
+import type { QuotesService } from '../services/quotes.js';
+import { QuoteError } from '../services/quotes.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
@@ -27,6 +29,7 @@ import { welcomePage } from './pages/welcome.js';
 import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
+import { quotesPage } from './pages/quotes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -69,6 +72,7 @@ export class WebServer {
     private readonly customCommands: CustomCommandService,
     private readonly commands: CommandRouter,
     private readonly lists: ListsService,
+    private readonly quotes: QuotesService,
   ) {
     this.channel = config.twitch.channels[0] ?? 'unknown';
   }
@@ -113,6 +117,9 @@ export class WebServer {
         case '/lists':
           // Public: logged-out visitors browse read-only (viewer access).
           return this.html(res, listsPage());
+        case '/quotes':
+          // Public: logged-out visitors browse read-only (viewer access).
+          return this.html(res, quotesPage());
         case '/auth/login':
           return this.handleLogin(res);
         case '/auth/callback':
@@ -125,6 +132,8 @@ export class WebServer {
           return this.getCommands(res);
         case '/api/lists':
           return this.getLists(res);
+        case '/api/quotes':
+          return this.getQuotes(res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -162,6 +171,10 @@ export class WebServer {
           return this.updateListEntry(req, res);
         case '/api/lists/entries/delete':
           return this.deleteListEntry(req, res);
+        case '/api/quotes/update':
+          return this.updateQuote(req, res);
+        case '/api/quotes/delete':
+          return this.deleteQuote(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -475,6 +488,43 @@ export class WebServer {
       await this.lists.removeEntry(this.channel, name, Number(body.id));
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  // ── Quotes API ────────────────────────────────────────────────────────────────
+
+  /** Every quote (public read — logged-out sees viewer access). */
+  private async getQuotes(res: ServerResponse): Promise<void> {
+    const quotes = await this.quotes.listAllForDashboard(this.channel);
+    this.json(res, 200, { quotes });
+  }
+
+  /** Update a quote's editable fields (mod+). */
+  private async updateQuote(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    const id = Number(body.id);
+    try {
+      if ('text' in body) await this.quotes.setText(this.channel, id, String(body.text ?? ''));
+      if ('user' in body) await this.quotes.setUser(this.channel, id, String(body.user ?? ''));
+      if ('game' in body) await this.quotes.setGame(this.channel, id, String(body.game ?? ''));
+      if ('date' in body) await this.quotes.setDate(this.channel, id, String(body.date ?? ''));
+    } catch (e) {
+      if (e instanceof QuoteError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  private async deleteQuote(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.quotes.remove(this.channel, Number(body.id));
+    } catch (e) {
+      if (e instanceof QuoteError) throw new HttpError(400, e.message);
       throw e;
     }
     this.json(res, 200, { ok: true });
