@@ -39,7 +39,9 @@ Required Twitch setup (two accounts, two tokens):
    (Subs/bits/follows EventSub can only be authorized by the channel owner, hence the second token.
    `moderator:read:chatters` + `channel:read:vips` let the points plugin pay out everyone in chat,
    incl. lurkers, and give VIPs the higher tier; `moderation:read` powers the dashboard mod check.)
-4. Fill `TWITCH_CHANNELS`, `TWITCH_BROADCASTER_USERNAME`, and `BOT_ADMINS` in `.env`.
+4. Fill `TWITCH_BROADCASTER_USERNAME` (the single channel the bot runs in) and `BOT_ADMINS` in `.env`.
+
+> **Single-channel by design.** BasecaBot operates in exactly one channel — the broadcaster's. It can *temporarily* join other "guest" channels at runtime (e.g. `!wheel connect` for BasecaWheel), but in those it only reacts to `!wheel` and persists nothing. Running it across many channels at once is out of scope.
 
 ## Commands (out of the box)
 

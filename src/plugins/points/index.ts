@@ -44,7 +44,6 @@ export function pointsPlugin(): Plugin {
 
   /** Pay out to everyone present in chat, but only while the channel is live. */
   async function payout(): Promise<void> {
-    const channel = ctx.config.twitch.channels[0] ?? 'unknown';
     const bid = await getBroadcasterId();
     if (!bid) {
       ctx.logger.error({ user: ctx.config.twitch.broadcasterUsername }, 'points: broadcaster not found');
@@ -86,8 +85,8 @@ export function pointsPlugin(): Plugin {
         ch.userId === bid || subs.has(ch.userId) || mods.has(ch.userId) || vips.has(ch.userId) || admins.includes(ch.userName.toLowerCase());
       try {
         await ctx.users.touch({ id: ch.userId, login: ch.userName, displayName: ch.userDisplayName });
-        if (higher) await ctx.points.award(ch.userId, channel, SUB_POINTS);
-        else await ctx.points.awardCapped(ch.userId, channel, NONSUB_POINTS, NONSUB_CAP);
+        if (higher) await ctx.points.award(ch.userId, SUB_POINTS);
+        else await ctx.points.awardCapped(ch.userId, NONSUB_POINTS, NONSUB_CAP);
         awarded++;
       } catch (err) {
         ctx.logger.error({ err, user: ch.userName }, 'points: award failed');
@@ -108,12 +107,12 @@ export function pointsPlugin(): Plugin {
         'points',
         async (e) => {
           if (e.args[0]?.toLowerCase() === 'top') {
-            const board = await ctx.points.leaderboard(e.channel, 5);
+            const board = await ctx.points.leaderboard(5);
             const rendered = board.map((r, i) => `${i + 1}. ${r.displayName} (${r.balance})`).join(', ');
             await ctx.chat.say(e.channel, `Top ${CURRENCY}: ${rendered || 'nobody yet'}`);
             return;
           }
-          const balance = await ctx.points.getBalance(e.user.id, e.channel);
+          const balance = await ctx.points.getBalance(e.user.id);
           await ctx.chat.say(e.channel, `@${e.user.displayName} you have ${balance} ${CURRENCY}.`);
         },
         { aliases: ['p'], description: `Check your ${CURRENCY} (or "!points top").`, usage: '[top]', cooldownSeconds: 3 },
@@ -134,7 +133,7 @@ export function pointsPlugin(): Plugin {
             return;
           }
           try {
-            await ctx.points.transfer(e.user.id, recipient.id, e.channel, amount);
+            await ctx.points.transfer(e.user.id, recipient.id, amount);
             await ctx.chat.say(e.channel, `@${e.user.displayName} gave ${amount} ${CURRENCY} to ${recipient.displayName}.`);
           } catch (err) {
             if (err instanceof InsufficientPointsError) {
@@ -161,7 +160,7 @@ export function pointsPlugin(): Plugin {
             await ctx.chat.say(e.channel, `Unknown user ${target}.`);
             return;
           }
-          const balance = await ctx.points.award(recipient.id, e.channel, amount);
+          const balance = await ctx.points.award(recipient.id, amount);
           await ctx.chat.say(e.channel, `${recipient.displayName} now has ${balance} ${CURRENCY}.`);
         },
         { permission: PermissionLevel.Broadcaster, description: `(Broadcaster) Grant/deduct ${CURRENCY}.`, usage: '<user> <amount>' },

@@ -18,19 +18,24 @@ describe('basecaWheel plugin', () => {
   let bus: EventBus;
   let say: ReturnType<typeof vi.fn>;
   let broadcast: ReturnType<typeof vi.fn>;
+  let join: ReturnType<typeof vi.fn>;
+  let part: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     bus = new EventBus();
     say = vi.fn(async () => {});
     broadcast = vi.fn();
-    const chatSvc = { say, reply: vi.fn(), whisper: vi.fn() } as unknown as ChatService;
+    join = vi.fn(async () => {});
+    part = vi.fn();
+    const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join, part } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
       ws: { broadcast },
-      logger: { debug: vi.fn() },
+      config: { twitch: { channel: 'test' } },
+      logger: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
     } as unknown as ServiceContext;
     await basecaWheelPlugin().init(ctx);
   });
@@ -42,6 +47,7 @@ describe('basecaWheel plugin', () => {
       text: 'Best Game Ever',
       user: 'Bob',
       permission: PermissionLevel.Moderator, // 3
+      channel: 'test',
     });
   });
 
@@ -52,6 +58,7 @@ describe('basecaWheel plugin', () => {
       text: 'Sir Reginald III',
       user: 'Alice',
       permission: 0,
+      channel: 'test',
     });
   });
 
@@ -67,6 +74,7 @@ describe('basecaWheel plugin', () => {
       text: '',
       user: 'Bob',
       permission: PermissionLevel.Subscriber, // 2
+      channel: 'test',
     });
   });
 
@@ -77,6 +85,7 @@ describe('basecaWheel plugin', () => {
       text: '',
       user: 'Mod',
       permission: PermissionLevel.Moderator, // 3
+      channel: 'test',
     });
   });
 
@@ -107,5 +116,29 @@ describe('basecaWheel plugin', () => {
       ts: Date.now(),
     });
     expect(say).toHaveBeenCalledWith('test', expect.stringContaining('Alice'));
+  });
+
+  it('routes app responses to the channel echoed back in the payload', async () => {
+    await bus.publish({
+      type: 'wsMessage',
+      channel: 'test', // hub default (primary)
+      room: 'baseca-wheel',
+      messageType: 'announce',
+      payload: { text: 'Round over!', channel: 'guestchan' }, // echoed guest channel wins
+      ts: Date.now(),
+    });
+    expect(say).toHaveBeenCalledWith('guestchan', 'Round over!');
+  });
+
+  it('lets a broadcaster connect to a guest channel (joins + greets both)', async () => {
+    await bus.publish(chat('!wheel connect GuestChan 60', user({ permission: PermissionLevel.Broadcaster })));
+    expect(join).toHaveBeenCalledWith('guestchan');
+    expect(say).toHaveBeenCalledWith('guestchan', expect.stringContaining('BasecaWheel'));
+    expect(say).toHaveBeenCalledWith('test', expect.stringContaining('Connected to guestchan'));
+  });
+
+  it('does not let a non-broadcaster connect to a guest channel', async () => {
+    await bus.publish(chat('!wheel connect guestchan', user({ permission: PermissionLevel.Moderator })));
+    expect(join).not.toHaveBeenCalled();
   });
 });

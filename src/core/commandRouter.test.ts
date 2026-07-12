@@ -8,6 +8,8 @@ const noopChat: ChatService = {
   say: vi.fn(async () => {}),
   reply: vi.fn(async () => {}),
   whisper: vi.fn(async () => {}),
+  join: vi.fn(async () => {}),
+  part: vi.fn(),
 };
 
 function user(overrides: Partial<EventUser> = {}): EventUser {

@@ -78,15 +78,14 @@ export class QuotesService {
     createdAt: q.createdAt.toISOString(),
   });
 
-  private async resolveOrThrow(channel: string, id: number) {
+  private async resolveOrThrow(id: number) {
     if (!Number.isInteger(id) || id <= 0) throw new QuoteError('Provide a numeric quote ID.');
-    const quote = await this.db.quote.findFirst({ where: { id, channel } });
+    const quote = await this.db.quote.findUnique({ where: { id } });
     if (!quote) throw new QuoteError(`No quote found with ID ${id}.`);
     return quote;
   }
 
   async add(
-    channel: string,
     data: { user: string; text: string; game?: string | null; date?: string },
     creator?: Actor,
   ): Promise<QuoteView> {
@@ -98,7 +97,6 @@ export class QuotesService {
     const date = data.date ?? todayIso();
     const quote = await this.db.quote.create({
       data: {
-        channel,
         text,
         quotedUser: user,
         game: (data.game ?? '').trim() || null,
@@ -110,82 +108,81 @@ export class QuotesService {
     return this.toView(quote);
   }
 
-  async getById(channel: string, id: number): Promise<QuoteView> {
-    return this.toView(await this.resolveOrThrow(channel, id));
+  async getById(id: number): Promise<QuoteView> {
+    return this.toView(await this.resolveOrThrow(id));
   }
 
-  async remove(channel: string, id: number): Promise<void> {
-    await this.resolveOrThrow(channel, id);
+  async remove(id: number): Promise<void> {
+    await this.resolveOrThrow(id);
     await this.db.quote.delete({ where: { id } });
   }
 
-  async setText(channel: string, id: number, text: string): Promise<QuoteView> {
-    await this.resolveOrThrow(channel, id);
+  async setText(id: number, text: string): Promise<QuoteView> {
+    await this.resolveOrThrow(id);
     const value = text.trim();
     if (!value) throw new QuoteError('Quote text cannot be empty.');
     if (value.length > 500) throw new QuoteError('Quote is too long (max 500).');
     return this.toView(await this.db.quote.update({ where: { id }, data: { text: value } }));
   }
 
-  async setUser(channel: string, id: number, user: string): Promise<QuoteView> {
-    await this.resolveOrThrow(channel, id);
+  async setUser(id: number, user: string): Promise<QuoteView> {
+    await this.resolveOrThrow(id);
     const value = normalizeUser(user);
     if (!value) throw new QuoteError('Provide a username.');
     return this.toView(await this.db.quote.update({ where: { id }, data: { quotedUser: value } }));
   }
 
-  async setGame(channel: string, id: number, game: string): Promise<QuoteView> {
-    await this.resolveOrThrow(channel, id);
+  async setGame(id: number, game: string): Promise<QuoteView> {
+    await this.resolveOrThrow(id);
     return this.toView(await this.db.quote.update({ where: { id }, data: { game: game.trim() || null } }));
   }
 
-  async setDate(channel: string, id: number, date: string): Promise<QuoteView> {
-    await this.resolveOrThrow(channel, id);
+  async setDate(id: number, date: string): Promise<QuoteView> {
+    await this.resolveOrThrow(id);
     const iso = parseQuoteDate(date);
     if (!iso) throw new QuoteError('Use a date like YYYY MM DD.');
     return this.toView(await this.db.quote.update({ where: { id }, data: { quoteDate: iso } }));
   }
 
-  /** A random quote from the channel, or null if there are none. */
-  async random(channel: string): Promise<QuoteView | null> {
-    return this.randomWhere(channel, {});
+  /** A random quote, or null if there are none. */
+  async random(): Promise<QuoteView | null> {
+    return this.randomWhere({});
   }
 
-  async searchText(channel: string, term: string): Promise<QuoteView | null> {
+  async searchText(term: string): Promise<QuoteView | null> {
     if (!term.trim()) throw new QuoteError('Provide a search term.');
-    return this.randomWhere(channel, { text: { contains: term.trim() } });
+    return this.randomWhere({ text: { contains: term.trim() } });
   }
 
-  async searchUser(channel: string, user: string): Promise<QuoteView | null> {
+  async searchUser(user: string): Promise<QuoteView | null> {
     const value = normalizeUser(user);
     if (!value) throw new QuoteError('Provide a username.');
-    return this.randomWhere(channel, { quotedUser: { contains: value } });
+    return this.randomWhere({ quotedUser: { contains: value } });
   }
 
-  async searchGame(channel: string, term: string): Promise<QuoteView | null> {
+  async searchGame(term: string): Promise<QuoteView | null> {
     if (!term.trim()) throw new QuoteError('Provide a game to search for.');
-    return this.randomWhere(channel, { game: { contains: term.trim() } });
+    return this.randomWhere({ game: { contains: term.trim() } });
   }
 
-  async searchDate(channel: string, date: string): Promise<QuoteView | null> {
+  async searchDate(date: string): Promise<QuoteView | null> {
     const iso = parseQuoteDate(date);
     if (!iso) throw new QuoteError('Use a date like YYYY MM DD.');
-    return this.randomWhere(channel, { quoteDate: iso });
+    return this.randomWhere({ quoteDate: iso });
   }
 
-  /** Pick a random quote matching a where-filter (channel is always applied). */
-  private async randomWhere(channel: string, where: Record<string, unknown>): Promise<QuoteView | null> {
-    const full = { channel, ...where };
-    const count = await this.db.quote.count({ where: full });
+  /** Pick a random quote matching a where-filter. */
+  private async randomWhere(where: Record<string, unknown>): Promise<QuoteView | null> {
+    const count = await this.db.quote.count({ where });
     if (count === 0) return null;
     const skip = Math.floor(Math.random() * count);
-    const [quote] = await this.db.quote.findMany({ where: full, orderBy: { id: 'asc' }, skip, take: 1 });
+    const [quote] = await this.db.quote.findMany({ where, orderBy: { id: 'asc' }, skip, take: 1 });
     return quote ? this.toView(quote) : null;
   }
 
-  /** Every quote in a channel, newest ID first, for the dashboard. */
-  async listAllForDashboard(channel: string): Promise<QuoteView[]> {
-    const rows = await this.db.quote.findMany({ where: { channel }, orderBy: { id: 'desc' } });
+  /** Every quote, newest ID first, for the dashboard. */
+  async listAllForDashboard(): Promise<QuoteView[]> {
+    const rows = await this.db.quote.findMany({ orderBy: { id: 'desc' } });
     return rows.map((r) => this.toView(r));
   }
 }

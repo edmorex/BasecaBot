@@ -46,8 +46,8 @@ export function listsPlugin(): Plugin {
 
       // For management/read subcommands (already gated Mod+ by the router): if the
       // list is restricted above Moderator, block anyone below that level too.
-      const assertMayManage = async (ch: string, name: string, e: CommandEvent) => {
-        const level = await svc.addPermission(ch, name); // throws ListError if unknown
+      const assertMayManage = async (name: string, e: CommandEvent) => {
+        const level = await svc.addPermission(name); // throws ListError if unknown
         if (level > PermissionLevel.Moderator && e.user.permission < level) {
           throw new ListError(`"${normalizeListName(name)}" is restricted to ${LEVEL_LABEL[level]}+.`);
         }
@@ -64,7 +64,7 @@ export function listsPlugin(): Plugin {
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
               await ctx.users.touch(e.user);
-              const list = await svc.create(e.channel, first, rest, actor(e));
+              const list = await svc.create(first, rest, actor(e));
               await say(e.channel, `Created list "${label(list.name, list.displayName)}" (add access: ${LEVEL_LABEL[list.addPermission]}+).`);
             }),
           },
@@ -73,8 +73,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName> <display name>',
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              await svc.setDisplayName(e.channel, first, rest);
+              await assertMayManage(first, e);
+              await svc.setDisplayName(first, rest);
               await say(e.channel, rest.trim() ? `Set display name of "${normalizeListName(first)}".` : `Cleared display name of "${normalizeListName(first)}".`);
             }),
           },
@@ -83,8 +83,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName> <description>',
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              await svc.setDescription(e.channel, first, rest);
+              await assertMayManage(first, e);
+              await svc.setDescription(first, rest);
               await say(e.channel, `Updated the description of "${normalizeListName(first)}".`);
             }),
           },
@@ -93,8 +93,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName>',
             handler: guard(async (e) => {
               const { first } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              await svc.remove(e.channel, first);
+              await assertMayManage(first, e);
+              await svc.remove(first);
               await say(e.channel, `Deleted list "${normalizeListName(first)}".`);
             }),
           },
@@ -103,10 +103,10 @@ export function listsPlugin(): Plugin {
             usage: '<listName> <All/Sub/VIP/Mod/Broadcaster/Admin>',
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
+              await assertMayManage(first, e);
               const level = listRestrictKeywordToLevel(rest);
               if (level === null) throw new ListError('Restrict to one of: All, Sub, VIP, Mod, Broadcaster, Admin.');
-              await svc.setPermission(e.channel, first, level);
+              await svc.setPermission(first, level);
               await say(e.channel, `"${normalizeListName(first)}" now allows ${LEVEL_LABEL[level]}+ to add entries.`);
             }),
           },
@@ -115,8 +115,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName>',
             handler: guard(async (e) => {
               const { first } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              const n = await svc.clear(e.channel, first);
+              await assertMayManage(first, e);
+              const n = await svc.clear(first);
               await say(e.channel, `Cleared ${n} ${n === 1 ? 'entry' : 'entries'} from "${normalizeListName(first)}".`);
             }),
           },
@@ -125,8 +125,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName> <newListName>',
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              await svc.rename(e.channel, first, rest);
+              await assertMayManage(first, e);
+              await svc.rename(first, rest);
               await say(e.channel, `Renamed "${normalizeListName(first)}" to "${normalizeListName(rest)}".`);
             }),
           },
@@ -137,13 +137,13 @@ export function listsPlugin(): Plugin {
             permission: PermissionLevel.Viewer,
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              const level = await svc.addPermission(e.channel, first); // throws if unknown
+              const level = await svc.addPermission(first); // throws if unknown
               if (e.user.permission < level) {
                 await say(e.channel, `Only ${LEVEL_LABEL[level]}+ can add to "${normalizeListName(first)}".`);
                 return;
               }
               await ctx.users.touch(e.user);
-              await svc.addEntry(e.channel, first, rest, actor(e));
+              await svc.addEntry(first, rest, actor(e));
               await say(e.channel, `@${e.user.displayName} added an entry to "${normalizeListName(first)}".`);
             }),
           },
@@ -152,8 +152,8 @@ export function listsPlugin(): Plugin {
             usage: '<listName>',
             handler: guard(async (e) => {
               const { first } = firstAndRest(e.argString);
-              await assertMayManage(e.channel, first, e);
-              const entry = await svc.random(e.channel, first);
+              await assertMayManage(first, e);
+              const entry = await svc.random(first);
               await say(e.channel, entry ? entry : `"${normalizeListName(first)}" has no entries yet.`);
             }),
           },

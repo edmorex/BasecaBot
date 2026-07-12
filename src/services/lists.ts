@@ -52,9 +52,9 @@ export interface ListView {
 
 /**
  * Owns named lists and their entries: CRUD used by the chat `!list` manager and
- * the dashboard. Lists are keyed by (channel, name); `name` is a normalized
- * single word. Metadata (creator, per-entry author, timestamps) is recorded so
- * the dashboard can show provenance.
+ * the dashboard. Lists are keyed by their normalized single-word `name`.
+ * Metadata (creator, per-entry author, timestamps) is recorded so the dashboard
+ * can show provenance.
  *
  * Callers that pass an `Actor` must ensure that user exists (UsersService.touch)
  * first — entries/lists reference User by foreign key.
@@ -67,35 +67,32 @@ export class ListsService {
   }
 
   /** Resolve a list row (without entries) or throw a user-facing error. */
-  private async resolveOrThrow(channel: string, name: string) {
-    const list = await this.db.list.findUnique({
-      where: { channel_name: { channel, name: normalizeListName(name) } },
-    });
+  private async resolveOrThrow(name: string) {
+    const list = await this.db.list.findUnique({ where: { name: normalizeListName(name) } });
     if (!list) throw new ListError(`No list called "${normalizeListName(name)}" exists.`);
     return list;
   }
 
-  async exists(channel: string, name: string): Promise<boolean> {
-    return (await this.db.list.findUnique({ where: { channel_name: { channel, name: normalizeListName(name) } } })) !== null;
+  async exists(name: string): Promise<boolean> {
+    return (await this.db.list.findUnique({ where: { name: normalizeListName(name) } })) !== null;
   }
 
   /** The permission level required to add to a list (throws if the list is unknown). */
-  async addPermission(channel: string, name: string): Promise<number> {
-    const list = await this.resolveOrThrow(channel, name);
+  async addPermission(name: string): Promise<number> {
+    const list = await this.resolveOrThrow(name);
     return list.addPermission;
   }
 
-  async create(channel: string, rawName: string, displayName?: string, creator?: Actor) {
+  async create(rawName: string, displayName?: string, creator?: Actor) {
     const name = normalizeListName(rawName);
     if (!name) throw new ListError('A list name is required.');
     if (/\s/.test(name)) throw new ListError('A list name must be a single word.');
     if (name.length > 40) throw new ListError('List name is too long (max 40).');
-    if (await this.exists(channel, name)) throw new ListError(`A list called "${name}" already exists.`);
+    if (await this.exists(name)) throw new ListError(`A list called "${name}" already exists.`);
     const display = (displayName ?? '').trim();
     if (display.length > 80) throw new ListError('Display name is too long (max 80).');
     return this.db.list.create({
       data: {
-        channel,
         name,
         displayName: display || null,
         addPermission: PermissionLevel.Moderator,
@@ -105,52 +102,52 @@ export class ListsService {
     });
   }
 
-  async setDisplayName(channel: string, name: string, displayName: string): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async setDisplayName(name: string, displayName: string): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     const display = displayName.trim();
     if (display.length > 80) throw new ListError('Display name is too long (max 80).');
     await this.db.list.update({ where: { id: list.id }, data: { displayName: display || null } });
   }
 
-  async setDescription(channel: string, name: string, description: string): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async setDescription(name: string, description: string): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     const value = description.trim();
     if (value.length > 500) throw new ListError('Description is too long (max 500).');
     await this.db.list.update({ where: { id: list.id }, data: { description: value || null } });
   }
 
-  async setPermission(channel: string, name: string, level: number): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async setPermission(name: string, level: number): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     await this.db.list.update({ where: { id: list.id }, data: { addPermission: clampLevel(level) } });
   }
 
   /** Rename a list's reference word (keeps entries + metadata). */
-  async rename(channel: string, name: string, rawNewName: string): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async rename(name: string, rawNewName: string): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     const newName = normalizeListName(rawNewName);
     if (!newName) throw new ListError('A new list name is required.');
     if (/\s/.test(newName)) throw new ListError('A list name must be a single word.');
     if (newName.length > 40) throw new ListError('List name is too long (max 40).');
     if (newName === list.name) return;
-    if (await this.exists(channel, newName)) throw new ListError(`A list called "${newName}" already exists.`);
+    if (await this.exists(newName)) throw new ListError(`A list called "${newName}" already exists.`);
     await this.db.list.update({ where: { id: list.id }, data: { name: newName } });
   }
 
   /** Delete a list and all of its entries. */
-  async remove(channel: string, name: string): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async remove(name: string): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     await this.db.list.delete({ where: { id: list.id } }); // cascades entries
   }
 
   /** Remove all entries but keep the list. Returns how many were cleared. */
-  async clear(channel: string, name: string): Promise<number> {
-    const list = await this.resolveOrThrow(channel, name);
+  async clear(name: string): Promise<number> {
+    const list = await this.resolveOrThrow(name);
     const { count } = await this.db.listEntry.deleteMany({ where: { listId: list.id } });
     return count;
   }
 
-  async addEntry(channel: string, name: string, rawText: string, actor?: Actor) {
-    const list = await this.resolveOrThrow(channel, name);
+  async addEntry(name: string, rawText: string, actor?: Actor) {
+    const list = await this.resolveOrThrow(name);
     const text = rawText.trim();
     if (!text) throw new ListError('Entry text cannot be empty.');
     if (text.length > 500) throw new ListError('Entry is too long (max 500).');
@@ -164,8 +161,8 @@ export class ListsService {
     });
   }
 
-  async updateEntry(channel: string, name: string, entryId: number, rawText: string): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async updateEntry(name: string, entryId: number, rawText: string): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     const text = rawText.trim();
     if (!text) throw new ListError('Entry text cannot be empty.');
     if (text.length > 500) throw new ListError('Entry is too long (max 500).');
@@ -173,15 +170,15 @@ export class ListsService {
     if (count === 0) throw new ListError('That entry no longer exists.');
   }
 
-  async removeEntry(channel: string, name: string, entryId: number): Promise<void> {
-    const list = await this.resolveOrThrow(channel, name);
+  async removeEntry(name: string, entryId: number): Promise<void> {
+    const list = await this.resolveOrThrow(name);
     const { count } = await this.db.listEntry.deleteMany({ where: { id: entryId, listId: list.id } });
     if (count === 0) throw new ListError('That entry no longer exists.');
   }
 
   /** A random entry's text, or null if the list is empty. */
-  async random(channel: string, name: string): Promise<string | null> {
-    const list = await this.resolveOrThrow(channel, name);
+  async random(name: string): Promise<string | null> {
+    const list = await this.resolveOrThrow(name);
     const count = await this.db.listEntry.count({ where: { listId: list.id } });
     if (count === 0) return null;
     const skip = Math.floor(Math.random() * count);
@@ -189,16 +186,15 @@ export class ListsService {
     return entry?.text ?? null;
   }
 
-  /** All list reference names in a channel (for the sidebar / help). */
-  async listNames(channel: string): Promise<string[]> {
-    const rows = await this.db.list.findMany({ where: { channel }, orderBy: { name: 'asc' }, select: { name: true } });
+  /** All list reference names (for the sidebar / help). */
+  async listNames(): Promise<string[]> {
+    const rows = await this.db.list.findMany({ orderBy: { name: 'asc' }, select: { name: true } });
     return rows.map((r) => r.name);
   }
 
   /** Every list with its entries, for the dashboard. */
-  async listAllForDashboard(channel: string): Promise<ListView[]> {
+  async listAllForDashboard(): Promise<ListView[]> {
     const rows = await this.db.list.findMany({
-      where: { channel },
       orderBy: { name: 'asc' },
       include: { entries: { orderBy: { id: 'asc' } } },
     });

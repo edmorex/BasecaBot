@@ -8,11 +8,19 @@ import { scopedLogger } from '../../services/logger.js';
 
 const log = scopedLogger('chatAdapter');
 
+/** Matches a `!wheel` command (the only thing processed in guest channels). */
+const WHEEL_COMMAND = /^\s*!wheel(\s|$)/i;
+
 /**
  * Bridges Twurple's ChatClient to the EventBus: every incoming message becomes
  * a normalized `chat` BotEvent (the CommandRouter turns command-shaped ones
  * into `command` events downstream). Also constructs the ChatClient the
  * ChatService wraps for outbound messages.
+ *
+ * The bot operates in ONE primary channel (the broadcaster's). It may join
+ * additional "guest" channels temporarily (e.g. BasecaWheel), but in those it
+ * ONLY processes `!wheel` commands — all other messages are ignored and no user
+ * data is persisted from them.
  */
 export class TwitchChatAdapter {
   readonly client: ChatClient;
@@ -23,7 +31,7 @@ export class TwitchChatAdapter {
     private readonly users: UsersService,
     private readonly config: AppConfig,
   ) {
-    this.client = new ChatClient({ authProvider, channels: config.twitch.channels });
+    this.client = new ChatClient({ authProvider, channels: [config.twitch.channel] });
   }
 
   async connect(): Promise<void> {
@@ -43,9 +51,16 @@ export class TwitchChatAdapter {
 
   private async onMessage(channel: string, text: string, msg: ChatMessage): Promise<void> {
     const channelName = channel.replace(/^#/, '').toLowerCase();
+    const isPrimary = channelName === this.config.twitch.channel;
+    // In guest channels, only `!wheel` commands are processed; ignore everything
+    // else (and don't persist those users — guest chat is not tracked).
+    if (!isPrimary && !WHEEL_COMMAND.test(text)) return;
+
     const user = this.resolveUser(msg);
-    // Remember the user (fire-and-forget; don't block message handling).
-    void this.users.touch(user).catch((err) => log.error({ err }, 'users.touch failed'));
+    if (isPrimary) {
+      // Remember the user (fire-and-forget; don't block message handling).
+      void this.users.touch(user).catch((err) => log.error({ err }, 'users.touch failed'));
+    }
 
     await this.bus.publish({
       type: 'chat',

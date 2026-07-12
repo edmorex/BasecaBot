@@ -72,7 +72,7 @@ export function sampleGamePlugin(): Plugin {
             const label = payload.winner ?? 'nobody';
             await ctx.chat.say(e.channel, `The winner is ${label}!`);
             if (payload.winnerUserId) {
-              await ctx.points.award(payload.winnerUserId, e.channel, WINNER_REWARD);
+              await ctx.points.award(payload.winnerUserId, WINNER_REWARD);
               await ctx.chat.say(e.channel, `${label} earned ${WINNER_REWARD} points!`);
             }
             break;

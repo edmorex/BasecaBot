@@ -16,44 +16,44 @@ export function eventsPlugin(): Plugin {
     version: '0.1.0',
 
     init(ctx: ServiceContext) {
-      const log = (channel: string, type: string, userId: string | null, amount: number | null, meta?: unknown) =>
+      const log = (type: string, userId: string | null, amount: number | null, meta?: unknown) =>
         ctx.storage.prisma.eventLog
-          .create({ data: { channel, type, userId, amount, meta: meta ? JSON.stringify(meta) : null } })
+          .create({ data: { type, userId, amount, meta: meta ? JSON.stringify(meta) : null } })
           .catch((err) => ctx.logger.error({ err }, 'eventLog write failed'));
 
       ctx.bus.on('sub', async (e) => {
         await ctx.chat.say(e.channel, `🎉 Thanks for subscribing, @${e.user.displayName}!`);
-        await log(e.channel, 'sub', e.user.id, null, { tier: e.tier });
+        await log('sub', e.user.id, null, { tier: e.tier });
       });
 
       ctx.bus.on('resub', async (e) => {
         await ctx.chat.say(e.channel, `🎉 @${e.user.displayName} resubbed for ${e.months} months!`);
-        await log(e.channel, 'resub', e.user.id, e.months, { tier: e.tier });
+        await log('resub', e.user.id, e.months, { tier: e.tier });
       });
 
       ctx.bus.on('subgift', async (e) => {
         await ctx.chat.say(e.channel, `🎁 ${e.gifter.displayName} gifted ${e.count} sub(s)!`);
-        await log(e.channel, 'subgift', e.gifter.id || null, e.count);
+        await log('subgift', e.gifter.id || null, e.count);
       });
 
       ctx.bus.on('bits', async (e) => {
         await ctx.chat.say(e.channel, `✨ ${e.user.displayName} cheered ${e.amount} bits!`);
-        await log(e.channel, 'bits', e.user.id || null, e.amount);
+        await log('bits', e.user.id || null, e.amount);
       });
 
       ctx.bus.on('raid', async (e) => {
         await ctx.chat.say(e.channel, `🚀 ${e.fromLogin} raided with ${e.viewers} viewers! Welcome!`);
-        await log(e.channel, 'raid', null, e.viewers, { from: e.fromLogin });
+        await log('raid', null, e.viewers, { from: e.fromLogin });
       });
 
       ctx.bus.on('follow', async (e) => {
         await ctx.chat.say(e.channel, `👋 Thanks for the follow, @${e.user.displayName}!`);
-        await log(e.channel, 'follow', e.user.id, null);
+        await log('follow', e.user.id, null);
       });
 
       ctx.bus.on('donation', async (e) => {
         await ctx.chat.say(e.channel, `💜 ${e.fromName} donated ${e.amount} ${e.currency}! Thank you!`);
-        await log(e.channel, 'donation', null, Math.round(e.amount), { currency: e.currency });
+        await log('donation', null, Math.round(e.amount), { currency: e.currency });
       });
     },
   };

@@ -72,17 +72,13 @@ model UserPreference {
   @@unique([userId, key])
 }
 
-/// Points balance per user, per channel (multi-channel ready).
+/// Points balance per user (the bot serves a single channel).
 model PointsBalance {
   id      Int    @id @default(autoincrement())
-  userId  String
-  channel String
+  userId  String @unique
   balance Int    @default(0)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, channel])
-  @@index([channel])
 }
 
 /// Admin-defined custom command. Two kinds:
@@ -92,7 +88,6 @@ model PointsBalance {
 ///    (case-insensitive substring). Phrases have no aliases.
 model CustomCommand {
   id             Int      @id @default(autoincrement())
-  channel        String
   kind           String   @default("trigger") // 'trigger' | 'phrase'
   /// Primary trigger word (no '!'), or the phrase text.
   name           String
@@ -113,23 +108,21 @@ model CustomCommand {
 
   triggers CommandTrigger[]
 
-  @@unique([channel, kind, name])
-  @@index([channel, kind, enabled])
+  @@unique([kind, name])
+  @@index([kind, enabled])
 }
 
 /// A trigger word (primary or alias) that maps to a trigger-kind CustomCommand.
-/// `word` is normalized (lowercase, no '!') and unique per channel, so trigger
+/// `word` is normalized (lowercase, no '!') and globally unique, so trigger
 /// words never collide across commands.
 model CommandTrigger {
   id        Int     @id @default(autoincrement())
-  channel   String
-  word      String
+  word      String  @unique
   isPrimary Boolean @default(false)
   commandId Int
 
   command CustomCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
 
-  @@unique([channel, word])
   @@index([commandId])
 }
 
@@ -140,8 +133,7 @@ model CommandTrigger {
 /// (Broadcaster/Admin), mods are also blocked from managing the list.
 model List {
   id            Int      @id @default(autoincrement())
-  channel       String
-  name          String // reference word (lowercase, no spaces)
+  name          String   @unique // reference word (lowercase, no spaces)
   displayName   String? // optional human-friendly name
   description   String?
   addPermission Int      @default(3) // PermissionLevel (see core/events.ts); default Moderator
@@ -152,9 +144,6 @@ model List {
 
   creator User?       @relation("ListCreator", fields: [createdById], references: [id], onDelete: SetNull)
   entries ListEntry[]
-
-  @@unique([channel, name])
-  @@index([channel])
 }
 
 /// One entry in a List. Records who added it and when.
@@ -177,7 +166,6 @@ model ListEntry {
 /// captured, the quote date (`quoteDate`, "YYYY-MM-DD"), and who added it.
 model Quote {
   id            Int      @id @default(autoincrement())
-  channel       String
   text          String
   quotedUser    String // the person quoted (login/name, no '@')
   game          String? // game/category at capture time
@@ -187,24 +175,18 @@ model Quote {
   createdAt     DateTime @default(now())
 
   creator User? @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
-
-  @@index([channel])
 }
 
-/// Per-channel runtime settings, editable without redeploying.
+/// Runtime settings, editable without redeploying.
 model Setting {
-  id      Int    @id @default(autoincrement())
-  channel String
-  key     String
-  value   String
-
-  @@unique([channel, key])
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
 }
 
 /// Audit log of notable events (subs, bits, donations, raids...).
 model EventLog {
   id        Int      @id @default(autoincrement())
-  channel   String
   type      String
   userId    String?
   amount    Int?
@@ -213,6 +195,6 @@ model EventLog {
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  @@index([channel, type])
+  @@index([type])
   @@index([createdAt])
 }

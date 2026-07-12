@@ -66,7 +66,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or "phrase"> [message]',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.create(e.channel, t.target, { response: t.rest });
+              await svc.create(t.target, { response: t.rest });
               await say(e.channel, `Added ${describeTarget(t.target)}.`);
             }),
           },
@@ -75,7 +75,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or "phrase"> [message]',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.setResponse(e.channel, t.target, t.rest);
+              await svc.setResponse(t.target, t.rest);
               await say(e.channel, `Updated response for ${describeTarget(t.target)}.`);
             }),
           },
@@ -84,7 +84,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or "phrase"> <group>',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.setGroup(e.channel, t.target, t.rest);
+              await svc.setGroup(t.target, t.rest);
               await say(
                 e.channel,
                 t.rest.trim()
@@ -100,7 +100,7 @@ export function commandsPlugin(): Plugin {
               const t = target(e);
               const count = Number.parseInt(t.rest, 10);
               if (!Number.isFinite(count)) throw new CommandError('Provide a numeric count.');
-              await svc.setUsageCount(e.channel, t.target, count);
+              await svc.setUsageCount(t.target, count);
               await say(e.channel, `Set usage count for ${describeTarget(t.target)} to ${Math.max(0, count)}.`);
             }),
           },
@@ -113,7 +113,7 @@ export function commandsPlugin(): Plugin {
               const g = Number.parseInt(parts[0] ?? '', 10);
               if (!Number.isFinite(g)) throw new CommandError('Usage: !command cooldown [target] [globalSecs] [userSecs?]');
               const u = parts[1] !== undefined ? Number.parseInt(parts[1], 10) : undefined;
-              await svc.setCooldown(e.channel, t.target, g, u);
+              await svc.setCooldown(t.target, g, u);
               await say(e.channel, `Updated cooldowns for ${describeTarget(t.target)}.`);
             }),
           },
@@ -124,7 +124,7 @@ export function commandsPlugin(): Plugin {
               const t = target(e);
               const level = restrictKeywordToLevel(t.rest);
               if (level === null) throw new CommandError('Restrict to one of: All, Sub, VIP, Mod, Broadcaster, Admin.');
-              await svc.setPermission(e.channel, t.target, level);
+              await svc.setPermission(t.target, level);
               await say(e.channel, `Restricted ${describeTarget(t.target)} to ${t.rest.trim()}.`);
             }),
           },
@@ -133,7 +133,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or "phrase">',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.setEnabled(e.channel, t.target, true);
+              await svc.setEnabled(t.target, true);
               await say(e.channel, `Enabled ${describeTarget(t.target)}.`);
             }),
           },
@@ -142,7 +142,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or "phrase">',
             handler: guard(async (e) => {
               const t = target(e);
-              await svc.setEnabled(e.channel, t.target, false);
+              await svc.setEnabled(t.target, false);
               await say(e.channel, `Disabled ${describeTarget(t.target)}.`);
             }),
           },
@@ -152,7 +152,7 @@ export function commandsPlugin(): Plugin {
             handler: guard(async (e) => {
               const t = target(e);
               if (!t.rest) throw new CommandError('Provide an alias like !alias.');
-              await svc.addAlias(e.channel, t.target, t.rest);
+              await svc.addAlias(t.target, t.rest);
               await say(e.channel, `Added alias to ${describeTarget(t.target)}.`);
             }),
           },
@@ -161,7 +161,7 @@ export function commandsPlugin(): Plugin {
             usage: '<!trigger or !alias or "phrase">',
             handler: guard(async (e) => {
               const t = target(e);
-              const res = await svc.remove(e.channel, t.target);
+              const res = await svc.remove(t.target);
               if (res.type === 'alias') {
                 await say(e.channel, `Removed alias ${res.alias} from ${res.command}.`);
               } else if (res.aliases.length) {
@@ -176,7 +176,7 @@ export function commandsPlugin(): Plugin {
 
       // ── Trigger runtime: unknown `!word` -> custom trigger command ──────────
       ctx.commands.setFallback(async (e) => {
-        const cmd = await svc.findByTrigger(e.channel, e.name);
+        const cmd = await svc.findByTrigger(e.name);
         if (!cmd) return;
         if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) return;
         svc.recordUse(cmd, e.user.id);
@@ -188,7 +188,7 @@ export function commandsPlugin(): Plugin {
       // ── Phrase runtime: fire on phrases appearing in normal chat ────────────
       ctx.bus.on('chat', async (e) => {
         if (e.user.login === ctx.config.twitch.botUsername) return; // ignore the bot itself
-        const matches = svc.matchPhrases(e.channel, e.message);
+        const matches = svc.matchPhrases(e.message);
         for (const cmd of matches) {
           if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) continue;
           svc.recordUse(cmd, e.user.id);

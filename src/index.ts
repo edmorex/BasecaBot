@@ -29,7 +29,7 @@ const log = scopedLogger('bootstrap');
  */
 async function main(): Promise<void> {
   const config = loadConfig();
-  log.info({ channels: config.twitch.channels }, 'starting BasecaBot');
+  log.info({ channel: config.twitch.channel }, 'starting BasecaBot');
 
   // ── Core services ────────────────────────────────────────────────────────
   const bus = new EventBus();
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const ws = new WsHub(bus, {
     port: config.ws.port,
     secret: config.ws.secret,
-    channel: config.twitch.channels[0] ?? 'unknown',
+    channel: config.twitch.channel,
   });
   ws.start();
 

@@ -19,7 +19,6 @@ const EnvSchema = z.object({
   TWITCH_BOT_USERNAME: z.string().min(1),
   TWITCH_BOT_ACCESS_TOKEN: z.string().min(1, 'TWITCH_BOT_ACCESS_TOKEN is required'),
   TWITCH_BOT_REFRESH_TOKEN: z.string().min(1, 'TWITCH_BOT_REFRESH_TOKEN is required'),
-  TWITCH_CHANNELS: z.string().min(1),
   TWITCH_BROADCASTER_USERNAME: z.string().min(1),
   TWITCH_BROADCASTER_ACCESS_TOKEN: z.string().min(1, 'TWITCH_BROADCASTER_ACCESS_TOKEN is required'),
   TWITCH_BROADCASTER_REFRESH_TOKEN: z.string().min(1, 'TWITCH_BROADCASTER_REFRESH_TOKEN is required'),
@@ -51,7 +50,12 @@ export interface AppConfig {
     botUsername: string;
     botAccessToken: string;
     botRefreshToken: string;
-    channels: string[];
+    /**
+     * The single channel the bot operates in — always the broadcaster's own
+     * channel. (The bot may temporarily join other "guest" channels at runtime,
+     * e.g. for BasecaWheel, but only this channel is tracked/persisted.)
+     */
+    channel: string;
     broadcasterUsername: string;
     broadcasterAccessToken: string;
     broadcasterRefreshToken: string;
@@ -102,7 +106,7 @@ export function loadConfig(): AppConfig {
       botUsername: env.TWITCH_BOT_USERNAME.toLowerCase(),
       botAccessToken: env.TWITCH_BOT_ACCESS_TOKEN,
       botRefreshToken: env.TWITCH_BOT_REFRESH_TOKEN,
-      channels: csv(env.TWITCH_CHANNELS),
+      channel: broadcaster, // the bot's single primary channel = the broadcaster's channel
       broadcasterUsername: broadcaster,
       broadcasterAccessToken: env.TWITCH_BROADCASTER_ACCESS_TOKEN,
       broadcasterRefreshToken: env.TWITCH_BROADCASTER_REFRESH_TOKEN,

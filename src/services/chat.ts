@@ -12,6 +12,10 @@ export interface ChatService {
   reply(channel: string, text: string, replyToMessageId: string): Promise<void>;
   /** Whisper a user (subject to Twitch whisper restrictions). */
   whisper(user: string, text: string): Promise<void>;
+  /** Join a channel's chat at runtime (e.g. a temporary guest channel). */
+  join(channel: string): Promise<void>;
+  /** Leave a channel's chat. */
+  part(channel: string): void;
 }
 
 /** ChatService backed by a Twurple ChatClient. */
@@ -24,6 +28,14 @@ export class TwurpleChatService implements ChatService {
 
   async reply(channel: string, text: string, replyToMessageId: string): Promise<void> {
     await this.client.say(channel, text, { replyTo: replyToMessageId });
+  }
+
+  async join(channel: string): Promise<void> {
+    await this.client.join(channel);
+  }
+
+  part(channel: string): void {
+    this.client.part(channel);
   }
 
   async whisper(_user: string, _text: string): Promise<void> {

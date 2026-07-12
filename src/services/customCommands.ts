@@ -78,7 +78,7 @@ export function parseTarget(input: string): { target: TargetRef; rest: string } 
  * in memory; usage counts are persisted.
  */
 export class CustomCommandService {
-  private phraseCache = new Map<string, RuntimeCommand[]>();
+  private phraseCache: RuntimeCommand[] = [];
   private readonly lastGlobal = new Map<number, number>();
   private readonly lastUser = new Map<number, Map<string, number>>();
 
@@ -103,13 +103,7 @@ export class CustomCommandService {
 
   private async reloadPhrases(): Promise<void> {
     const rows = await this.db.customCommand.findMany({ where: { kind: 'phrase', enabled: true } });
-    const byChannel = new Map<string, RuntimeCommand[]>();
-    for (const r of rows) {
-      const list = byChannel.get(r.channel) ?? [];
-      list.push(this.toRuntime(r));
-      byChannel.set(r.channel, list);
-    }
-    this.phraseCache = byChannel;
+    this.phraseCache = rows.map((r) => this.toRuntime(r));
   }
 
   private toRuntime(r: {
@@ -125,20 +119,19 @@ export class CustomCommandService {
   // ── Runtime matching ────────────────────────────────────────────────────────
 
   /** Resolve a `!word` (primary or alias) to its command, or null. */
-  async findByTrigger(channel: string, word: string): Promise<RuntimeCommand | null> {
+  async findByTrigger(word: string): Promise<RuntimeCommand | null> {
     const trigger = await this.db.commandTrigger.findUnique({
-      where: { channel_word: { channel, word: normalizeWord(word) } },
+      where: { word: normalizeWord(word) },
       include: { command: true },
     });
     return trigger ? this.toRuntime(trigger.command) : null;
   }
 
   /** Enabled phrase commands whose text appears in `message` (case-insensitive). */
-  matchPhrases(channel: string, message: string): RuntimeCommand[] {
-    const list = this.phraseCache.get(channel);
-    if (!list?.length) return [];
+  matchPhrases(message: string): RuntimeCommand[] {
+    if (!this.phraseCache.length) return [];
     const lower = message.toLowerCase();
-    return list.filter((c) => lower.includes(c.name.toLowerCase()));
+    return this.phraseCache.filter((c) => lower.includes(c.name.toLowerCase()));
   }
 
   /** Whether a command may fire now for this user (enabled + permission + cooldowns). */
@@ -165,28 +158,27 @@ export class CustomCommandService {
   // ── CRUD (used by `!command` and the dashboard) ──────────────────────────────
 
   /** Fetch the full command row for a target, or null. */
-  async resolve(channel: string, target: TargetRef) {
+  async resolve(target: TargetRef) {
     if (target.kind === 'trigger') {
       const t = await this.db.commandTrigger.findUnique({
-        where: { channel_word: { channel, word: normalizeWord(target.name) } },
+        where: { word: normalizeWord(target.name) },
         include: { command: { include: { triggers: true } } },
       });
       return t?.command ?? null;
     }
     return this.db.customCommand.findUnique({
-      where: { channel_kind_name: { channel, kind: 'phrase', name: target.name } },
+      where: { kind_name: { kind: 'phrase', name: target.name } },
       include: { triggers: true },
     });
   }
 
-  private async resolveOrThrow(channel: string, target: TargetRef) {
-    const cmd = await this.resolve(channel, target);
+  private async resolveOrThrow(target: TargetRef) {
+    const cmd = await this.resolve(target);
     if (!cmd) throw new CommandError(`No command ${describeTarget(target)} found.`);
     return cmd;
   }
 
   async create(
-    channel: string,
     target: TargetRef,
     opts: { response?: string | null; permission?: number; globalCooldown?: number; userCooldown?: number } = {},
   ) {
@@ -197,64 +189,64 @@ export class CustomCommandService {
       throw new CommandError(`!${name} is a built-in command and can't be a custom command.`);
     }
 
-    if (await this.resolve(channel, { kind: target.kind, name })) {
+    if (await this.resolve({ kind: target.kind, name })) {
       throw new CommandError(`A command ${describeTarget({ kind: target.kind, name })} already exists.`);
     }
-    if (target.kind === 'trigger' && (await this.wordTaken(channel, name))) {
+    if (target.kind === 'trigger' && (await this.wordTaken(name))) {
       throw new CommandError(`The trigger !${name} is already in use.`);
     }
 
     const { globalCooldown, userCooldown } = clampCooldowns(opts.globalCooldown ?? 0, opts.userCooldown ?? 0);
     const cmd = await this.db.customCommand.create({
       data: {
-        channel, kind: target.kind, name,
+        kind: target.kind, name,
         response: emptyToNull(opts.response),
         permission: clampLevel(opts.permission ?? 0),
         globalCooldown, userCooldown,
       },
     });
     if (target.kind === 'trigger') {
-      await this.db.commandTrigger.create({ data: { channel, word: name, isPrimary: true, commandId: cmd.id } });
+      await this.db.commandTrigger.create({ data: { word: name, isPrimary: true, commandId: cmd.id } });
     }
     await this.reloadPhrases();
     return cmd;
   }
 
-  async setResponse(channel: string, target: TargetRef, response: string | null) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setResponse(target: TargetRef, response: string | null) {
+    const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { response: emptyToNull(response) } });
     await this.reloadPhrases();
   }
 
   /** Set (or clear, when empty) the command's grouping label. */
-  async setGroup(channel: string, target: TargetRef, group: string) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setGroup(target: TargetRef, group: string) {
+    const cmd = await this.resolveOrThrow(target);
     const value = group.trim();
     if (value.length > 30) throw new CommandError('Group name is too long (max 30).');
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { group: value || null } });
   }
 
-  async setPermission(channel: string, target: TargetRef, level: number) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setPermission(target: TargetRef, level: number) {
+    const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { permission: clampLevel(level) } });
     await this.reloadPhrases();
   }
 
-  async setCooldown(channel: string, target: TargetRef, globalSecs: number, userSecs?: number) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setCooldown(target: TargetRef, globalSecs: number, userSecs?: number) {
+    const cmd = await this.resolveOrThrow(target);
     const { globalCooldown, userCooldown } = clampCooldowns(globalSecs, userSecs ?? cmd.userCooldown);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { globalCooldown, userCooldown } });
     await this.reloadPhrases();
   }
 
-  async setEnabled(channel: string, target: TargetRef, enabled: boolean) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setEnabled(target: TargetRef, enabled: boolean) {
+    const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { enabled } });
     await this.reloadPhrases();
   }
 
-  async setUsageCount(channel: string, target: TargetRef, count: number) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async setUsageCount(target: TargetRef, count: number) {
+    const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { usageCount: Math.max(0, Math.floor(count)) } });
   }
 
@@ -264,11 +256,11 @@ export class CustomCommandService {
    *  - Trigger word that is the **primary** (or a phrase) -> removes the whole
    *    command and all its aliases (returned so the caller can report them).
    */
-  async remove(channel: string, target: TargetRef): Promise<RemoveResult> {
+  async remove(target: TargetRef): Promise<RemoveResult> {
     if (target.kind === 'trigger') {
       const word = normalizeWord(target.name);
       const trigger = await this.db.commandTrigger.findUnique({
-        where: { channel_word: { channel, word } },
+        where: { word },
         include: { command: { include: { triggers: true } } },
       });
       if (!trigger) throw new CommandError(`No command !${word} found.`);
@@ -281,39 +273,38 @@ export class CustomCommandService {
       await this.reloadPhrases();
       return { type: 'command', label: `!${trigger.command.name}`, aliases };
     }
-    const cmd = await this.resolveOrThrow(channel, target);
+    const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.delete({ where: { id: cmd.id } });
     await this.reloadPhrases();
     return { type: 'command', label: describeTarget(target), aliases: [] };
   }
 
-  async addAlias(channel: string, target: TargetRef, aliasWord: string) {
-    const cmd = await this.resolveOrThrow(channel, target);
+  async addAlias(target: TargetRef, aliasWord: string) {
+    const cmd = await this.resolveOrThrow(target);
     if (cmd.kind !== 'trigger') throw new CommandError('Only trigger commands can have aliases.');
     const word = normalizeWord(aliasWord);
     if (!word || /\s/.test(word)) throw new CommandError('An alias must be a single word.');
     if (this.isReserved(word)) throw new CommandError(`!${word} is a built-in command and can't be used as an alias.`);
-    if (await this.wordTaken(channel, word)) throw new CommandError(`The trigger !${word} is already in use.`);
-    await this.db.commandTrigger.create({ data: { channel, word, isPrimary: false, commandId: cmd.id } });
+    if (await this.wordTaken(word)) throw new CommandError(`The trigger !${word} is already in use.`);
+    await this.db.commandTrigger.create({ data: { word, isPrimary: false, commandId: cmd.id } });
   }
 
   /** Remove a single alias by its word (must be a non-primary alias, not a command). */
-  async removeAlias(channel: string, aliasWord: string) {
+  async removeAlias(aliasWord: string) {
     const word = normalizeWord(aliasWord);
-    const trigger = await this.db.commandTrigger.findUnique({ where: { channel_word: { channel, word } } });
+    const trigger = await this.db.commandTrigger.findUnique({ where: { word } });
     if (!trigger) throw new CommandError(`No alias !${word} found.`);
     if (trigger.isPrimary) throw new CommandError(`!${word} is a primary command, not an alias.`);
     await this.db.commandTrigger.delete({ where: { id: trigger.id } });
   }
 
-  private async wordTaken(channel: string, word: string): Promise<boolean> {
-    return (await this.db.commandTrigger.findUnique({ where: { channel_word: { channel, word } } })) !== null;
+  private async wordTaken(word: string): Promise<boolean> {
+    return (await this.db.commandTrigger.findUnique({ where: { word } })) !== null;
   }
 
   /** All custom commands (with alias words) for the dashboard. */
-  async listForDashboard(channel: string) {
+  async listForDashboard() {
     const rows = await this.db.customCommand.findMany({
-      where: { channel },
       include: { triggers: { orderBy: { isPrimary: 'desc' } } },
       orderBy: { name: 'asc' },
     });

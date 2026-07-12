@@ -66,13 +66,13 @@ export function quotesPlugin(): Plugin {
       // An edit subcommand: first arg is the ID, the rest is the new value.
       const editHandler = (
         label: string,
-        apply: (channel: string, id: number, value: string) => Promise<QuoteView>,
+        apply: (id: number, value: string) => Promise<QuoteView>,
       ) =>
         guard(async (e) => {
           const { first, rest } = firstAndRest(e.argString);
           const id = parseId(first);
           if (id === null) throw new QuoteError(`Usage: !quote ${label} <quoteId> <new value>`);
-          await say(e.channel, formatQuote(await apply(e.channel, id, rest)));
+          await say(e.channel, formatQuote(await apply(id, rest)));
         });
 
       ctx.commands.registerGroup('quote', {
@@ -83,10 +83,10 @@ export function quotesPlugin(): Plugin {
         onUnknown: guard(async (e) => {
           const id = e.args[0] ? parseId(e.args[0]) : null;
           if (id !== null) {
-            await say(e.channel, formatQuote(await svc.getById(e.channel, id)));
+            await say(e.channel, formatQuote(await svc.getById(id)));
             return;
           }
-          const q = await svc.random(e.channel);
+          const q = await svc.random();
           await say(e.channel, q ? formatQuote(q) : 'No quotes yet.');
         }),
         subcommands: {
@@ -99,7 +99,7 @@ export function quotesPlugin(): Plugin {
               if (!first || !rest.trim()) throw new QuoteError('Usage: !quote add <@username> <quote text>');
               await ctx.users.touch(e.user);
               const game = await currentGame();
-              const quote = await svc.add(e.channel, { user: first, text: rest, game }, { id: e.user.id, displayName: e.user.displayName });
+              const quote = await svc.add({ user: first, text: rest, game }, { id: e.user.id, displayName: e.user.displayName });
               await say(e.channel, `Added ${formatQuote(quote)}`);
             }),
           },
@@ -110,7 +110,7 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const id = parseId(firstAndRest(e.argString).first);
               if (id === null) throw new QuoteError('Usage: !quote remove <quoteId>');
-              await svc.remove(e.channel, id);
+              await svc.remove(id);
               await say(e.channel, `Removed quote ${id}.`);
             }),
           },
@@ -118,31 +118,31 @@ export function quotesPlugin(): Plugin {
             description: 'Edit the text of a quote.',
             usage: '<quoteId> <newText>',
             permission: PermissionLevel.Moderator,
-            handler: editHandler('edittext', (ch, id, v) => svc.setText(ch, id, v)),
+            handler: editHandler('edittext', (id, v) => svc.setText(id, v)),
           },
           edituser: {
             description: 'Edit the user a quote is attributed to.',
             usage: '<quoteId> <newUsername>',
             permission: PermissionLevel.Moderator,
-            handler: editHandler('edituser', (ch, id, v) => svc.setUser(ch, id, v)),
+            handler: editHandler('edituser', (id, v) => svc.setUser(id, v)),
           },
           editgame: {
             description: 'Edit the game recorded on a quote.',
             usage: '<quoteId> <newGame>',
             permission: PermissionLevel.Moderator,
-            handler: editHandler('editgame', (ch, id, v) => svc.setGame(ch, id, v)),
+            handler: editHandler('editgame', (id, v) => svc.setGame(id, v)),
           },
           editdate: {
             description: 'Edit the date of a quote (YYYY MM DD).',
             usage: '<quoteId> <newDate>',
             permission: PermissionLevel.Moderator,
-            handler: editHandler('editdate', (ch, id, v) => svc.setDate(ch, id, v)),
+            handler: editHandler('editdate', (id, v) => svc.setDate(id, v)),
           },
           search: {
             description: 'Print a random quote matching the search term(s).',
             usage: '<searchTerm>',
             handler: guard(async (e) => {
-              const q = await svc.searchText(e.channel, e.argString);
+              const q = await svc.searchText(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes matched that search.');
             }),
           },
@@ -150,7 +150,7 @@ export function quotesPlugin(): Plugin {
             description: 'Print a random quote said by the given user.',
             usage: '<@username>',
             handler: guard(async (e) => {
-              const q = await svc.searchUser(e.channel, e.argString);
+              const q = await svc.searchUser(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that user.');
             }),
           },
@@ -158,7 +158,7 @@ export function quotesPlugin(): Plugin {
             description: 'Print a random quote from the given date (YYYY MM DD).',
             usage: '<YYYY MM DD>',
             handler: guard(async (e) => {
-              const q = await svc.searchDate(e.channel, e.argString);
+              const q = await svc.searchDate(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that date.');
             }),
           },
@@ -166,7 +166,7 @@ export function quotesPlugin(): Plugin {
             description: 'Print a random quote captured during the given game.',
             usage: '<searchTerm>',
             handler: guard(async (e) => {
-              const q = await svc.searchGame(e.channel, e.argString);
+              const q = await svc.searchGame(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that game.');
             }),
           },

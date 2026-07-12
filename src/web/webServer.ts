@@ -63,7 +63,6 @@ class HttpError extends Error {
  */
 export class WebServer {
   private server?: Server;
-  private readonly channel: string;
 
   constructor(
     private readonly config: AppConfig,
@@ -73,9 +72,7 @@ export class WebServer {
     private readonly commands: CommandRouter,
     private readonly lists: ListsService,
     private readonly quotes: QuotesService,
-  ) {
-    this.channel = config.twitch.channels[0] ?? 'unknown';
-  }
+  ) {}
 
   start(): void {
     this.server = createServer((req, res) => {
@@ -279,7 +276,7 @@ export class WebServer {
       response: null as string | null, globalCooldown: c.globalCooldown, userCooldown: c.userCooldown,
       enabled: true, usageCount: 0, aliases: [] as string[],
     }));
-    const customs = (await this.customCommands.listForDashboard(this.channel)).map((c) => ({
+    const customs = (await this.customCommands.listForDashboard()).map((c) => ({
       kind: c.kind, name: c.name, access: c.permission, group: c.group,
       response: c.response, globalCooldown: c.globalCooldown, userCooldown: c.userCooldown,
       enabled: c.enabled, usageCount: c.usageCount, aliases: c.aliases,
@@ -302,14 +299,14 @@ export class WebServer {
     const body = await this.readJson(req);
     const target = this.targetFromBody(body);
     try {
-      if ('response' in body) await this.customCommands.setResponse(this.channel, target, body.response == null ? null : String(body.response));
-      if ('group' in body) await this.customCommands.setGroup(this.channel, target, String(body.group ?? ''));
-      if ('permission' in body) await this.customCommands.setPermission(this.channel, target, Number(body.permission) || 0);
+      if ('response' in body) await this.customCommands.setResponse(target, body.response == null ? null : String(body.response));
+      if ('group' in body) await this.customCommands.setGroup(target, String(body.group ?? ''));
+      if ('permission' in body) await this.customCommands.setPermission(target, Number(body.permission) || 0);
       if ('globalCooldown' in body || 'userCooldown' in body) {
-        await this.customCommands.setCooldown(this.channel, target, Number(body.globalCooldown) || 0, Number(body.userCooldown) || 0);
+        await this.customCommands.setCooldown(target, Number(body.globalCooldown) || 0, Number(body.userCooldown) || 0);
       }
-      if ('enabled' in body) await this.customCommands.setEnabled(this.channel, target, Boolean(body.enabled));
-      if ('usageCount' in body) await this.customCommands.setUsageCount(this.channel, target, Number(body.usageCount) || 0);
+      if ('enabled' in body) await this.customCommands.setEnabled(target, Boolean(body.enabled));
+      if ('usageCount' in body) await this.customCommands.setUsageCount(target, Number(body.usageCount) || 0);
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;
@@ -323,14 +320,14 @@ export class WebServer {
     const body = await this.readJson(req);
     const target = this.targetFromBody(body);
     try {
-      await this.customCommands.create(this.channel, target, {
+      await this.customCommands.create(target, {
         response: body.response == null ? null : String(body.response),
         permission: Number(body.permission) || 0,
         globalCooldown: Number(body.globalCooldown) || 0,
         userCooldown: Number(body.userCooldown) || 0,
       });
-      if (body.group != null && String(body.group).trim()) await this.customCommands.setGroup(this.channel, target, String(body.group));
-      if (body.enabled === false) await this.customCommands.setEnabled(this.channel, target, false);
+      if (body.group != null && String(body.group).trim()) await this.customCommands.setGroup(target, String(body.group));
+      if (body.enabled === false) await this.customCommands.setEnabled(target, false);
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;
@@ -342,7 +339,7 @@ export class WebServer {
     this.requireManager(req);
     const target = this.targetFromBody(await this.readJson(req));
     try {
-      await this.customCommands.remove(this.channel, target);
+      await this.customCommands.remove(target);
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(404, e.message);
       throw e;
@@ -355,7 +352,7 @@ export class WebServer {
     const body = await this.readJson(req);
     const target = this.targetFromBody(body);
     try {
-      await this.customCommands.addAlias(this.channel, target, String(body.alias ?? ''));
+      await this.customCommands.addAlias(target, String(body.alias ?? ''));
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;
@@ -367,7 +364,7 @@ export class WebServer {
     this.requireManager(req);
     const body = await this.readJson(req);
     try {
-      await this.customCommands.removeAlias(this.channel, String(body.alias ?? ''));
+      await this.customCommands.removeAlias(String(body.alias ?? ''));
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;
@@ -379,7 +376,7 @@ export class WebServer {
 
   /** Every list with its entries (public read — logged-out sees viewer access). */
   private async getLists(res: ServerResponse): Promise<void> {
-    const lists = await this.lists.listAllForDashboard(this.channel);
+    const lists = await this.lists.listAllForDashboard();
     this.json(res, 200, { lists });
   }
 
@@ -400,7 +397,7 @@ export class WebServer {
    */
   private async requireListManage(req: IncomingMessage, listName: string): Promise<SessionData> {
     const session = this.requireManager(req);
-    const level = await this.lists.addPermission(this.channel, listName);
+    const level = await this.lists.addPermission(listName);
     if (level > PermissionLevel.Moderator && this.sessionLevel(session) < level) {
       throw new HttpError(403, `This list is restricted to ${LEVEL_LABELS[level]}+.`);
     }
@@ -413,9 +410,9 @@ export class WebServer {
     const name = String(body.name ?? '').trim();
     const actor = { id: session.user.id, displayName: session.user.displayName };
     try {
-      await this.lists.create(this.channel, name, body.displayName == null ? undefined : String(body.displayName), actor);
-      if (body.description != null && String(body.description).trim()) await this.lists.setDescription(this.channel, name, String(body.description));
-      if (body.permission != null) await this.lists.setPermission(this.channel, name, Number(body.permission) || PermissionLevel.Moderator);
+      await this.lists.create(name, body.displayName == null ? undefined : String(body.displayName), actor);
+      if (body.description != null && String(body.description).trim()) await this.lists.setDescription(name, String(body.description));
+      if (body.permission != null) await this.lists.setPermission(name, Number(body.permission) || PermissionLevel.Moderator);
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -428,10 +425,10 @@ export class WebServer {
     const name = String(body.name ?? '').trim();
     try {
       await this.requireListManage(req, name);
-      if ('displayName' in body) await this.lists.setDisplayName(this.channel, name, String(body.displayName ?? ''));
-      if ('description' in body) await this.lists.setDescription(this.channel, name, String(body.description ?? ''));
-      if ('permission' in body) await this.lists.setPermission(this.channel, name, Number(body.permission) || 0);
-      if (body.newName != null && String(body.newName).trim()) await this.lists.rename(this.channel, name, String(body.newName));
+      if ('displayName' in body) await this.lists.setDisplayName(name, String(body.displayName ?? ''));
+      if ('description' in body) await this.lists.setDescription(name, String(body.description ?? ''));
+      if ('permission' in body) await this.lists.setPermission(name, Number(body.permission) || 0);
+      if (body.newName != null && String(body.newName).trim()) await this.lists.rename(name, String(body.newName));
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -444,7 +441,7 @@ export class WebServer {
     const name = String(body.name ?? '').trim();
     try {
       await this.requireListManage(req, name);
-      await this.lists.remove(this.channel, name);
+      await this.lists.remove(name);
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -457,9 +454,9 @@ export class WebServer {
     const body = await this.readJson(req);
     const name = String(body.list ?? '').trim();
     try {
-      const level = await this.lists.addPermission(this.channel, name);
+      const level = await this.lists.addPermission(name);
       if (this.sessionLevel(session) < level) throw new HttpError(403, `Only ${LEVEL_LABELS[level]}+ can add to this list.`);
-      await this.lists.addEntry(this.channel, name, String(body.text ?? ''), { id: session.user.id, displayName: session.user.displayName });
+      await this.lists.addEntry(name, String(body.text ?? ''), { id: session.user.id, displayName: session.user.displayName });
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -472,7 +469,7 @@ export class WebServer {
     const name = String(body.list ?? '').trim();
     try {
       await this.requireListManage(req, name);
-      await this.lists.updateEntry(this.channel, name, Number(body.id), String(body.text ?? ''));
+      await this.lists.updateEntry(name, Number(body.id), String(body.text ?? ''));
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -485,7 +482,7 @@ export class WebServer {
     const name = String(body.list ?? '').trim();
     try {
       await this.requireListManage(req, name);
-      await this.lists.removeEntry(this.channel, name, Number(body.id));
+      await this.lists.removeEntry(name, Number(body.id));
     } catch (e) {
       if (e instanceof ListError) throw new HttpError(400, e.message);
       throw e;
@@ -497,7 +494,7 @@ export class WebServer {
 
   /** Every quote (public read — logged-out sees viewer access). */
   private async getQuotes(res: ServerResponse): Promise<void> {
-    const quotes = await this.quotes.listAllForDashboard(this.channel);
+    const quotes = await this.quotes.listAllForDashboard();
     this.json(res, 200, { quotes });
   }
 
@@ -507,10 +504,10 @@ export class WebServer {
     const body = await this.readJson(req);
     const id = Number(body.id);
     try {
-      if ('text' in body) await this.quotes.setText(this.channel, id, String(body.text ?? ''));
-      if ('user' in body) await this.quotes.setUser(this.channel, id, String(body.user ?? ''));
-      if ('game' in body) await this.quotes.setGame(this.channel, id, String(body.game ?? ''));
-      if ('date' in body) await this.quotes.setDate(this.channel, id, String(body.date ?? ''));
+      if ('text' in body) await this.quotes.setText(id, String(body.text ?? ''));
+      if ('user' in body) await this.quotes.setUser(id, String(body.user ?? ''));
+      if ('game' in body) await this.quotes.setGame(id, String(body.game ?? ''));
+      if ('date' in body) await this.quotes.setDate(id, String(body.date ?? ''));
     } catch (e) {
       if (e instanceof QuoteError) throw new HttpError(400, e.message);
       throw e;
@@ -522,7 +519,7 @@ export class WebServer {
     this.requireManager(req);
     const body = await this.readJson(req);
     try {
-      await this.quotes.remove(this.channel, Number(body.id));
+      await this.quotes.remove(Number(body.id));
     } catch (e) {
       if (e instanceof QuoteError) throw new HttpError(400, e.message);
       throw e;

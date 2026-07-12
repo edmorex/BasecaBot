@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { Storage } from './storage/index.js';
 import { UsersService, AliasError } from './users.js';
 
-const DB_PATH = path.resolve('prisma/basecabot.db');
+const DB_PATH = path.resolve('prisma/test.db'); // isolated test DB (see test/globalSetup.ts)
 const run = existsSync(DB_PATH) ? describe : describe.skip;
 
 run('UsersService (integration)', () => {

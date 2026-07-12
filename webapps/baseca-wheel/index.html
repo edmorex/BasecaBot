@@ -56,7 +56,7 @@
             <input type="number" id="maxPerUser" value="2" min="0" />
           </label>
           <div class="perm">
-            Rules when enforced: <code>title</code>/<code>spin</code>/<code>reset</code> need permission ≥ 3 (mod).
+            Rules when enforced: <code>title</code>/<code>spin</code>/<code>clearall</code> need permission ≥ 3 (mod).
             <code>add</code> is open to all (up to the per-user limit); <code>clear</code> removes only the caller's own entries.
           </div>
         </div>
@@ -129,26 +129,31 @@
         renderEntries();
       }
 
+      // The channel of the most recent command; echoed back so the bot replies
+      // in the right chat (primary OR a guest channel).
+      let currentChannel = null;
+
       function spin() {
         if (entries.length === 0) {
-          send('announce', { text: 'The wheel is empty — add entries with !wheel add' });
+          send('announce', { text: 'The wheel is empty — add entries with !wheel add', channel: currentChannel });
           return;
         }
         const winner = entries[Math.floor(Math.random() * entries.length)];
         log('sys', `spun → winner: ${winner.text} (added by ${winner.user})`);
         // The winner label is the ENTRY text; tweak to winner.user if you prefer.
-        send('result', { winner: winner.text });
+        send('result', { winner: winner.text, channel: currentChannel });
       }
 
       // ── Handle bot → wheel commands ──────────────────────────────────────────
       function handleWheel(payload) {
-        const { command, text, user, permission } = payload;
+        const { command, text, user, permission, channel } = payload;
+        currentChannel = channel; // remember where to reply
         const enforce = $('enforce').checked;
         const maxPerUser = Number($('maxPerUser').value);
 
-        // title / spin / reset are "manager" actions → require mod (>= 3).
+        // title / spin / clearall are "manager" actions → require mod (>= 3).
         // add is open to everyone; clear only affects the caller's own entries.
-        if ((command === 'title' || command === 'spin' || command === 'reset') && enforce && permission < 3) {
+        if ((command === 'title' || command === 'spin' || command === 'clearall') && enforce && permission < 3) {
           log('sys', `rejected "${command}" from ${user} (permission ${permission} < 3)`);
           return;
         }
@@ -161,7 +166,7 @@
             const used = addCounts.get(user) || 0;
             if (enforce && maxPerUser > 0 && used >= maxPerUser) {
               log('sys', `rejected "add" from ${user} (limit ${maxPerUser} reached)`);
-              send('announce', { text: `@${user} you've hit the entry limit.` });
+              send('announce', { text: `@${user} you've hit the entry limit.`, channel: currentChannel });
               return;
             }
             addCounts.set(user, used + 1);
@@ -171,6 +176,7 @@
           case 'spin':
             spin();
             break;
+          // (channel is echoed via currentChannel on any announce/result we send)
           case 'clear': {
             // A user clears only their OWN entries (open to everyone).
             const before = entries.length;
@@ -182,13 +188,13 @@
             log('sys', `${user} cleared their entries (${before - entries.length} removed)`);
             break;
           }
-          case 'reset':
+          case 'clearall':
             // A manager wipes the entire wheel.
             entries.length = 0;
             addCounts.clear();
             setTitle('');
             renderEntries();
-            log('sys', `${user} reset the whole wheel`);
+            log('sys', `${user} cleared the whole wheel`);
             break;
           default:
             log('sys', `unknown command: ${command}`);

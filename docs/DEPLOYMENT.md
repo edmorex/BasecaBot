@@ -121,7 +121,7 @@ Fill in, at minimum:
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | from your Twitch app |
 | `TWITCH_BOT_USERNAME` | `basecabot` |
 | `TWITCH_BOT_ACCESS_TOKEN` / `TWITCH_BOT_REFRESH_TOKEN` | bot-account token pair |
-| `TWITCH_CHANNELS`, `TWITCH_BROADCASTER_USERNAME` | your channel login |
+| `TWITCH_BROADCASTER_USERNAME` | your channel login (the single channel the bot runs in) |
 | `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN` | broadcaster-account token pair |
 | `BOT_ADMINS` | your login |
 | `WS_HUB_SECRET` | a long random string (`openssl rand -hex 24`) |
