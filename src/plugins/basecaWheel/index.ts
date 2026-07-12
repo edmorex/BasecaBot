@@ -162,14 +162,19 @@ export function basecaWheelPlugin(): Plugin {
             },
           },
           disconnect: {
-            description: 'Leave the current guest channel (Broadcaster+).',
+            // Unlike connect, disconnect may be run from EITHER the primary channel
+            // or the guest channel itself (a Broadcaster/bot-admin pulling the bot
+            // out from inside the guest chat). There's no abuse to prevent — leaving
+            // is always safe.
+            description: 'Leave the current guest channel — usable from the primary OR the guest channel (Broadcaster+).',
             permission: PermissionLevel.Broadcaster,
             handler: async (e: CommandEvent) => {
-              if (e.channel !== primary) return;
               if (!guest) return void ctx.chat.say(e.channel, "I'm not connected to any guest channel.");
               const left = guest.channel;
-              await partGuest(true);
-              await ctx.chat.say(e.channel, `Disconnected from ${left}.`);
+              await partGuest(true); // announces farewell in the guest, then parts it
+              // Confirm in the primary channel — if the command came from the guest,
+              // we've just left e.channel and can no longer speak there.
+              await ctx.chat.say(primary, `Disconnected from ${left}.`);
             },
           },
         },
