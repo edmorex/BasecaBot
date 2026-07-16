@@ -8,14 +8,7 @@ import {
   describeTarget,
   restrictKeywordToLevel,
 } from '../../services/customCommands.js';
-
-/** Substitute the simple variables supported in custom-command responses. */
-function render(response: string, vars: { user: string; channel: string; args: string }): string {
-  return response
-    .replaceAll('{user}', vars.user)
-    .replaceAll('{channel}', vars.channel)
-    .replaceAll('{args}', vars.args);
-}
+import { CommandVarEngine, type VarContext } from '../../services/commandVars.js';
 
 /**
  * Custom commands: the mod-facing `!command …` manager (each subcommand
@@ -24,17 +17,50 @@ function render(response: string, vars: { user: string; channel: string; args: s
  * "phrase" matches (by scanning chat). Enable state, permissions, global/user
  * cooldowns, and usage counts are enforced/tracked by the CustomCommandService.
  *
- * Responses support {user}, {channel}, {args}. An empty response is a silent
- * command: it still fires (usage++, cooldowns) but says nothing.
+ * Responses support the $(…)/${…} variable engine (see services/commandVars.ts
+ * + docs). An empty response is a silent command: it still fires (usage++,
+ * cooldowns) but says nothing.
  */
 export function commandsPlugin(): Plugin {
   return {
     name: 'commands',
-    version: '0.3.0',
+    version: '0.4.0',
 
     init(ctx: ServiceContext) {
       const svc = ctx.customCommands;
       const say = (channel: string, msg: string) => ctx.chat.say(channel, msg);
+
+      const vars = new CommandVarEngine({
+        points: ctx.points,
+        users: ctx.users,
+        quotes: ctx.quotes,
+        lists: ctx.lists,
+        customCommands: ctx.customCommands,
+        api: ctx.api,
+        broadcasterUsername: ctx.config.twitch.broadcasterUsername,
+        pointsName: ctx.config.points.name,
+        logger: ctx.logger,
+      });
+
+      // Render a custom-command response through the $()/${} variable engine.
+      const renderResponse = (
+        cmdName: string,
+        response: string,
+        e: { user: { id: string; login: string; displayName: string }; channel: string },
+        argString: string,
+        args: string[],
+        count: number,
+      ): Promise<string> => {
+        const u = e.user;
+        const context: VarContext = {
+          sender: { id: u.id, login: u.login, displayName: u.displayName },
+          channel: e.channel,
+          args,
+          argString,
+          command: { name: cmdName, count },
+        };
+        return vars.render(response, context);
+      };
 
       // Parse the leading `!trigger` or `"phrase"` target from a subcommand's args.
       const target = (e: CommandEvent) => {
@@ -179,9 +205,9 @@ export function commandsPlugin(): Plugin {
         const cmd = await svc.findByTrigger(e.name);
         if (!cmd) return;
         if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) return;
-        svc.recordUse(cmd, e.user.id);
+        const count = svc.recordUse(cmd, e.user.id);
         if (cmd.response) {
-          await say(e.channel, render(cmd.response, { user: e.user.displayName, channel: e.channel, args: e.argString }));
+          await say(e.channel, await renderResponse(cmd.name, cmd.response, e, e.argString, e.args, count));
         }
       });
 
@@ -191,9 +217,10 @@ export function commandsPlugin(): Plugin {
         const matches = svc.matchPhrases(e.message);
         for (const cmd of matches) {
           if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) continue;
-          svc.recordUse(cmd, e.user.id);
+          const count = svc.recordUse(cmd, e.user.id);
           if (cmd.response) {
-            await say(e.channel, render(cmd.response, { user: e.user.displayName, channel: e.channel, args: e.message }));
+            const words = e.message.split(/\s+/).filter(Boolean);
+            await say(e.channel, await renderResponse(cmd.name, cmd.response, e, e.message, words, count));
           }
           break; // at most one phrase fires per message, to avoid chat spam
         }

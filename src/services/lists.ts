@@ -186,6 +186,20 @@ export class ListsService {
     return entry?.text ?? null;
   }
 
+  /** A list's display name (falls back to its reference name), or null if unknown. Non-throwing — for $(list). */
+  async displayNameOf(name: string): Promise<string | null> {
+    const list = await this.db.list.findUnique({ where: { name: normalizeListName(name) } });
+    return list ? (list.displayName?.trim() || list.name) : null;
+  }
+
+  /** The nth entry (1-based) of a list, or null if out of range / unknown. Non-throwing — for $(list.n). */
+  async entryAt(name: string, n: number): Promise<string | null> {
+    const list = await this.db.list.findUnique({ where: { name: normalizeListName(name) } });
+    if (!list || !Number.isInteger(n) || n < 1) return null;
+    const [entry] = await this.db.listEntry.findMany({ where: { listId: list.id }, orderBy: { id: 'asc' }, skip: n - 1, take: 1 });
+    return entry?.text ?? null;
+  }
+
   /** All list reference names (for the sidebar / help). */
   async listNames(): Promise<string[]> {
     const rows = await this.db.list.findMany({ orderBy: { name: 'asc' }, select: { name: true } });

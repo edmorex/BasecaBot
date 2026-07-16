@@ -27,6 +27,7 @@ interface RuntimeCommand {
   globalCooldown: number;
   userCooldown: number;
   enabled: boolean;
+  usageCount: number;
 }
 
 /** `!command restrict` keyword <-> PermissionLevel. */
@@ -108,11 +109,12 @@ export class CustomCommandService {
 
   private toRuntime(r: {
     id: number; kind: string; name: string; response: string | null;
-    permission: number; globalCooldown: number; userCooldown: number; enabled: boolean;
+    permission: number; globalCooldown: number; userCooldown: number; enabled: boolean; usageCount: number;
   }): RuntimeCommand {
     return {
       id: r.id, kind: r.kind as CommandKind, name: r.name, response: r.response,
       permission: r.permission, globalCooldown: r.globalCooldown, userCooldown: r.userCooldown, enabled: r.enabled,
+      usageCount: r.usageCount,
     };
   }
 
@@ -146,13 +148,24 @@ export class CustomCommandService {
     return true;
   }
 
-  /** Record a fire: bump cooldown clocks and persist the usage count. */
-  recordUse(cmd: RuntimeCommand, userId: string, now = Date.now()): void {
+  /**
+   * Record a fire: bump cooldown clocks and persist the usage count. Returns the
+   * new usage count (the value $(count) shows), computed from the runtime row so
+   * it's available synchronously even though the DB write is fire-and-forget.
+   */
+  recordUse(cmd: RuntimeCommand, userId: string, now = Date.now()): number {
     this.lastGlobal.set(cmd.id, now);
     let um = this.lastUser.get(cmd.id);
     if (!um) this.lastUser.set(cmd.id, (um = new Map()));
     um.set(userId, now);
     void this.db.customCommand.update({ where: { id: cmd.id }, data: { usageCount: { increment: 1 } } }).catch(() => {});
+    return cmd.usageCount + 1;
+  }
+
+  /** The current usage count of a `!trigger`/phrase, for $(count !other). Null if unknown. */
+  async getUsageCount(target: TargetRef): Promise<number | null> {
+    const cmd = await this.resolve(target);
+    return cmd ? cmd.usageCount : null;
   }
 
   // ── CRUD (used by `!command` and the dashboard) ──────────────────────────────

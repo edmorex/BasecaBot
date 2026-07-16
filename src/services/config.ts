@@ -27,6 +27,9 @@ const EnvSchema = z.object({
   WS_HUB_PORT: z.coerce.number().int().positive().default(8080),
   WS_HUB_SECRET: z.string().min(1),
   LOG_LEVEL: z.string().default('info'),
+  // Display name of the loyalty currency (shown by the points plugin and the
+  // $(pointsname) command variable). e.g. "points", "BascaPoints".
+  POINTS_NAME: z.string().default('points'),
   DISABLED_PLUGINS: z.string().optional(),
   // Dev-only: when 'true', enables the eventSimulator plugin that injects fake
   // events from the WebSocket hub. Keep OFF in production (it can fabricate
@@ -65,6 +68,7 @@ export interface AppConfig {
   ws: { port: number; secret: string };
   disabledPlugins: string[];
   eventSim: { enabled: boolean };
+  points: { name: string };
   web: {
     httpPort: number;
     publicUrl: string;
@@ -116,6 +120,7 @@ export function loadConfig(): AppConfig {
     ws: { port: env.WS_HUB_PORT, secret: env.WS_HUB_SECRET },
     disabledPlugins: csv(env.DISABLED_PLUGINS),
     eventSim: { enabled: env.EVENT_SIM_ENABLED === 'true' },
+    points: { name: env.POINTS_NAME },
     web: {
       httpPort: env.HTTP_PORT,
       publicUrl,

@@ -3,7 +3,6 @@ import type { ServiceContext } from '../../core/serviceContext.js';
 import { InsufficientPointsError } from '../../services/points.js';
 import { PermissionLevel } from '../../core/events.js';
 
-const CURRENCY = 'BascaPoints';
 const PAYOUT_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const SUB_POINTS = 30; // subscribers (and VIP/Mod/Broadcaster/Admin) per payout
 const NONSUB_POINTS = 25; // everyone else per payout
@@ -101,6 +100,7 @@ export function pointsPlugin(): Plugin {
 
     init(context: ServiceContext) {
       ctx = context;
+      const CURRENCY = ctx.config.points.name;
 
       // ── Commands ──────────────────────────────────────────────────────────
       ctx.commands.register(

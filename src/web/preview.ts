@@ -83,7 +83,7 @@ async function collectBuiltins() {
     points: {},
     storage: { prisma: {} },
     ws: { broadcast: noop },
-    config: { twitch: { botUsername: 'bot', channel: 'preview', admins: [] }, eventSim: { enabled: false } },
+    config: { twitch: { botUsername: 'bot', channel: 'preview', broadcasterUsername: 'preview', admins: [] }, points: { name: 'points' }, eventSim: { enabled: false } },
     logger: { info: noop, warn: noop, debug: noop, error: noop, child: () => ({}) },
   } as unknown as ServiceContext;
 

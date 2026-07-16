@@ -155,7 +155,7 @@ export function basecaWheelPlugin(): Plugin {
               guest = { channel: target, timer: setTimeout(() => void partGuest(true), seconds * 1000) };
               await ctx.chat.say(
                 target,
-                `👋 BasecaBot is here for BasecaWheel! Use !wheel add <name> to enter and !wheel spin to play. (I'll auto-leave in ${formatDuration(seconds)}.)`,
+                `👋 BasecaBot is here for BasecaWheel! Use !wheel add <entry> to enter and !wheel spin to play. (I'll auto-leave in ${formatDuration(seconds)}.)`,
               );
               await ctx.chat.say(e.channel, `Connected to ${target} for ${formatDuration(seconds)}. Use !wheel disconnect to end early.`);
               ctx.logger.info({ target, seconds }, 'wheel: joined guest channel');
