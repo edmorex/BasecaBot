@@ -112,13 +112,21 @@ model CustomCommand {
   @@index([kind, enabled])
 }
 
-/// A trigger word (primary or alias) that maps to a trigger-kind CustomCommand.
-/// `word` is normalized (lowercase, no '!') and globally unique, so trigger
-/// words never collide across commands.
+/// A trigger word that maps to a trigger-kind CustomCommand. `word` is normalized
+/// (lowercase, no '!') and globally unique, so trigger words never collide.
+///  - `isPrimary` = true: the command's own trigger word (== command.name).
+///  - `isPrimary` = false: an ALIAS. It runs the target command, optionally
+///    prepending `args` (which may contain $() variables resolved at call time),
+///    and can be enabled/disabled independently (`enabled`). Aliases always point
+///    to a primary command, never to another alias.
 model CommandTrigger {
   id        Int     @id @default(autoincrement())
   word      String  @unique
   isPrimary Boolean @default(false)
+  /// Alias only: extra argument string prepended to the caller's args (may hold $() vars).
+  args      String?
+  /// Alias only: independent enable flag (a disabled alias is a no-op).
+  enabled   Boolean @default(true)
   commandId Int
 
   command CustomCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)

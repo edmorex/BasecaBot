@@ -45,7 +45,8 @@ const me = structuredClone(PROFILES[which]);
 
 const mk = (o: Partial<Record<string, unknown>>) => ({
   kind: 'trigger', name: 'x', access: 0, description: 'Custom response command.', response: 'hi',
-  globalCooldown: 0, userCooldown: 0, enabled: true, usageCount: 0, aliases: [] as string[], group: null as string | null, ...o,
+  globalCooldown: 0, userCooldown: 0, enabled: true, usageCount: 0, group: null as string | null,
+  target: null as string | null, args: null as string | null, ...o,
 });
 
 /**
@@ -110,11 +111,14 @@ const builtins = await collectBuiltins();
 const GROUPS = ['People', 'Pets', 'Facts', null];
 const mockCustoms = [
   mk({ kind: 'phrase', name: 'good game', response: 'gg!', usageCount: 12, group: 'Games' }),
-  mk({ kind: 'trigger', name: 'discord', response: 'Join: discord.gg/example', aliases: ['dc'], usageCount: 42, globalCooldown: 10, userCooldown: 30, group: 'Links' }),
+  mk({ kind: 'trigger', name: 'discord', response: 'Join: discord.gg/example', usageCount: 42, globalCooldown: 10, userCooldown: 30, group: 'Links' }),
+  // An alias row: mirrors discord's access/uses/cooldown/group; Response shows its target.
+  mk({ kind: 'alias', name: 'dc', target: 'discord', args: null, usageCount: 42, globalCooldown: 10, userCooldown: 30, group: 'Links', response: null }),
+  mk({ kind: 'trigger', name: 'roll', response: 'You rolled $(1)', usageCount: 8, group: 'Fun' }),
+  mk({ kind: 'alias', name: 'd6', target: 'roll', args: '$(random 1-6)', usageCount: 8, group: 'Fun', response: null, enabled: false }),
   // Enough to span many pages so the ellipsis pager is visible in the preview.
   ...Array.from({ length: 420 }, (_, i) =>
-    mk({ name: `custom${i + 1}`, access: i % 6, response: i % 5 === 0 ? null : `Response #${i + 1}`, enabled: i % 7 !== 0, usageCount: i,
-      aliases: i === 0 ? ['c1', 'first'] : [], group: GROUPS[i % 4] })),
+    mk({ name: `custom${i + 1}`, access: i % 6, response: i % 5 === 0 ? null : `Response #${i + 1}`, enabled: i % 7 !== 0, usageCount: i, group: GROUPS[i % 4] })),
 ];
 const commands = [...builtins, ...mockCustoms];
 
@@ -228,14 +232,28 @@ const server = createServer(async (req, res) => {
       return json(200, { ok: true });
     }
     if (p === '/api/commands/alias') {
-      const norm = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
-      const cmd = commands.find((c) => c.kind === body.kind && c.name === body.name) as { aliases: string[] } | undefined;
-      if (cmd && norm && !cmd.aliases.includes(norm)) cmd.aliases.push(norm);
+      const word = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
+      const targetName = String(body.target ?? '').replace(/^!/, '').toLowerCase().trim();
+      const cmd = commands.find((c) => c.kind === 'trigger' && c.name === targetName);
+      if (word && cmd) {
+        commands.push(mk({ kind: 'alias', name: word, target: cmd.name, args: body.args ? String(body.args) : null, access: cmd.access, group: cmd.group, globalCooldown: cmd.globalCooldown, userCooldown: cmd.userCooldown, usageCount: cmd.usageCount, response: null }));
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/commands/alias/update') {
+      const word = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
+      const a = commands.find((c) => c.kind === 'alias' && c.name === word);
+      if (a) {
+        if ('target' in body) { const t = commands.find((c) => c.kind === 'trigger' && c.name === String(body.target ?? '').replace(/^!/, '').toLowerCase().trim()); if (t) { a.target = t.name; a.access = t.access; a.group = t.group; a.globalCooldown = t.globalCooldown; a.userCooldown = t.userCooldown; a.usageCount = t.usageCount; } }
+        if ('args' in body) a.args = body.args ? String(body.args) : null;
+        if ('enabled' in body) a.enabled = Boolean(body.enabled);
+      }
       return json(200, { ok: true });
     }
     if (p === '/api/commands/alias/delete') {
-      const norm = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
-      commands.forEach((c) => { const cc = c as { aliases?: string[] }; if (cc.aliases) cc.aliases = cc.aliases.filter((x) => x !== norm); });
+      const word = String(body.alias ?? '').replace(/^!/, '').toLowerCase().trim();
+      const i = commands.findIndex((c) => c.kind === 'alias' && c.name === word);
+      if (i >= 0) commands.splice(i, 1);
       return json(200, { ok: true });
     }
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });

@@ -83,7 +83,7 @@ export function commandsPlugin(): Plugin {
       // ── Mod manager: !command <sub> [!trigger or "phrase"] … ────────────────
       ctx.commands.registerGroup('command', {
         description:
-          'Manage custom commands (mods+). Subcommands: add, response, setgroup, cooldown, restrict, setcount, enable, disable, addalias, remove — target a !trigger or "phrase".',
+          'Manage custom commands (mods+). Subcommands: add, response, setgroup, cooldown, restrict, setcount, enable, disable, addalias, remove — target a !trigger, "phrase", or (for enable/disable/remove) a !alias.',
         permission: PermissionLevel.Moderator,
         aliases: ['cmd'],
         subcommands: {
@@ -155,8 +155,8 @@ export function commandsPlugin(): Plugin {
             }),
           },
           enable: {
-            description: 'Enable a command.',
-            usage: '<!trigger or "phrase">',
+            description: 'Enable a command or an alias.',
+            usage: '<!trigger, "phrase", or !alias>',
             handler: guard(async (e) => {
               const t = target(e);
               await svc.setEnabled(t.target, true);
@@ -164,8 +164,8 @@ export function commandsPlugin(): Plugin {
             }),
           },
           disable: {
-            description: 'Disable a command (keeps it in the database).',
-            usage: '<!trigger or "phrase">',
+            description: 'Disable a command or an alias (keeps it in the database).',
+            usage: '<!trigger, "phrase", or !alias>',
             handler: guard(async (e) => {
               const t = target(e);
               await svc.setEnabled(t.target, false);
@@ -173,13 +173,15 @@ export function commandsPlugin(): Plugin {
             }),
           },
           addalias: {
-            description: 'Add a trigger alias to a command.',
-            usage: '<!trigger> <!alias>',
+            description: 'Add an alias for a command, with optional extra args (may contain $() vars): !command addalias <!alias> <!trigger> [args].',
+            usage: '<!alias> <!trigger> [arguments]',
             handler: guard(async (e) => {
-              const t = target(e);
-              if (!t.rest) throw new CommandError('Provide an alias like !alias.');
-              await svc.addAlias(t.target, t.rest);
-              await say(e.channel, `Added alias to ${describeTarget(t.target)}.`);
+              const first = parseTarget(e.argString);
+              if (!first || first.target.kind !== 'trigger') throw new CommandError('Usage: !command addalias <!alias> <!trigger> [args]');
+              const second = parseTarget(first.rest);
+              if (!second || second.target.kind !== 'trigger') throw new CommandError('Provide the command to alias, e.g. !command addalias <!alias> <!trigger> [args].');
+              await svc.addAlias(first.target.name, second.target.name, second.rest);
+              await say(e.channel, `Added alias !${first.target.name} → !${second.target.name}${second.rest ? ' ' + second.rest : ''}.`);
             }),
           },
           remove: {
@@ -200,15 +202,35 @@ export function commandsPlugin(): Plugin {
         },
       });
 
-      // ── Trigger runtime: unknown `!word` -> custom trigger command ──────────
+      // ── Trigger runtime: unknown `!word` -> custom trigger command or alias ──
       ctx.commands.setFallback(async (e) => {
-        const cmd = await svc.findByTrigger(e.name);
-        if (!cmd) return;
-        if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) return;
-        const count = svc.recordUse(cmd, e.user.id);
-        if (cmd.response) {
-          await say(e.channel, await renderResponse(cmd.name, cmd.response, e, e.argString, e.args, count));
+        const match = await svc.findByTrigger(e.name);
+        if (!match) return;
+        const { command, alias } = match;
+        if (alias && !alias.enabled) return; // a disabled alias is a no-op
+        // The COMMAND's enable/permission/cooldown gate applies (so a disabled
+        // root command is a no-op even when the alias itself is enabled).
+        if (!svc.canTrigger(command, e.user.id, e.user.permission)) return;
+        const count = svc.recordUse(command, e.user.id);
+        if (!command.response) return; // silent
+
+        let argString = e.argString;
+        let args = e.args;
+        if (alias && alias.args) {
+          // Resolve the alias's extra args ($() vars included), then prepend to the caller's.
+          const resolved = (
+            await vars.render(alias.args, {
+              sender: { id: e.user.id, login: e.user.login, displayName: e.user.displayName },
+              channel: e.channel,
+              args: e.args,
+              argString: e.argString,
+              command: { name: command.name, count },
+            })
+          ).trim();
+          argString = `${resolved} ${e.argString}`.trim();
+          args = argString.length ? argString.split(/\s+/) : [];
         }
+        await say(e.channel, await renderResponse(command.name, command.response, e, argString, args, count));
       });
 
       // ── Phrase runtime: fire on phrases appearing in normal chat ────────────

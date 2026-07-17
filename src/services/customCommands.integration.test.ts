@@ -32,7 +32,7 @@ run('CustomCommandService (integration)', () => {
 
   it('creates and resolves a trigger command (case-insensitive)', async () => {
     await svc.create(trig('hello'), { response: 'Hi {user}!' });
-    expect((await svc.findByTrigger('HELLO'))?.response).toBe('Hi {user}!');
+    expect((await svc.findByTrigger('HELLO'))?.command.response).toBe('Hi {user}!');
     expect(await svc.findByTrigger('nope')).toBeNull();
   });
 
@@ -41,14 +41,48 @@ run('CustomCommandService (integration)', () => {
     await expect(svc.create(trig('hello'), { response: 'b' })).rejects.toBeInstanceOf(CommandError);
   });
 
-  it('adds and resolves aliases; blocks collisions; blocks phrase aliases', async () => {
+  it('adds and resolves aliases; blocks collisions; blocks aliasing a phrase', async () => {
     await svc.create(trig('hello'), { response: 'hi' });
-    await svc.addAlias(trig('hello'), '!hi');
-    expect((await svc.findByTrigger('hi'))?.name).toBe('hello');
-    await expect(svc.addAlias(trig('hello'), 'hi')).rejects.toBeInstanceOf(CommandError);
+    await svc.addAlias('hi', 'hello');
+    const m = await svc.findByTrigger('hi');
+    expect(m?.command.name).toBe('hello');
+    expect(m?.alias).toMatchObject({ word: 'hi', enabled: true });
+    await expect(svc.addAlias('hi', 'hello')).rejects.toBeInstanceOf(CommandError); // duplicate word
 
     await svc.create(phrase('gg'), { response: 'good game' });
-    await expect(svc.addAlias(phrase('gg'), '!ggwp')).rejects.toBeInstanceOf(CommandError);
+    await expect(svc.addAlias('ggwp', 'gg')).rejects.toBeInstanceOf(CommandError); // target is a phrase (no trigger)
+  });
+
+  it('creates aliases with args and forbids aliasing to another alias', async () => {
+    await svc.create(trig('roll'), { response: 'rolled $(1)' });
+    await svc.addAlias('d6', 'roll', '$(random 1-6)');
+    const m = await svc.findByTrigger('d6');
+    expect(m?.command.name).toBe('roll');
+    expect(m?.alias).toMatchObject({ word: 'd6', args: '$(random 1-6)', enabled: true });
+    await expect(svc.addAlias('dd', 'd6')).rejects.toBeInstanceOf(CommandError); // no alias-to-alias
+  });
+
+  it('enables/disables an alias independently of its command, and edits it', async () => {
+    await svc.create(trig('roll'), { response: 'r' });
+    await svc.create(trig('spin'), { response: 's' });
+    await svc.addAlias('d6', 'roll', 'a');
+    await svc.setEnabled(trig('d6'), false); // toggles the alias only
+    expect((await svc.findByTrigger('d6'))?.alias?.enabled).toBe(false);
+    expect((await svc.findByTrigger('roll'))?.command.enabled).toBe(true); // command untouched
+    await svc.updateAlias('d6', { targetWord: 'spin', args: 'b', enabled: true });
+    const m = await svc.findByTrigger('d6');
+    expect(m?.command.name).toBe('spin');
+    expect(m?.alias).toMatchObject({ args: 'b', enabled: true });
+  });
+
+  it('lists aliases as their own rows mirroring the target command', async () => {
+    await svc.create(trig('roll'), { response: 'r', permission: 2, globalCooldown: 5 });
+    await svc.setGroup(trig('roll'), 'Fun');
+    await svc.addAlias('d6', 'roll', '$(random 1-6)');
+    const rows = await svc.listForDashboard();
+    expect(rows.some((r) => r.kind === 'trigger' && r.name === 'roll')).toBe(true);
+    const aliasRow = rows.find((r) => r.kind === 'alias' && r.name === 'd6')!;
+    expect(aliasRow).toMatchObject({ target: 'roll', args: '$(random 1-6)', permission: 2, globalCooldown: 5, group: 'Fun', enabled: true });
   });
 
   it('matches phrases (case-insensitive) only when enabled', async () => {
@@ -74,7 +108,7 @@ run('CustomCommandService (integration)', () => {
 
   it('enforces enabled, permission, and cooldowns in canTrigger', async () => {
     await svc.create(trig('cd'), { response: 'x', permission: PermissionLevel.Subscriber, globalCooldown: 10, userCooldown: 20 });
-    const cmd = (await svc.findByTrigger('cd'))!;
+    const cmd = (await svc.findByTrigger('cd'))!.command;
     const t0 = 1_000_000;
 
     expect(svc.canTrigger(cmd, 'u1', PermissionLevel.Viewer, t0)).toBe(false); // too low permission
@@ -111,9 +145,9 @@ run('CustomCommandService (integration)', () => {
       await svc.create(phrase('wheel'), { response: 'ok' });
       expect(await svc.resolve(phrase('wheel'))).not.toBeNull();
 
-      // Aliases are blocked too.
+      // Alias words are blocked from shadowing built-ins too.
       await svc.create(trig('game'), { response: 'g' });
-      await expect(svc.addAlias(trig('game'), '!points')).rejects.toBeInstanceOf(CommandError);
+      await expect(svc.addAlias('points', 'game')).rejects.toBeInstanceOf(CommandError);
     } finally {
       svc.useReservedWords(() => false); // don't leak into other tests (shared svc)
     }
@@ -121,24 +155,24 @@ run('CustomCommandService (integration)', () => {
 
   it('treats an empty response as silent', async () => {
     await svc.create(trig('silent'), { response: '' });
-    expect((await svc.findByTrigger('silent'))?.response).toBeNull();
+    expect((await svc.findByTrigger('silent'))?.command.response).toBeNull();
   });
 
   it('remove by an alias trigger removes only that alias', async () => {
     await svc.create(trig('hello'), { response: 'hi' });
-    await svc.addAlias(trig('hello'), '!hi');
-    await svc.addAlias(trig('hello'), '!yo');
+    await svc.addAlias('hi', 'hello');
+    await svc.addAlias('yo', 'hello');
 
     const res = await svc.remove(trig('hi'));
     expect(res).toEqual({ type: 'alias', alias: '!hi', command: '!hello' });
     expect(await svc.findByTrigger('hi')).toBeNull(); // alias gone
-    expect((await svc.findByTrigger('hello'))?.name).toBe('hello'); // command remains
-    expect((await svc.findByTrigger('yo'))?.name).toBe('hello'); // other alias remains
+    expect((await svc.findByTrigger('hello'))?.command.name).toBe('hello'); // command remains
+    expect((await svc.findByTrigger('yo'))?.command.name).toBe('hello'); // other alias remains
   });
 
-  it('remove by the primary removes the command and reports its aliases', async () => {
+  it('remove by the primary removes the command and cascades its aliases', async () => {
     await svc.create(trig('bye'), { response: 'cya' });
-    await svc.addAlias(trig('bye'), '!cya');
+    await svc.addAlias('cya', 'bye');
 
     const res = await svc.remove(trig('bye'));
     expect(res).toMatchObject({ type: 'command', label: '!bye', aliases: ['!cya'] });

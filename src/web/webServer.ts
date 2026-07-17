@@ -170,6 +170,8 @@ export class WebServer {
           return this.deleteCommand(req, res);
         case '/api/commands/alias':
           return this.addCommandAlias(req, res);
+        case '/api/commands/alias/update':
+          return this.updateCommandAlias(req, res);
         case '/api/commands/alias/delete':
           return this.removeCommandAlias(req, res);
         case '/api/lists/create':
@@ -293,13 +295,13 @@ export class WebServer {
   private async getCommands(res: ServerResponse): Promise<void> {
     const builtins = this.commands.list().map((c) => ({
       kind: 'builtin' as const, name: c.name, usage: c.usage ?? '', group: c.group ?? 'other', access: c.permission, description: c.description,
-      response: null as string | null, globalCooldown: c.globalCooldown, userCooldown: c.userCooldown,
-      enabled: true, usageCount: 0, aliases: [] as string[],
+      response: null as string | null, target: null as string | null, args: null as string | null,
+      globalCooldown: c.globalCooldown, userCooldown: c.userCooldown, enabled: true, usageCount: 0,
     }));
     const customs = (await this.customCommands.listForDashboard()).map((c) => ({
-      kind: c.kind, name: c.name, access: c.permission, group: c.group,
-      response: c.response, globalCooldown: c.globalCooldown, userCooldown: c.userCooldown,
-      enabled: c.enabled, usageCount: c.usageCount, aliases: c.aliases,
+      kind: c.kind, name: c.name, usage: '', group: c.group, access: c.permission, description: '',
+      response: c.response, target: c.target, args: c.args,
+      globalCooldown: c.globalCooldown, userCooldown: c.userCooldown, enabled: c.enabled, usageCount: c.usageCount,
     }));
     const commands = [...builtins, ...customs].sort((a, b) => a.name.localeCompare(b.name));
     this.json(res, 200, { commands });
@@ -367,12 +369,29 @@ export class WebServer {
     this.json(res, 200, { ok: true });
   }
 
+  /** Create an alias: { alias, target, args? }. */
   private async addCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
     const body = await this.readJson(req);
-    const target = this.targetFromBody(body);
     try {
-      await this.customCommands.addAlias(target, String(body.alias ?? ''));
+      await this.customCommands.addAlias(String(body.alias ?? ''), String(body.target ?? ''), body.args == null ? null : String(body.args));
+    } catch (e) {
+      if (e instanceof CommandError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  /** Edit an alias: { alias, target?, args?, enabled? }. */
+  private async updateCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.customCommands.updateAlias(String(body.alias ?? ''), {
+        targetWord: 'target' in body ? String(body.target ?? '') : undefined,
+        args: 'args' in body ? (body.args == null ? null : String(body.args)) : undefined,
+        enabled: 'enabled' in body ? Boolean(body.enabled) : undefined,
+      });
     } catch (e) {
       if (e instanceof CommandError) throw new HttpError(400, e.message);
       throw e;

@@ -30,6 +30,38 @@ interface RuntimeCommand {
   usageCount: number;
 }
 
+/** The alias half of a trigger match (null when the word is the command's own trigger). */
+export interface AliasInfo {
+  word: string;
+  /** Extra args to prepend to the caller's (may contain $() vars). */
+  args: string;
+  /** The alias's own enable flag. */
+  enabled: boolean;
+}
+
+/** Result of resolving a `!word`: the target command plus alias info if it was an alias. */
+export interface TriggerMatch {
+  command: RuntimeCommand;
+  alias: AliasInfo | null;
+}
+
+/** One row of the dashboard command list: a command/phrase, or an alias mirroring its target. */
+export interface DashboardRow {
+  kind: CommandKind | 'alias';
+  name: string;
+  response: string | null;
+  group: string | null;
+  permission: number;
+  globalCooldown: number;
+  userCooldown: number;
+  enabled: boolean;
+  usageCount: number;
+  /** Alias only: the command it points to. */
+  target: string | null;
+  /** Alias only: the extra args it prepends. */
+  args: string | null;
+}
+
 /** `!command restrict` keyword <-> PermissionLevel. */
 const RESTRICT_TO_LEVEL: Record<string, number> = {
   all: PermissionLevel.Viewer,
@@ -120,13 +152,21 @@ export class CustomCommandService {
 
   // ── Runtime matching ────────────────────────────────────────────────────────
 
-  /** Resolve a `!word` (primary or alias) to its command, or null. */
-  async findByTrigger(word: string): Promise<RuntimeCommand | null> {
+  /**
+   * Resolve a `!word` to its target command plus alias info. `alias` is null when
+   * the word is the command's own (primary) trigger; otherwise it carries the
+   * alias's extra args + its independent enable flag.
+   */
+  async findByTrigger(word: string): Promise<TriggerMatch | null> {
     const trigger = await this.db.commandTrigger.findUnique({
       where: { word: normalizeWord(word) },
       include: { command: true },
     });
-    return trigger ? this.toRuntime(trigger.command) : null;
+    if (!trigger) return null;
+    return {
+      command: this.toRuntime(trigger.command),
+      alias: trigger.isPrimary ? null : { word: trigger.word, args: trigger.args ?? '', enabled: trigger.enabled },
+    };
   }
 
   /** Enabled phrase commands whose text appears in `message` (case-insensitive). */
@@ -252,7 +292,19 @@ export class CustomCommandService {
     await this.reloadPhrases();
   }
 
+  /**
+   * Enable/disable a command OR an alias. If the target word is an alias, only
+   * that alias's flag is toggled (the command is untouched); otherwise the
+   * command's flag is toggled.
+   */
   async setEnabled(target: TargetRef, enabled: boolean) {
+    if (target.kind === 'trigger') {
+      const t = await this.db.commandTrigger.findUnique({ where: { word: normalizeWord(target.name) } });
+      if (t && !t.isPrimary) {
+        await this.db.commandTrigger.update({ where: { id: t.id }, data: { enabled } });
+        return;
+      }
+    }
     const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.update({ where: { id: cmd.id }, data: { enabled } });
     await this.reloadPhrases();
@@ -292,14 +344,41 @@ export class CustomCommandService {
     return { type: 'command', label: describeTarget(target), aliases: [] };
   }
 
-  async addAlias(target: TargetRef, aliasWord: string) {
-    const cmd = await this.resolveOrThrow(target);
-    if (cmd.kind !== 'trigger') throw new CommandError('Only trigger commands can have aliases.');
+  /** Resolve a word to the PRIMARY (root) command it triggers, or throw. Aliases rejected. */
+  private async primaryCommandForWord(targetWord: string) {
+    const word = normalizeWord(targetWord);
+    if (!word) throw new CommandError('Provide the command to alias like !command.');
+    const t = await this.db.commandTrigger.findUnique({ where: { word }, include: { command: true } });
+    if (!t) throw new CommandError(`No command !${word} found to alias.`);
+    if (!t.isPrimary) throw new CommandError(`!${word} is itself an alias — an alias must point to a command.`);
+    return t.command;
+  }
+
+  /**
+   * Create an alias `!alias` that runs `!target`, optionally prepending `args`
+   * (which may contain $() variables resolved at call time). The target must be a
+   * root trigger command, not another alias.
+   */
+  async addAlias(aliasWord: string, targetWord: string, args?: string | null) {
     const word = normalizeWord(aliasWord);
     if (!word || /\s/.test(word)) throw new CommandError('An alias must be a single word.');
     if (this.isReserved(word)) throw new CommandError(`!${word} is a built-in command and can't be used as an alias.`);
     if (await this.wordTaken(word)) throw new CommandError(`The trigger !${word} is already in use.`);
-    await this.db.commandTrigger.create({ data: { word, isPrimary: false, commandId: cmd.id } });
+    const command = await this.primaryCommandForWord(targetWord);
+    await this.db.commandTrigger.create({ data: { word, isPrimary: false, args: emptyToNull(args), enabled: true, commandId: command.id } });
+  }
+
+  /** Edit an alias: repoint it (`targetWord`), change its `args`, and/or toggle `enabled`. */
+  async updateAlias(aliasWord: string, opts: { targetWord?: string; args?: string | null; enabled?: boolean }) {
+    const word = normalizeWord(aliasWord);
+    const t = await this.db.commandTrigger.findUnique({ where: { word } });
+    if (!t) throw new CommandError(`No alias !${word} found.`);
+    if (t.isPrimary) throw new CommandError(`!${word} is a command, not an alias.`);
+    const data: { commandId?: number; args?: string | null; enabled?: boolean } = {};
+    if (opts.targetWord !== undefined) data.commandId = (await this.primaryCommandForWord(opts.targetWord)).id;
+    if (opts.args !== undefined) data.args = emptyToNull(opts.args);
+    if (opts.enabled !== undefined) data.enabled = opts.enabled;
+    await this.db.commandTrigger.update({ where: { id: t.id }, data });
   }
 
   /** Remove a single alias by its word (must be a non-primary alias, not a command). */
@@ -315,24 +394,49 @@ export class CustomCommandService {
     return (await this.db.commandTrigger.findUnique({ where: { word } })) !== null;
   }
 
-  /** All custom commands (with alias words) for the dashboard. */
-  async listForDashboard() {
+  /**
+   * Flat list for the dashboard: one row per command/phrase, plus one row per
+   * alias. Alias rows mirror their target's access/group/cooldown/usage and carry
+   * the target name + extra args; their `enabled` is the alias's own flag.
+   */
+  async listForDashboard(): Promise<DashboardRow[]> {
     const rows = await this.db.customCommand.findMany({
-      include: { triggers: { orderBy: { isPrimary: 'desc' } } },
+      include: { triggers: true },
       orderBy: { name: 'asc' },
     });
-    return rows.map((r) => ({
-      kind: r.kind as CommandKind,
-      name: r.name,
-      response: r.response,
-      group: r.group,
-      permission: r.permission,
-      globalCooldown: r.globalCooldown,
-      userCooldown: r.userCooldown,
-      enabled: r.enabled,
-      usageCount: r.usageCount,
-      aliases: r.triggers.filter((t) => !t.isPrimary).map((t) => t.word),
-    }));
+    const out: DashboardRow[] = [];
+    for (const r of rows) {
+      out.push({
+        kind: r.kind as CommandKind,
+        name: r.name,
+        response: r.response,
+        group: r.group,
+        permission: r.permission,
+        globalCooldown: r.globalCooldown,
+        userCooldown: r.userCooldown,
+        enabled: r.enabled,
+        usageCount: r.usageCount,
+        target: null,
+        args: null,
+      });
+      for (const t of r.triggers) {
+        if (t.isPrimary) continue;
+        out.push({
+          kind: 'alias',
+          name: t.word,
+          response: null,
+          group: r.group, // mirrored
+          permission: r.permission, // mirrored
+          globalCooldown: r.globalCooldown, // mirrored
+          userCooldown: r.userCooldown, // mirrored
+          enabled: t.enabled, // alias's own flag
+          usageCount: r.usageCount, // mirrored
+          target: r.name,
+          args: t.args,
+        });
+      }
+    }
+    return out;
   }
 }
 
