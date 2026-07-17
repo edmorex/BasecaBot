@@ -13,7 +13,11 @@ export function quotesPage(): string {
         <h1>Quotes</h1>
         <p class="muted" id="quote-sub" style="margin:0; padding:0">Loading…</p>
       </div>
-      <input type="text" id="quote-search" placeholder="Search quotes…" style="flex:none; width:min(22rem,46vw)" />
+      <div class="rowline" style="flex:none; gap:.5rem; align-items:center; justify-content:flex-end">
+        <input type="text" id="quote-search" placeholder="Search quotes…" style="width:min(18rem,40vw)" />
+        <button type="button" class="pink" id="q-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink" id="q-export-btn" style="display:none">Export CSV</button>
+      </div>
     </div>
     <div class="card" id="quote-card"><div class="md-main" id="quote-main"></div></div>
     <div class="pager-wrap" id="quote-pager"></div>
@@ -43,6 +47,33 @@ export function quotesPage(): string {
         <button type="button" class="secondary" id="qdel-cancel">Cancel</button>
         <button type="button" class="pink" id="qdel-confirm">Delete</button>
       </div>
+    </dialog>
+
+    <dialog id="qimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(36rem,94vw)">
+      <h2 style="margin-top:0">Import Quotes from CSV</h2>
+      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>ID, Quote, User, Game, Date, Quoted By, Quoted By ID</code> (ID is ignored on import; <code>Quoted By ID</code> restores who added it when that user is still known to the bot). A header row is optional.</p>
+      <label class="muted">CSV file</label>
+      <input type="file" id="qimp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Mode</label>
+      <div class="radio-row" style="margin:.35rem 0 .8rem; flex-wrap:wrap">
+        <label><input type="radio" name="qimp-mode" value="add" checked /> Add to existing quotes</label>
+        <label><input type="radio" name="qimp-mode" value="replace" /> Wipe &amp; replace all quotes</label>
+      </div>
+      <div class="toast err" id="qimp-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="qimp-cancel">Cancel</button>
+        <button type="button" class="pink" id="qimp-go">Import</button>
+      </div>
+    </dialog>
+
+    <dialog id="qwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+      <h2 style="margin-top:0">⚠️ Wipe &amp; replace all quotes?</h2>
+      <p class="muted">This permanently deletes <strong>every existing quote</strong> and replaces them with the rows in your CSV. This cannot be undone.</p>
+      <div class="toast err" id="qwarn-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="qwarn-cancel">Cancel</button>
+        <button type="button" class="danger" id="qwarn-confirm">Wipe &amp; replace</button>
+      </div>
     </dialog>`;
 
   const script = `
@@ -71,6 +102,8 @@ export function quotesPage(): string {
         for(var i=0;i<state.quotes.length;i++) state.quotes[i].__i=i;
         var n=state.quotes.length;
         document.getElementById('quote-sub').textContent = n+' quote'+(n===1?'':'s')+'.'+(state.canManage?' You can edit quotes.':'');
+        document.getElementById('q-import-btn').style.display = state.canManage?'':'none';
+        document.getElementById('q-export-btn').style.display = state.canManage?'':'none';
         render();
       }catch(e){ document.getElementById('quote-sub').textContent='Could not load quotes: '+e.message; }
     }
@@ -173,6 +206,64 @@ export function quotesPage(): string {
       if(!deleting) return;
       try{ await api('POST','/api/quotes/delete',{ id:deleting.id }); delDlg.close?delDlg.close():delDlg.removeAttribute('open'); await load(); }
       catch(e){ document.getElementById('qdel-toast').textContent='Delete failed: '+e.message; }
+    };
+
+    // ── CSV export/import ───────────────────────────────────────────────────────
+    function downloadCsv(filename, text){
+      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement('a'); a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }
+    document.getElementById('q-export-btn').onclick=async function(){
+      try{
+        var res=await fetch('/api/quotes/export',{ credentials:'same-origin' });
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        downloadCsv('quotes.csv', await res.text());
+      }catch(e){ alert('Export failed: '+e.message); }
+    };
+
+    var impDlg=document.getElementById('qimp-dlg');
+    var warnDlg=document.getElementById('qwarn-dlg');
+    function impMode(){ var el=document.querySelector('input[name=qimp-mode]:checked'); return el?el.value:'add'; }
+    document.getElementById('q-import-btn').onclick=function(){
+      document.getElementById('qimp-file').value='';
+      var add=document.querySelector('input[name=qimp-mode][value=add]'); if(add) add.checked=true;
+      document.getElementById('qimp-toast').textContent='';
+      if(impDlg.showModal) impDlg.showModal(); else impDlg.setAttribute('open','');
+    };
+    document.getElementById('qimp-cancel').onclick=function(){ impDlg.close?impDlg.close():impDlg.removeAttribute('open'); };
+    function readFileText(input){
+      return new Promise(function(resolve,reject){
+        var f=input.files && input.files[0];
+        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
+        var r=new FileReader();
+        r.onload=function(){ resolve(String(r.result||'')); };
+        r.onerror=function(){ reject(new Error('Could not read the file.')); };
+        r.readAsText(f);
+      });
+    }
+    async function doQuoteImport(mode, csv){
+      var d=await api('POST','/api/quotes/import',{ mode:mode, csv:csv });
+      impDlg.close?impDlg.close():impDlg.removeAttribute('open');
+      warnDlg.close?warnDlg.close():warnDlg.removeAttribute('open');
+      await load();
+      var sub=document.getElementById('quote-sub');
+      sub.textContent = (mode==='replace'?'Replaced with ':'Imported ')+d.added+' quote'+(d.added===1?'':'s')+'. '+sub.textContent;
+    }
+    var pendingCsv='';
+    document.getElementById('qimp-go').onclick=async function(){
+      try{
+        pendingCsv=await readFileText(document.getElementById('qimp-file'));
+        if(impMode()==='replace'){ document.getElementById('qwarn-toast').textContent=''; if(warnDlg.showModal) warnDlg.showModal(); else warnDlg.setAttribute('open',''); return; }
+        await doQuoteImport('add', pendingCsv);
+      }catch(e){ document.getElementById('qimp-toast').textContent=e.message; }
+    };
+    document.getElementById('qwarn-cancel').onclick=function(){ warnDlg.close?warnDlg.close():warnDlg.removeAttribute('open'); };
+    document.getElementById('qwarn-confirm').onclick=async function(){
+      try{ await doQuoteImport('replace', pendingCsv); }
+      catch(e){ document.getElementById('qwarn-toast').textContent=e.message; }
     };`;
 
   return renderLayout({ title: 'BasecaBot — Quotes', active: 'quotes', body, script, wide: true });

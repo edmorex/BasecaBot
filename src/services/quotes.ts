@@ -9,6 +9,17 @@ export interface Actor {
   displayName: string;
 }
 
+/** One row of a CSV import. */
+export interface QuoteImportItem {
+  text: string;
+  user: string;
+  game?: string | null;
+  date?: string;
+  quotedByName?: string | null;
+  /** Twitch user id of who added it; restored only if that user still exists. */
+  quotedById?: string | null;
+}
+
 /** A quote as surfaced to the dashboard / chat formatting. */
 export interface QuoteView {
   id: number;
@@ -17,6 +28,7 @@ export interface QuoteView {
   game: string | null;
   date: string; // "YYYY-MM-DD"
   quotedByName: string | null;
+  quotedById: string | null;
   createdAt: string;
 }
 
@@ -67,7 +79,7 @@ export class QuotesService {
   }
 
   private toView = (q: {
-    id: number; text: string; quotedUser: string; game: string | null; quoteDate: string; createdByName: string | null; createdAt: Date;
+    id: number; text: string; quotedUser: string; game: string | null; quoteDate: string; createdByName: string | null; createdById: string | null; createdAt: Date;
   }): QuoteView => ({
     id: q.id,
     text: q.text,
@@ -75,6 +87,7 @@ export class QuotesService {
     game: q.game,
     date: q.quoteDate,
     quotedByName: q.createdByName,
+    quotedById: q.createdById,
     createdAt: q.createdAt.toISOString(),
   });
 
@@ -184,5 +197,51 @@ export class QuotesService {
   async listAllForDashboard(): Promise<QuoteView[]> {
     const rows = await this.db.quote.findMany({ orderBy: { id: 'desc' } });
     return rows.map((r) => this.toView(r));
+  }
+
+  // ── CSV import ────────────────────────────────────────────────────────────────
+
+  /** Which of the given user ids currently exist (so we never violate the FK). */
+  private async existingUserIds(ids: (string | null | undefined)[]): Promise<Set<string>> {
+    const want = [...new Set(ids.filter((x): x is string => !!x))];
+    if (want.length === 0) return new Set();
+    const rows = await this.db.user.findMany({ where: { id: { in: want } }, select: { id: true } });
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** Map imported items to valid create rows (skips rows with no text or user). */
+  private async toCreateRows(items: QuoteImportItem[]) {
+    const known = await this.existingUserIds(items.map((it) => it.quotedById));
+    return items
+      .map((it) => {
+        const id = it.quotedById && known.has(it.quotedById) ? it.quotedById : null;
+        return {
+          text: (it.text ?? '').trim().slice(0, 500),
+          quotedUser: normalizeUser(it.user ?? ''),
+          game: (it.game ?? '').toString().trim() || null,
+          quoteDate: parseQuoteDate(it.date ?? '') ?? todayIso(),
+          createdByName: (it.quotedByName ?? '').toString().trim() || null,
+          createdById: id,
+        };
+      })
+      .filter((r) => r.text.length > 0 && r.quotedUser.length > 0);
+  }
+
+  /** Add imported quotes (additive). Returns the number created. */
+  async bulkImport(items: QuoteImportItem[]): Promise<number> {
+    const data = await this.toCreateRows(items);
+    if (data.length === 0) return 0;
+    const { count } = await this.db.quote.createMany({ data });
+    return count;
+  }
+
+  /** Replace ALL quotes with the imported set (atomic). Returns the number created. */
+  async replaceAllWith(items: QuoteImportItem[]): Promise<number> {
+    const data = await this.toCreateRows(items);
+    const [, created] = await this.db.$transaction([
+      this.db.quote.deleteMany({}),
+      this.db.quote.createMany({ data }),
+    ]);
+    return created.count;
   }
 }

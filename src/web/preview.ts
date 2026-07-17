@@ -6,6 +6,7 @@ import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
+import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
 import type { CommandHandler, CommandOptions, GroupOptions } from '../core/commandRouter.js';
@@ -168,6 +169,8 @@ const server = createServer(async (req, res) => {
   const p = url.pathname;
   const html = (body: string) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(body); };
   const json = (status: number, obj: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const csv = (text: string) => { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8' }); res.end(text); };
+  const LVL = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
 
   if (req.method === 'GET') {
     if (p === '/') return html(welcomePage());
@@ -179,6 +182,21 @@ const server = createServer(async (req, res) => {
     if (p === '/api/commands') return json(200, { commands });
     if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
+    if (p === '/api/quotes/export') {
+      const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID'], ...mockQuotes.map((q) => [q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', ''])];
+      return csv(toCsv(rows));
+    }
+    if (p === '/api/lists/export') {
+      const scope = url.searchParams.get('scope') === 'active' ? 'active' : 'all';
+      const only = (url.searchParams.get('list') ?? '').toLowerCase();
+      const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
+      for (const l of mockLists.filter((l) => scope === 'all' || l.name === only)) {
+        const meta = [l.name, l.displayName ?? '', l.description ?? '', LVL[l.permission] ?? String(l.permission), l.createdByName ?? '', ''];
+        if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
+        else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', '', (e.addedAt ?? '').slice(0, 10)]);
+      }
+      return csv(toCsv(rows));
+    }
     if (p.startsWith('/assets/')) {
       const name = p.slice('/assets/'.length);
       try {
@@ -278,6 +296,41 @@ const server = createServer(async (req, res) => {
       const i = mockQuotes.findIndex((x) => x.id === Number(body.id));
       if (i >= 0) mockQuotes.splice(i, 1);
       return json(200, { ok: true });
+    }
+    if (p === '/api/quotes/import') {
+      const items = mapCsvRows(parseCsv(String(body.csv ?? '')), QUOTE_CSV_SPEC)
+        .map((m) => ({ text: m.text ?? '', user: (m.user ?? '').replace(/^@/, ''), game: (m.game ?? '') || null, date: (m.date ?? '') || dISO(0), quotedByName: (m.quotedByName ?? '') || null }))
+        .filter((x) => x.text && x.user);
+      if (body.mode === 'replace') mockQuotes.length = 0;
+      let nextId = mockQuotes.reduce((mx, q) => Math.max(mx, q.id), 0);
+      for (const d of items) mockQuotes.unshift({ id: ++nextId, text: d.text, user: d.user, game: d.game, date: d.date, quotedByName: d.quotedByName, createdAt: new Date().toISOString() });
+      mockQuotes.sort((a, b) => b.id - a.id);
+      return json(200, { ok: true, mode: body.mode, added: items.length });
+    }
+    if (p === '/api/lists/import') {
+      const mapped = mapCsvRows(parseCsv(String(body.csv ?? '')), LIST_CSV_SPEC);
+      const toLevel = (s: string) => { const i = LVL.findIndex((l) => l.toLowerCase() === s.toLowerCase()); return i >= 0 ? i : 3; };
+      const mode = String(body.mode ?? '');
+      if (mode === 'replace-all') {
+        mockLists.length = 0;
+        const byName = new Map<string, MockList>();
+        for (const m of mapped) {
+          const name = (m.list ?? '').trim(); if (!name) continue;
+          const key = name.toLowerCase();
+          let g = byName.get(key);
+          if (!g) { g = { name: key, displayName: (m.displayName ?? '') || null, description: (m.description ?? '') || null, permission: toLevel(m.permission ?? ''), createdByName: me.user.displayName, createdAt: iso(0), entries: [] }; byName.set(key, g); mockLists.push(g); }
+          if ((m.text ?? '').trim()) g.entries.push(entry(m.text!, m.addedByName ?? '', 0));
+        }
+        return json(200, { ok: true, mode, lists: byName.size });
+      }
+      const l = listByName(String(body.list ?? ''));
+      if (l) {
+        const entries = mapped.filter((m) => (m.text ?? '').trim());
+        if (mode === 'replace') l.entries.length = 0;
+        for (const m of entries) l.entries.push(entry(m.text!, m.addedByName ?? '', 0));
+        return json(200, { ok: true, mode, added: entries.length });
+      }
+      return json(200, { ok: true, mode, added: 0 });
     }
 
     res.writeHead(404); return res.end('Not Found');

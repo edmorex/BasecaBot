@@ -34,6 +34,27 @@ function clampLevel(level: number): number {
   return Math.min(PermissionLevel.Admin, Math.max(PermissionLevel.Viewer, Math.floor(level) || 0));
 }
 
+/** One entry row of a CSV import. */
+export interface ListEntryImportItem {
+  text: string;
+  addedByName?: string | null;
+  /** Twitch user id of who added it; restored only if that user still exists. */
+  addedById?: string | null;
+  addedAt?: string;
+}
+
+/** One list (with metadata + entries) of a CSV import. */
+export interface ListImportItem {
+  name: string;
+  displayName?: string | null;
+  description?: string | null;
+  permission?: number;
+  /** Original creator (id restored only if that user still exists). */
+  createdById?: string | null;
+  createdByName?: string | null;
+  entries?: ListEntryImportItem[];
+}
+
 /** A list plus its entries, shaped for the dashboard / chat. */
 export interface ListView {
   name: string;
@@ -41,11 +62,13 @@ export interface ListView {
   description: string | null;
   permission: number;
   createdByName: string | null;
+  createdById: string | null;
   createdAt: string;
   entries: {
     id: number;
     text: string;
     addedByName: string | null;
+    addedById: string | null;
     addedAt: string;
   }[];
 }
@@ -206,6 +229,96 @@ export class ListsService {
     return rows.map((r) => r.name);
   }
 
+  // ── CSV import ────────────────────────────────────────────────────────────────
+
+  /** The highest add-permission among existing lists (0 if none) — guards bulk ops. */
+  async maxPermission(): Promise<number> {
+    const top = await this.db.list.findFirst({ orderBy: { addPermission: 'desc' }, select: { addPermission: true } });
+    return top?.addPermission ?? 0;
+  }
+
+  /** Which of the given user ids currently exist (so we never violate the FK). */
+  private async existingUserIds(ids: (string | null | undefined)[]): Promise<Set<string>> {
+    const want = [...new Set(ids.filter((x): x is string => !!x))];
+    if (want.length === 0) return new Set();
+    const rows = await this.db.user.findMany({ where: { id: { in: want } }, select: { id: true } });
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /** Map imported entries to valid create rows for a list (skips blank text). */
+  private entryRows(listId: number, entries: ListEntryImportItem[], knownUsers: Set<string>) {
+    return entries
+      .map((e) => {
+        const when = e.addedAt ? new Date(e.addedAt) : null;
+        return {
+          listId,
+          text: (e.text ?? '').trim().slice(0, 500),
+          addedByName: (e.addedByName ?? '').toString().trim() || null,
+          addedById: e.addedById && knownUsers.has(e.addedById) ? e.addedById : null,
+          ...(when && !Number.isNaN(when.getTime()) ? { createdAt: when } : {}),
+        };
+      })
+      .filter((e) => e.text.length > 0);
+  }
+
+  /** Add imported entries to a list (additive). Returns the number created. */
+  async addEntries(name: string, entries: ListEntryImportItem[]): Promise<number> {
+    const list = await this.resolveOrThrow(name);
+    const known = await this.existingUserIds(entries.map((e) => e.addedById));
+    const data = this.entryRows(list.id, entries, known);
+    if (data.length === 0) return 0;
+    const { count } = await this.db.listEntry.createMany({ data });
+    return count;
+  }
+
+  /** Replace a list's entries with the imported set (atomic). Returns the number created. */
+  async replaceEntries(name: string, entries: ListEntryImportItem[]): Promise<number> {
+    const list = await this.resolveOrThrow(name);
+    const known = await this.existingUserIds(entries.map((e) => e.addedById));
+    const data = this.entryRows(list.id, entries, known);
+    const [, created] = await this.db.$transaction([
+      this.db.listEntry.deleteMany({ where: { listId: list.id } }),
+      this.db.listEntry.createMany({ data }),
+    ]);
+    return created.count;
+  }
+
+  /**
+   * Replace ALL lists with the imported structure (atomic). Each list's original
+   * creator is restored (id kept only if that user still exists); when a list
+   * carries no creator, `fallbackCreator` (the importer) is used.
+   */
+  async replaceAllLists(lists: ListImportItem[], fallbackCreator?: Actor): Promise<number> {
+    const known = await this.existingUserIds(lists.flatMap((l) => [l.createdById, ...(l.entries ?? []).map((e) => e.addedById)]));
+    let created = 0;
+    await this.db.$transaction(async (tx) => {
+      await tx.list.deleteMany({}); // cascades entries
+      const seen = new Set<string>();
+      for (const l of lists) {
+        const name = normalizeListName(l.name);
+        if (!name || /\s/.test(name) || name.length > 40 || seen.has(name)) continue;
+        seen.add(name);
+        const hasCreator = (l.createdByName ?? '').trim() || l.createdById;
+        const createdById = l.createdById && known.has(l.createdById) ? l.createdById : hasCreator ? null : (fallbackCreator?.id ?? null);
+        const createdByName = hasCreator ? (l.createdByName ?? '').trim() || null : (fallbackCreator?.displayName ?? null);
+        const row = await tx.list.create({
+          data: {
+            name,
+            displayName: (l.displayName ?? '').trim() || null,
+            description: (l.description ?? '').trim() || null,
+            addPermission: clampLevel(l.permission ?? PermissionLevel.Moderator),
+            createdById,
+            createdByName,
+          },
+        });
+        const entries = this.entryRows(row.id, l.entries ?? [], known);
+        if (entries.length) await tx.listEntry.createMany({ data: entries });
+        created++;
+      }
+    });
+    return created;
+  }
+
   /** Every list with its entries, for the dashboard. */
   async listAllForDashboard(): Promise<ListView[]> {
     const rows = await this.db.list.findMany({
@@ -218,11 +331,13 @@ export class ListsService {
       description: r.description,
       permission: r.addPermission,
       createdByName: r.createdByName,
+      createdById: r.createdById,
       createdAt: r.createdAt.toISOString(),
       entries: r.entries.map((e) => ({
         id: e.id,
         text: e.text,
         addedByName: e.addedByName,
+        addedById: e.addedById,
         addedAt: e.createdAt.toISOString(),
       })),
     }));

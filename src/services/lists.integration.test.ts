@@ -109,4 +109,70 @@ run('ListsService (integration)', () => {
     await lists.setPermission('quotes', 4);
     expect(await lists.addPermission('quotes')).toBe(4);
   });
+
+  it('addEntries / replaceEntries bulk-import into a list', async () => {
+    await lists.create('quotes');
+    expect(await lists.addEntries('quotes', [{ text: 'a', addedByName: 'Bob' }, { text: '' }, { text: 'b' }])).toBe(2);
+    let [list] = await lists.listAllForDashboard();
+    expect(list!.entries.map((e) => e.text)).toEqual(['a', 'b']);
+    expect(await lists.replaceEntries('quotes', [{ text: 'only' }])).toBe(1);
+    [list] = await lists.listAllForDashboard();
+    expect(list!.entries.map((e) => e.text)).toEqual(['only']);
+  });
+
+  it('replaceAllLists rebuilds the whole structure', async () => {
+    await lists.create('old', 'Old One', CREATOR);
+    await lists.addEntry('old', 'stale', ADDER);
+    const count = await lists.replaceAllLists(
+      [
+        { name: 'Games', displayName: 'Completed Games', description: 'beaten', permission: 4, entries: [{ text: 'Half-Life', addedByName: 'Neo' }, { text: 'Metal Gear' }] },
+        { name: 'songs', permission: 1, entries: [] },
+      ],
+      CREATOR,
+    );
+    expect(count).toBe(2);
+    const all = await lists.listAllForDashboard();
+    expect(all.map((l) => l.name).sort()).toEqual(['games', 'songs']);
+    const games = all.find((l) => l.name === 'games')!;
+    expect(games).toMatchObject({ displayName: 'Completed Games', permission: 4, createdByName: 'Creator' });
+    expect(games.entries.map((e) => e.text)).toEqual(['Half-Life', 'Metal Gear']);
+    expect(await lists.exists('old')).toBe(false); // wiped
+  });
+
+  it('restores creator + addedBy ids only when the user exists (FK-safe)', async () => {
+    await lists.replaceAllLists(
+      [
+        {
+          name: 'games',
+          createdById: CREATOR.id,
+          createdByName: 'Creator',
+          entries: [
+            { text: 'known', addedByName: 'Adder', addedById: ADDER.id },
+            { text: 'ghost', addedByName: 'Ghost', addedById: 'itest_no_such_user' },
+          ],
+        },
+      ],
+      { id: 'itest_no_such_user', displayName: 'Importer' }, // fallback should NOT be used (list carries a creator)
+    );
+    const [list] = await lists.listAllForDashboard();
+    expect(list!.createdById).toBe(CREATOR.id); // restored, not the importer
+    expect(list!.createdByName).toBe('Creator');
+    expect(list!.entries.find((e) => e.text === 'known')!.addedById).toBe(ADDER.id);
+    const ghost = list!.entries.find((e) => e.text === 'ghost')!;
+    expect(ghost.addedById).toBeNull(); // unknown id dropped
+    expect(ghost.addedByName).toBe('Ghost'); // name preserved
+  });
+
+  it('replaceAllLists falls back to the importer only when a list carries no creator', async () => {
+    await lists.replaceAllLists([{ name: 'orphan', entries: [] }], { id: CREATOR.id, displayName: 'Importer' });
+    const [list] = await lists.listAllForDashboard();
+    expect(list!.createdById).toBe(CREATOR.id); // fallback importer used
+  });
+
+  it('maxPermission reports the highest restriction', async () => {
+    await lists.create('a');
+    await lists.create('b');
+    await lists.setPermission('b', 4);
+    expect(await lists.maxPermission()).toBe(4);
+  });
 });

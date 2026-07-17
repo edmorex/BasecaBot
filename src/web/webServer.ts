@@ -7,10 +7,11 @@ import type { UsersService } from '../services/users.js';
 import { AliasError } from '../services/users.js';
 import type { CustomCommandService, TargetRef } from '../services/customCommands.js';
 import { CommandError } from '../services/customCommands.js';
-import type { ListsService } from '../services/lists.js';
+import type { ListsService, ListImportItem } from '../services/lists.js';
 import { ListError } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
 import { QuoteError } from '../services/quotes.js';
+import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
@@ -34,7 +35,18 @@ import { quotesPage } from './pages/quotes.js';
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
+const IMPORT_MAX_BYTES = 5 * 1024 * 1024; // CSV imports can be large
 const LEVEL_LABELS = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
+
+/** Map a permission label ("Moderator"), restrict keyword ("mod"), or number to a level 0–5. */
+function labelToLevel(s: string): number {
+  const t = s.trim().toLowerCase();
+  if (/^\d+$/.test(t)) return Math.min(5, Math.max(0, Number(t)));
+  const byLabel = LEVEL_LABELS.findIndex((l) => l.toLowerCase() === t);
+  if (byLabel >= 0) return byLabel;
+  const kw: Record<string, number> = { all: 0, sub: 1, mod: 3 };
+  return kw[t] ?? 3;
+}
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -129,8 +141,12 @@ export class WebServer {
           return this.getCommands(res);
         case '/api/lists':
           return this.getLists(res);
+        case '/api/lists/export':
+          return this.exportLists(req, res, url);
         case '/api/quotes':
           return this.getQuotes(res);
+        case '/api/quotes/export':
+          return this.exportQuotes(req, res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -168,10 +184,14 @@ export class WebServer {
           return this.updateListEntry(req, res);
         case '/api/lists/entries/delete':
           return this.deleteListEntry(req, res);
+        case '/api/lists/import':
+          return this.importLists(req, res);
         case '/api/quotes/update':
           return this.updateQuote(req, res);
         case '/api/quotes/delete':
           return this.deleteQuote(req, res);
+        case '/api/quotes/import':
+          return this.importQuotes(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -527,6 +547,104 @@ export class WebServer {
     this.json(res, 200, { ok: true });
   }
 
+  // ── CSV import / export (mod+) ──────────────────────────────────────────────────
+
+  private async exportQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const quotes = await this.quotes.listAllForDashboard();
+    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID']];
+    for (const q of quotes) rows.push([q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '']);
+    this.csvDownload(res, 'quotes.csv', toCsv(rows));
+  }
+
+  private async importQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const mode = body.mode === 'replace' ? 'replace' : 'add';
+    const items = mapCsvRows(parseCsv(String(body.csv ?? '')), QUOTE_CSV_SPEC).map((m) => ({
+      text: m.text!,
+      user: m.user!,
+      game: m.game,
+      date: m.date,
+      quotedByName: m.quotedByName,
+      quotedById: m.quotedById,
+    }));
+    const added = mode === 'replace' ? await this.quotes.replaceAllWith(items) : await this.quotes.bulkImport(items);
+    this.json(res, 200, { ok: true, mode, added });
+  }
+
+  private async exportLists(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    this.requireManager(req);
+    const scope = url.searchParams.get('scope') === 'active' ? 'active' : 'all';
+    const only = (url.searchParams.get('list') ?? '').toLowerCase();
+    let lists = await this.lists.listAllForDashboard();
+    if (scope === 'active') lists = lists.filter((l) => l.name === only);
+    const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
+    for (const l of lists) {
+      const meta = [l.name, l.displayName ?? '', l.description ?? '', LEVEL_LABELS[l.permission] ?? String(l.permission), l.createdByName ?? '', l.createdById ?? ''];
+      if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
+      else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', e.addedById ?? '', (e.addedAt ?? '').slice(0, 10)]);
+    }
+    this.csvDownload(res, scope === 'active' && only ? `${only}.csv` : 'lists.csv', toCsv(rows));
+  }
+
+  /** Group per-entry list rows back into structured lists (metadata from the first row of each). */
+  private groupLists(mapped: Record<string, string>[]): ListImportItem[] {
+    const map = new Map<string, ListImportItem>();
+    for (const m of mapped) {
+      const name = (m.list ?? '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          name,
+          displayName: m.displayName || null,
+          description: m.description || null,
+          permission: labelToLevel(m.permission ?? ''),
+          createdByName: m.createdByName || null,
+          createdById: m.createdById || null,
+          entries: [],
+        };
+        map.set(key, g);
+      }
+      if ((m.text ?? '').trim()) g.entries!.push({ text: m.text!, addedByName: m.addedByName, addedById: m.addedById, addedAt: m.addedAt });
+    }
+    return [...map.values()];
+  }
+
+  /** Replacing all lists needs mod+ AND at least the highest restriction level among existing lists. */
+  private async requireBulkListManager(req: IncomingMessage): Promise<SessionData> {
+    const session = this.requireManager(req);
+    const max = await this.lists.maxPermission();
+    if (this.sessionLevel(session) < max) {
+      throw new HttpError(403, `Replacing all lists requires ${LEVEL_LABELS[max]}+ (a list is restricted to that level).`);
+    }
+    return session;
+  }
+
+  private async importLists(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const mode = String(body.mode ?? '');
+    const activeName = String(body.list ?? '').trim();
+    const mapped = mapCsvRows(parseCsv(String(body.csv ?? '')), LIST_CSV_SPEC);
+    try {
+      if (mode === 'replace-all') {
+        const session = await this.requireBulkListManager(req);
+        const count = await this.lists.replaceAllLists(this.groupLists(mapped), { id: session.user.id, displayName: session.user.displayName });
+        this.json(res, 200, { ok: true, mode, lists: count });
+        return;
+      }
+      await this.requireListManage(req, activeName);
+      const entries = mapped.filter((m) => (m.text ?? '').trim()).map((m) => ({ text: m.text!, addedByName: m.addedByName, addedById: m.addedById, addedAt: m.addedAt }));
+      const added = mode === 'replace' ? await this.lists.replaceEntries(activeName, entries) : await this.lists.addEntries(activeName, entries);
+      this.json(res, 200, { ok: true, mode, added });
+    } catch (e) {
+      if (e instanceof ListError) throw new HttpError(400, e.message);
+      throw e;
+    }
+  }
+
   // ── Session / CSRF helpers ────────────────────────────────────────────────────
 
   private getSession(req: IncomingMessage): SessionData | null {
@@ -562,12 +680,12 @@ export class WebServer {
     if (origin && origin !== this.config.web.publicUrl) throw new HttpError(403, 'Bad origin.');
   }
 
-  private async readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  private async readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) throw new HttpError(413, 'Body too large.');
+      if (size > maxBytes) throw new HttpError(413, 'Body too large.');
       chunks.push(chunk as Buffer);
     }
     if (chunks.length === 0) return {};
@@ -602,6 +720,15 @@ export class WebServer {
 
   private json(res: ServerResponse, status: number, obj: unknown): void {
     this.send(res, status, 'application/json', JSON.stringify(obj));
+  }
+
+  private csvDownload(res: ServerResponse, filename: string, csv: string): void {
+    this.securityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}"`,
+    });
+    res.end(csv);
   }
 
   private send(res: ServerResponse, status: number, contentType: string, body: string): void {

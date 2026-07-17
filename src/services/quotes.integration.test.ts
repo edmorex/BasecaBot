@@ -22,7 +22,7 @@ describe('quote helpers (unit)', () => {
   });
 
   it('formats a quote for chat', () => {
-    const base = { id: 5, text: 'hi', user: 'baseca', quotedByName: 'mod', createdAt: '' };
+    const base = { id: 5, text: 'hi', user: 'baseca', quotedByName: 'mod', quotedById: null, createdAt: '' };
     expect(formatQuote({ ...base, game: 'Elden Ring', date: '2024-01-02' })).toBe('Quote 5: "hi" - @baseca [Elden Ring] [2024/01/02]');
     expect(formatQuote({ ...base, game: null, date: '2024-01-02' })).toBe('Quote 5: "hi" - @baseca [2024/01/02]');
   });
@@ -97,5 +97,40 @@ run('QuotesService (integration)', () => {
     const b = await quotes.add({ user: 'y', text: 'second' }, ADDER);
     const all = await quotes.listAllForDashboard();
     expect(all.map((q) => q.id)).toEqual([b.id, a.id]);
+  });
+
+  it('bulkImport adds valid rows, skips blanks, and defaults the date', async () => {
+    const added = await quotes.bulkImport([
+      { text: 'hello', user: '@Baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod' },
+      { text: '', user: 'x' }, // skipped (no text)
+      { text: 'no user', user: '' }, // skipped (no user)
+      { text: 'defaults', user: 'alice' }, // date defaults to today
+    ]);
+    expect(added).toBe(2);
+    const all = await quotes.listAllForDashboard();
+    expect(all).toHaveLength(2);
+    expect(all.find((q) => q.text === 'hello')).toMatchObject({ user: 'Baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod' });
+    expect(all.find((q) => q.text === 'defaults')!.date).toBe(todayIso());
+  });
+
+  it('restores quotedById only when that user exists (FK-safe)', async () => {
+    await quotes.bulkImport([
+      { text: 'known adder', user: 'a', quotedByName: 'Adder', quotedById: ADDER.id },
+      { text: 'ghost adder', user: 'b', quotedByName: 'Ghost', quotedById: 'itest_no_such_user' },
+    ]);
+    const all = await quotes.listAllForDashboard();
+    expect(all.find((q) => q.text === 'known adder')!.quotedById).toBe(ADDER.id); // restored
+    const ghost = all.find((q) => q.text === 'ghost adder')!;
+    expect(ghost.quotedById).toBeNull(); // unknown id dropped
+    expect(ghost.quotedByName).toBe('Ghost'); // name preserved
+  });
+
+  it('replaceAllWith wipes then inserts (atomic)', async () => {
+    await quotes.add({ user: 'old', text: 'old quote' }, ADDER);
+    const added = await quotes.replaceAllWith([{ text: 'brand new', user: 'neo' }]);
+    expect(added).toBe(1);
+    const all = await quotes.listAllForDashboard();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ text: 'brand new', user: 'neo' });
   });
 });

@@ -15,7 +15,11 @@ export function listsPage(): string {
         <h1>Lists</h1>
         <p class="muted" id="list-sub" style="margin:0; padding:0">Loading…</p>
       </div>
-      <button type="button" class="pink" id="new-list-btn" style="display:none; flex:none">+ Add List</button>
+      <div class="rowline" style="flex:none; gap:.5rem; justify-content:flex-end">
+        <button type="button" class="pink" id="new-list-btn" style="display:none">+ Add List</button>
+        <button type="button" class="pink" id="l-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink" id="l-export-btn" style="display:none">Export CSV</button>
+      </div>
     </div>
     <div class="md-layout">
       <nav class="md-side card" id="list-side"></nav>
@@ -68,6 +72,47 @@ export function listsPage(): string {
         <button type="button" class="secondary" id="del-cancel">Cancel</button>
         <button type="button" class="pink" id="del-confirm">Delete</button>
       </div>
+    </dialog>
+
+    <dialog id="lexp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+      <h2 style="margin-top:0">Export Lists to CSV</h2>
+      <div class="radio-row" style="margin:.35rem 0 .8rem; flex-wrap:wrap">
+        <label><input type="radio" name="lexp-scope" value="all" checked /> All lists</label>
+        <label><input type="radio" name="lexp-scope" value="active" /> Active list only (<code id="lexp-active">—</code>)</label>
+      </div>
+      <div class="toast err" id="lexp-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="lexp-cancel">Cancel</button>
+        <button type="button" class="pink" id="lexp-go">Export</button>
+      </div>
+    </dialog>
+
+    <dialog id="limp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+      <h2 style="margin-top:0">Import Lists from CSV</h2>
+      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>List, Display Name, Description, Permission, Created By, Created By ID, Entry, Added By, Added By ID, Date Added</code>. The <code>ID</code> columns restore attribution when those users are still known to the bot. A header row is optional.</p>
+      <label class="muted">CSV file</label>
+      <input type="file" id="limp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Mode</label>
+      <div style="display:flex; flex-direction:column; gap:.35rem; margin:.35rem 0 .8rem">
+        <label><input type="radio" name="limp-mode" value="add" checked /> Add entries to the active list (<code id="limp-active">—</code>)</label>
+        <label><input type="radio" name="limp-mode" value="replace" /> Wipe &amp; replace the active list's entries</label>
+        <label><input type="radio" name="limp-mode" value="replace-all" /> Wipe &amp; replace ALL lists</label>
+      </div>
+      <div class="toast err" id="limp-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="limp-cancel">Cancel</button>
+        <button type="button" class="pink" id="limp-go">Import</button>
+      </div>
+    </dialog>
+
+    <dialog id="lwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+      <h2 style="margin-top:0" id="lwarn-title">⚠️ Confirm wipe &amp; replace</h2>
+      <p class="muted" id="lwarn-msg"></p>
+      <div class="toast err" id="lwarn-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="lwarn-cancel">Cancel</button>
+        <button type="button" class="danger" id="lwarn-confirm">Wipe &amp; replace</button>
+      </div>
     </dialog>`;
 
   const script = `
@@ -98,6 +143,8 @@ export function listsPage(): string {
         var n=state.lists.length;
         document.getElementById('list-sub').textContent = n+' list'+(n===1?'':'s')+'.'+(state.canManage?' You can manage lists.':'');
         document.getElementById('new-list-btn').style.display = state.canManage ? '' : 'none';
+        document.getElementById('l-import-btn').style.display = state.canManage ? '' : 'none';
+        document.getElementById('l-export-btn').style.display = state.canManage ? '' : 'none';
         renderSide(); renderMain();
       }catch(e){ document.getElementById('list-sub').textContent='Could not load lists: '+e.message; }
     }
@@ -269,6 +316,100 @@ export function listsPage(): string {
         if(delKind==='list') state.view=null;
         await load();
       }catch(e){ document.getElementById('del-toast').textContent='Delete failed: '+e.message; }
+    };
+
+    // ── CSV export/import ───────────────────────────────────────────────────────
+    function downloadCsv(filename, text){
+      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement('a'); a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }
+    function readFileText(input){
+      return new Promise(function(resolve,reject){
+        var f=input.files && input.files[0];
+        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
+        var r=new FileReader();
+        r.onload=function(){ resolve(String(r.result||'')); };
+        r.onerror=function(){ reject(new Error('Could not read the file.')); };
+        r.readAsText(f);
+      });
+    }
+
+    // Export (scope: all vs active list)
+    var expDlg=document.getElementById('lexp-dlg');
+    document.getElementById('l-export-btn').onclick=function(){
+      var activeEl=document.querySelector('input[name=lexp-scope][value=active]');
+      document.getElementById('lexp-active').textContent = state.view || '—';
+      if(activeEl) activeEl.disabled = !state.view;
+      var allEl=document.querySelector('input[name=lexp-scope][value=all]'); if(allEl) allEl.checked=true;
+      document.getElementById('lexp-toast').textContent='';
+      if(expDlg.showModal) expDlg.showModal(); else expDlg.setAttribute('open','');
+    };
+    document.getElementById('lexp-cancel').onclick=function(){ expDlg.close?expDlg.close():expDlg.removeAttribute('open'); };
+    document.getElementById('lexp-go').onclick=async function(){
+      var scopeEl=document.querySelector('input[name=lexp-scope]:checked'); var scope=scopeEl?scopeEl.value:'all';
+      var qs = scope==='active' ? ('?scope=active&list='+encodeURIComponent(state.view||'')) : '?scope=all';
+      try{
+        var res=await fetch('/api/lists/export'+qs,{ credentials:'same-origin' });
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        downloadCsv(scope==='active'&&state.view ? state.view+'.csv' : 'lists.csv', await res.text());
+        expDlg.close?expDlg.close():expDlg.removeAttribute('open');
+      }catch(e){ document.getElementById('lexp-toast').textContent='Export failed: '+e.message; }
+    };
+
+    // Import (add / replace-current / replace-all)
+    var limpDlg=document.getElementById('limp-dlg');
+    var lwarnDlg=document.getElementById('lwarn-dlg');
+    var lPendingCsv='';
+    function limpMode(){ var el=document.querySelector('input[name=limp-mode]:checked'); return el?el.value:'add'; }
+    document.getElementById('l-import-btn').onclick=function(){
+      document.getElementById('limp-file').value='';
+      document.getElementById('limp-active').textContent = state.view || '(none selected)';
+      var add=document.querySelector('input[name=limp-mode][value=add]'); if(add) add.checked=true;
+      // current-list modes need an active list selected
+      var needActive=!state.view;
+      document.querySelector('input[name=limp-mode][value=add]').disabled=needActive;
+      document.querySelector('input[name=limp-mode][value=replace]').disabled=needActive;
+      if(needActive){ var ra=document.querySelector('input[name=limp-mode][value=replace-all]'); if(ra) ra.checked=true; }
+      document.getElementById('limp-toast').textContent='';
+      if(limpDlg.showModal) limpDlg.showModal(); else limpDlg.setAttribute('open','');
+    };
+    document.getElementById('limp-cancel').onclick=function(){ limpDlg.close?limpDlg.close():limpDlg.removeAttribute('open'); };
+    async function doListImport(mode, csv){
+      var body={ mode:mode, csv:csv }; if(mode!=='replace-all') body.list=state.view;
+      var d=await api('POST','/api/lists/import', body);
+      limpDlg.close?limpDlg.close():limpDlg.removeAttribute('open');
+      lwarnDlg.close?lwarnDlg.close():lwarnDlg.removeAttribute('open');
+      if(mode==='replace-all') state.view=null;
+      await load();
+      var sub=document.getElementById('list-sub');
+      var msg = mode==='replace-all' ? ('Replaced all lists ('+d.lists+').') : ((mode==='replace'?'Replaced entries — ':'Imported ')+d.added+' entr'+(d.added===1?'y':'ies')+'.');
+      sub.textContent = msg+' '+sub.textContent;
+    }
+    document.getElementById('limp-go').onclick=async function(){
+      try{
+        var mode=limpMode();
+        if((mode==='add'||mode==='replace') && !state.view){ document.getElementById('limp-toast').textContent='Select a list first (left panel) for current-list modes.'; return; }
+        lPendingCsv=await readFileText(document.getElementById('limp-file'));
+        if(mode==='replace' || mode==='replace-all'){
+          document.getElementById('lwarn-title').textContent = mode==='replace-all' ? '⚠️ Wipe & replace ALL lists?' : '⚠️ Wipe & replace this list?';
+          document.getElementById('lwarn-msg').innerHTML = mode==='replace-all'
+            ? 'This permanently deletes <strong>every list and all their entries</strong>, then rebuilds them from your CSV. This cannot be undone.'
+            : 'This permanently deletes all entries in <strong>'+esc(state.view)+'</strong> and replaces them with your CSV. This cannot be undone.';
+          document.getElementById('lwarn-confirm').setAttribute('data-mode', mode);
+          document.getElementById('lwarn-toast').textContent='';
+          if(lwarnDlg.showModal) lwarnDlg.showModal(); else lwarnDlg.setAttribute('open','');
+          return;
+        }
+        await doListImport('add', lPendingCsv);
+      }catch(e){ document.getElementById('limp-toast').textContent=e.message; }
+    };
+    document.getElementById('lwarn-cancel').onclick=function(){ lwarnDlg.close?lwarnDlg.close():lwarnDlg.removeAttribute('open'); };
+    document.getElementById('lwarn-confirm').onclick=async function(){
+      try{ await doListImport(document.getElementById('lwarn-confirm').getAttribute('data-mode'), lPendingCsv); }
+      catch(e){ document.getElementById('lwarn-toast').textContent=e.message; }
     };`;
 
   return renderLayout({ title: 'BasecaBot — Lists', active: 'lists', body, script, wide: true });
