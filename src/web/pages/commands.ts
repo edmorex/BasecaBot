@@ -76,7 +76,7 @@ export function commandsPage(): string {
 
     <dialog id="cimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
       <h2 style="margin-top:0">Import Commands from CSV</h2>
-      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>Type, Name, Response, Group, Access, Enabled, Global Cooldown, User Cooldown, Uses, Target, Args</code>. Type is <code>trigger</code>, <code>phrase</code>, or <code>alias</code> (alias rows use Target + Args). Only custom commands are affected — built-ins are never touched. A header row is optional.</p>
+      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>Type, Name, Response, Group, Access, Enabled, Global Cooldown, User Cooldown, Uses, Target, Args, Created At, Updated At</code>. Type is <code>trigger</code>, <code>phrase</code>, or <code>alias</code> (alias rows use Target + Args). Only custom commands are affected — built-ins are never touched. <strong>Wipe &amp; replace preserves timestamps</strong> for a true backup restore. A header row is optional.</p>
       <label class="muted">CSV file</label>
       <input type="file" id="cimp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
       <label class="muted">Mode</label>

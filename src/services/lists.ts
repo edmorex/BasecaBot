@@ -52,7 +52,17 @@ export interface ListImportItem {
   /** Original creator (id restored only if that user still exists). */
   createdById?: string | null;
   createdByName?: string | null;
+  /** List timestamps (ISO); honored on a full restore. */
+  createdAt?: string;
+  updatedAt?: string;
   entries?: ListEntryImportItem[];
+}
+
+/** Parse an ISO datetime string to a Date, or null if empty/invalid. */
+function parseTimestamp(s: string | null | undefined): Date | null {
+  if (!s || !s.trim()) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** A list plus its entries, shaped for the dashboard / chat. */
@@ -64,6 +74,7 @@ export interface ListView {
   createdByName: string | null;
   createdById: string | null;
   createdAt: string;
+  updatedAt: string;
   entries: {
     id: number;
     text: string;
@@ -309,6 +320,8 @@ export class ListsService {
             addPermission: clampLevel(l.permission ?? PermissionLevel.Moderator),
             createdById,
             createdByName,
+            createdAt: parseTimestamp(l.createdAt) ?? undefined,
+            updatedAt: parseTimestamp(l.updatedAt) ?? undefined,
           },
         });
         const entries = this.entryRows(row.id, l.entries ?? [], known);
@@ -333,6 +346,7 @@ export class ListsService {
       createdByName: r.createdByName,
       createdById: r.createdById,
       createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
       entries: r.entries.map((e) => ({
         id: e.id,
         text: e.text,

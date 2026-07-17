@@ -133,4 +133,18 @@ run('QuotesService (integration)', () => {
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ text: 'brand new', user: 'neo' });
   });
+
+  it('replaceAllWith preserves the quote id + createdAt (true restore)', async () => {
+    const createdAt = '2020-05-06T07:08:09.000Z';
+    await quotes.replaceAllWith([{ id: 4242, text: 'restored', user: 'neo', date: '2019-01-02', createdAt }]);
+    const all = await quotes.listAllForDashboard();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ id: 4242, text: 'restored', date: '2019-01-02', createdAt });
+  });
+
+  it('additive import ignores ids (no primary-key conflict)', async () => {
+    const q = await quotes.add({ user: 'x', text: 'seed' }, ADDER);
+    await expect(quotes.bulkImport([{ id: q.id, text: 'new', user: 'y' }])).resolves.toBe(1);
+    expect(await quotes.listAllForDashboard()).toHaveLength(2);
+  });
 });

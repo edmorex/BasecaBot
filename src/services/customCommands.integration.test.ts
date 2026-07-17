@@ -175,6 +175,15 @@ run('CustomCommandService (integration)', () => {
     expect((await svc.findByTrigger('existing'))?.command.response).toBe('old'); // not overwritten
   });
 
+  it('importCommands restores created/updated timestamps (true restore)', async () => {
+    const c = '2020-01-02T03:04:05.000Z';
+    const u = '2021-02-03T04:05:06.000Z';
+    await svc.importCommands([{ kind: 'trigger', name: 'greet', response: 'hi', createdAt: c, updatedAt: u }], 'replace');
+    const row = (await svc.listForDashboard()).find((r) => r.name === 'greet')!;
+    expect(row.createdAt).toBe(c);
+    expect(row.updatedAt).toBe(u);
+  });
+
   it('imports in replace mode, wiping existing custom commands first', async () => {
     await svc.create(trig('old1'), { response: 'a' });
     await svc.create(trig('old2'), { response: 'b' });

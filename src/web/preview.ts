@@ -46,7 +46,8 @@ const me = structuredClone(PROFILES[which]);
 const mk = (o: Partial<Record<string, unknown>>) => ({
   kind: 'trigger', name: 'x', access: 0, description: 'Custom response command.', response: 'hi',
   globalCooldown: 0, userCooldown: 0, enabled: true, usageCount: 0, group: null as string | null,
-  target: null as string | null, args: null as string | null, ...o,
+  target: null as string | null, args: null as string | null,
+  createdAt: '2026-06-01T12:00:00.000Z' as string | null, updatedAt: '2026-06-15T09:30:00.000Z' as string | null, ...o,
 });
 
 /**
@@ -185,26 +186,26 @@ const server = createServer(async (req, res) => {
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
     if (p === '/api/commands/export') {
-      const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args']];
+      const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At']];
       for (const c of commands.filter((c) => c.kind !== 'builtin')) {
-        rows.push([c.kind, c.name, c.response ?? '', c.group ?? '', LVL[c.access] ?? String(c.access), c.enabled ? 'true' : 'false', c.globalCooldown, c.userCooldown, c.usageCount, c.target ?? '', c.args ?? '']);
+        rows.push([c.kind, c.name, c.response ?? '', c.group ?? '', LVL[c.access] ?? String(c.access), c.enabled ? 'true' : 'false', c.globalCooldown, c.userCooldown, c.usageCount, c.target ?? '', c.args ?? '', c.kind === 'alias' ? '' : (c.createdAt ?? ''), c.kind === 'alias' ? '' : (c.updatedAt ?? '')]);
       }
       return csv(toCsv(rows));
     }
     if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
-      const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID'], ...mockQuotes.map((q) => [q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', ''])];
+      const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
       return csv(toCsv(rows));
     }
     if (p === '/api/lists/export') {
       const scope = url.searchParams.get('scope') === 'active' ? 'active' : 'all';
       const only = (url.searchParams.get('list') ?? '').toLowerCase();
-      const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
+      const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'List Created At', 'List Updated At', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
       for (const l of mockLists.filter((l) => scope === 'all' || l.name === only)) {
-        const meta = [l.name, l.displayName ?? '', l.description ?? '', LVL[l.permission] ?? String(l.permission), l.createdByName ?? '', ''];
+        const meta = [l.name, l.displayName ?? '', l.description ?? '', LVL[l.permission] ?? String(l.permission), l.createdByName ?? '', '', l.createdAt, l.createdAt];
         if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
-        else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', '', (e.addedAt ?? '').slice(0, 10)]);
+        else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', '', e.addedAt]);
       }
       return csv(toCsv(rows));
     }

@@ -25,13 +25,13 @@ describe('csv', () => {
   });
 
   it('mapCsvRows maps by header (any column order), dropping the header row', () => {
-    const rows = parseCsv('ID,Quote,User,Game,Date,Quoted By,Quoted By ID\n1,hi there,baseca,Elden Ring,2024-01-02,Mod,u9');
+    const rows = parseCsv('ID,Quote,User,Game,Date,Quoted By,Quoted By ID,Created At\n1,hi there,baseca,Elden Ring,2024-01-02,Mod,u9,2024-01-02T00:00:00.000Z');
     expect(mapCsvRows(rows, QUOTE_CSV_SPEC)).toEqual([
-      { text: 'hi there', user: 'baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod', quotedById: 'u9' },
+      { id: '1', text: 'hi there', user: 'baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod', quotedById: 'u9', createdAt: '2024-01-02T00:00:00.000Z' },
     ]);
     // Header without some columns still maps the rest correctly by name.
     const noId = parseCsv('Quote,User\nhello,alice');
-    expect(mapCsvRows(noId, QUOTE_CSV_SPEC)).toEqual([{ text: 'hello', user: 'alice', game: '', date: '', quotedByName: '', quotedById: '' }]);
+    expect(mapCsvRows(noId, QUOTE_CSV_SPEC)).toEqual([{ id: '', text: 'hello', user: 'alice', game: '', date: '', quotedByName: '', quotedById: '', createdAt: '' }]);
   });
 
   it('mapCsvRows falls back to positional order when there is no header', () => {
@@ -40,9 +40,9 @@ describe('csv', () => {
   });
 
   it('maps a command CSV row (alias with target + args)', () => {
-    const rows = parseCsv('Type,Name,Response,Group,Access,Enabled,Global Cooldown,User Cooldown,Uses,Target,Args\nalias,d6,,Fun,Everyone,false,0,0,8,roll,$(random 1-6)');
+    const rows = parseCsv('Type,Name,Response,Group,Access,Enabled,Global Cooldown,User Cooldown,Uses,Target,Args,Created At,Updated At\nalias,d6,,Fun,Everyone,false,0,0,8,roll,$(random 1-6),,');
     expect(mapCsvRows(rows, COMMAND_CSV_SPEC)).toEqual([
-      { type: 'alias', name: 'd6', response: '', group: 'Fun', access: 'Everyone', enabled: 'false', globalCooldown: '0', userCooldown: '0', usageCount: '8', target: 'roll', args: '$(random 1-6)' },
+      { type: 'alias', name: 'd6', response: '', group: 'Fun', access: 'Everyone', enabled: 'false', globalCooldown: '0', userCooldown: '0', usageCount: '8', target: 'roll', args: '$(random 1-6)', createdAt: '', updatedAt: '' },
     ]);
   });
 

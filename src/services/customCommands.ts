@@ -60,6 +60,9 @@ export interface CommandImportItem {
   target?: string | null;
   /** Alias only: extra args. */
   args?: string | null;
+  /** Command/phrase timestamps (ISO); honored on import. */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /** One row of the dashboard command list: a command/phrase, or an alias mirroring its target. */
@@ -77,6 +80,9 @@ export interface DashboardRow {
   target: string | null;
   /** Alias only: the extra args it prepends. */
   args: string | null;
+  /** Command/phrase only (aliases have no timestamps). ISO strings or null. */
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 /** `!command restrict` keyword <-> PermissionLevel. */
@@ -435,6 +441,8 @@ export class CustomCommandService {
         usageCount: r.usageCount,
         target: null,
         args: null,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
       });
       for (const t of r.triggers) {
         if (t.isPrimary) continue;
@@ -450,6 +458,8 @@ export class CustomCommandService {
           usageCount: r.usageCount, // mirrored
           target: r.name,
           args: t.args,
+          createdAt: null, // aliases have no timestamps
+          updatedAt: null,
         });
       }
     }
@@ -473,10 +483,17 @@ export class CustomCommandService {
       if (it.kind === 'alias') continue;
       const t: TargetRef = { kind: it.kind, name: it.name };
       try {
-        await this.create(t, { response: it.response ?? null, permission: it.permission, globalCooldown: it.globalCooldown, userCooldown: it.userCooldown });
+        const cmd = await this.create(t, { response: it.response ?? null, permission: it.permission, globalCooldown: it.globalCooldown, userCooldown: it.userCooldown });
         if (it.group) await this.setGroup(t, it.group);
         if (it.enabled === false) await this.setEnabled(t, false);
         if (it.usageCount) await this.setUsageCount(t, it.usageCount);
+        // Restore timestamps LAST via raw SQL — the setGroup/setEnabled/setUsageCount
+        // updates above bump updatedAt (@updatedAt), and raw SQL bypasses that.
+        const cAt = parseTimestamp(it.createdAt);
+        const uAt = parseTimestamp(it.updatedAt);
+        if (cAt && uAt) await this.db.$executeRaw`UPDATE "CustomCommand" SET "createdAt" = ${cAt}, "updatedAt" = ${uAt} WHERE "id" = ${cmd.id}`;
+        else if (cAt) await this.db.$executeRaw`UPDATE "CustomCommand" SET "createdAt" = ${cAt} WHERE "id" = ${cmd.id}`;
+        else if (uAt) await this.db.$executeRaw`UPDATE "CustomCommand" SET "updatedAt" = ${uAt} WHERE "id" = ${cmd.id}`;
         commands++;
       } catch (e) {
         if (e instanceof CommandError) skipped++;
@@ -507,6 +524,13 @@ export class CustomCommandService {
 function emptyToNull(v: string | null | undefined): string | null {
   const t = (v ?? '').trim();
   return t.length ? t : null;
+}
+
+/** Parse an ISO datetime string to a Date, or null if empty/invalid. */
+function parseTimestamp(s: string | null | undefined): Date | null {
+  if (!s || !s.trim()) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function clampLevel(level: number): number {

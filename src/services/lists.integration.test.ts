@@ -169,6 +169,17 @@ run('ListsService (integration)', () => {
     expect(list!.createdById).toBe(CREATOR.id); // fallback importer used
   });
 
+  it('replaceAllLists preserves list + entry timestamps (true restore)', async () => {
+    const lc = '2020-01-02T03:04:05.000Z';
+    const lu = '2021-02-03T04:05:06.000Z';
+    const ea = '2019-06-07T08:09:10.000Z';
+    await lists.replaceAllLists([{ name: 'games', createdAt: lc, updatedAt: lu, entries: [{ text: 'Half-Life', addedAt: ea }] }]);
+    const [l] = await lists.listAllForDashboard();
+    expect(l!.createdAt).toBe(lc);
+    expect(l!.updatedAt).toBe(lu);
+    expect(l!.entries[0]!.addedAt).toBe(ea);
+  });
+
   it('maxPermission reports the highest restriction', async () => {
     await lists.create('a');
     await lists.create('b');

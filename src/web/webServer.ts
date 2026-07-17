@@ -418,7 +418,7 @@ export class WebServer {
   /** Export custom commands + aliases as CSV (built-ins are code-defined, excluded). */
   private async exportCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
-    const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args']];
+    const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At']];
     for (const c of await this.customCommands.listForDashboard()) {
       rows.push([
         c.kind,
@@ -432,6 +432,8 @@ export class WebServer {
         c.usageCount,
         c.target ?? '',
         c.args ?? '',
+        c.createdAt ?? '',
+        c.updatedAt ?? '',
       ]);
     }
     this.csvDownload(res, 'commands.csv', toCsv(rows));
@@ -457,6 +459,8 @@ export class WebServer {
         usageCount: Number(m.usageCount) || 0,
         target: m.target,
         args: m.args,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
       };
     });
     const result = await this.customCommands.importCommands(items, mode);
@@ -623,8 +627,8 @@ export class WebServer {
   private async exportQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
     const quotes = await this.quotes.listAllForDashboard();
-    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID']];
-    for (const q of quotes) rows.push([q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '']);
+    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At']];
+    for (const q of quotes) rows.push([q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '', q.createdAt]);
     this.csvDownload(res, 'quotes.csv', toCsv(rows));
   }
 
@@ -633,12 +637,14 @@ export class WebServer {
     const body = await this.readJson(req, IMPORT_MAX_BYTES);
     const mode = body.mode === 'replace' ? 'replace' : 'add';
     const items = mapCsvRows(parseCsv(String(body.csv ?? '')), QUOTE_CSV_SPEC).map((m) => ({
+      id: m.id,
       text: m.text!,
       user: m.user!,
       game: m.game,
       date: m.date,
       quotedByName: m.quotedByName,
       quotedById: m.quotedById,
+      createdAt: m.createdAt,
     }));
     const added = mode === 'replace' ? await this.quotes.replaceAllWith(items) : await this.quotes.bulkImport(items);
     this.json(res, 200, { ok: true, mode, added });
@@ -650,11 +656,11 @@ export class WebServer {
     const only = (url.searchParams.get('list') ?? '').toLowerCase();
     let lists = await this.lists.listAllForDashboard();
     if (scope === 'active') lists = lists.filter((l) => l.name === only);
-    const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
+    const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'List Created At', 'List Updated At', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
     for (const l of lists) {
-      const meta = [l.name, l.displayName ?? '', l.description ?? '', LEVEL_LABELS[l.permission] ?? String(l.permission), l.createdByName ?? '', l.createdById ?? ''];
+      const meta = [l.name, l.displayName ?? '', l.description ?? '', LEVEL_LABELS[l.permission] ?? String(l.permission), l.createdByName ?? '', l.createdById ?? '', l.createdAt, l.updatedAt];
       if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
-      else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', e.addedById ?? '', (e.addedAt ?? '').slice(0, 10)]);
+      else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', e.addedById ?? '', e.addedAt]);
     }
     this.csvDownload(res, scope === 'active' && only ? `${only}.csv` : 'lists.csv', toCsv(rows));
   }
@@ -675,6 +681,8 @@ export class WebServer {
           permission: labelToLevel(m.permission ?? ''),
           createdByName: m.createdByName || null,
           createdById: m.createdById || null,
+          createdAt: m.createdAt || undefined,
+          updatedAt: m.updatedAt || undefined,
           entries: [],
         };
         map.set(key, g);

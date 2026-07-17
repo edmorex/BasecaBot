@@ -105,12 +105,14 @@ export function mapCsvRows(rows: string[][], spec: CsvColumn[]): Record<string, 
 
 /** Standard CSV column layouts for quotes and lists (shared by the API + preview). */
 export const QUOTE_CSV_SPEC: CsvColumn[] = [
+  { key: 'id', aliases: ['id'], pos: 0 },
   { key: 'text', aliases: ['quote'], pos: 1 },
   { key: 'user', aliases: ['user'], pos: 2 },
   { key: 'game', aliases: ['game'], pos: 3 },
   { key: 'date', aliases: ['date'], pos: 4 },
   { key: 'quotedByName', aliases: ['quoted by'], pos: 5 },
   { key: 'quotedById', aliases: ['quoted by id'], pos: 6 },
+  { key: 'createdAt', aliases: ['created at'], pos: 7 },
 ];
 export const COMMAND_CSV_SPEC: CsvColumn[] = [
   { key: 'type', aliases: ['type'], pos: 0 },
@@ -124,6 +126,8 @@ export const COMMAND_CSV_SPEC: CsvColumn[] = [
   { key: 'usageCount', aliases: ['uses', 'usage count'], pos: 8 },
   { key: 'target', aliases: ['target'], pos: 9 },
   { key: 'args', aliases: ['args', 'arguments'], pos: 10 },
+  { key: 'createdAt', aliases: ['created at'], pos: 11 },
+  { key: 'updatedAt', aliases: ['updated at'], pos: 12 },
 ];
 export const LIST_CSV_SPEC: CsvColumn[] = [
   { key: 'list', aliases: ['list', 'list name'], pos: 0 },
@@ -132,8 +136,10 @@ export const LIST_CSV_SPEC: CsvColumn[] = [
   { key: 'permission', aliases: ['permission'], pos: 3 },
   { key: 'createdByName', aliases: ['created by'], pos: 4 },
   { key: 'createdById', aliases: ['created by id'], pos: 5 },
-  { key: 'text', aliases: ['entry'], pos: 6 },
-  { key: 'addedByName', aliases: ['added by'], pos: 7 },
-  { key: 'addedById', aliases: ['added by id'], pos: 8 },
-  { key: 'addedAt', aliases: ['date added'], pos: 9 },
+  { key: 'createdAt', aliases: ['list created at'], pos: 6 },
+  { key: 'updatedAt', aliases: ['list updated at'], pos: 7 },
+  { key: 'text', aliases: ['entry'], pos: 8 },
+  { key: 'addedByName', aliases: ['added by'], pos: 9 },
+  { key: 'addedById', aliases: ['added by id'], pos: 10 },
+  { key: 'addedAt', aliases: ['date added'], pos: 11 },
 ];

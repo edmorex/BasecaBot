@@ -51,7 +51,7 @@ export function quotesPage(): string {
 
     <dialog id="qimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(36rem,94vw)">
       <h2 style="margin-top:0">Import Quotes from CSV</h2>
-      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>ID, Quote, User, Game, Date, Quoted By, Quoted By ID</code> (ID is ignored on import; <code>Quoted By ID</code> restores who added it when that user is still known to the bot). A header row is optional.</p>
+      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>ID, Quote, User, Game, Date, Quoted By, Quoted By ID, Created At</code>. Additive keeps existing quotes and assigns new IDs; <strong>wipe &amp; replace is a true backup restore</strong> — it preserves the original IDs and timestamps. A header row is optional.</p>
       <label class="muted">CSV file</label>
       <input type="file" id="qimp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
       <label class="muted">Mode</label>

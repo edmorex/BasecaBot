@@ -11,6 +11,8 @@ export interface Actor {
 
 /** One row of a CSV import. */
 export interface QuoteImportItem {
+  /** Quote number; preserved on a full (replace) restore. */
+  id?: string | number;
   text: string;
   user: string;
   game?: string | null;
@@ -18,6 +20,15 @@ export interface QuoteImportItem {
   quotedByName?: string | null;
   /** Twitch user id of who added it; restored only if that user still exists. */
   quotedById?: string | null;
+  /** Row creation timestamp (ISO); honored on import. */
+  createdAt?: string;
+}
+
+/** Parse an ISO datetime string to a Date, or null if empty/invalid. */
+function parseTimestamp(s: string | null | undefined): Date | null {
+  if (!s || !s.trim()) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /** A quote as surfaced to the dashboard / chat formatting. */
@@ -209,35 +220,43 @@ export class QuotesService {
     return new Set(rows.map((r) => r.id));
   }
 
-  /** Map imported items to valid create rows (skips rows with no text or user). */
-  private async toCreateRows(items: QuoteImportItem[]) {
+  /**
+   * Map imported items to valid create rows (skips rows with no text or user).
+   * `withId` preserves the quote number (only safe on a full replace, since ids
+   * are the primary key); `createdAt` is honored when present.
+   */
+  private async toCreateRows(items: QuoteImportItem[], withId: boolean) {
     const known = await this.existingUserIds(items.map((it) => it.quotedById));
     return items
       .map((it) => {
-        const id = it.quotedById && known.has(it.quotedById) ? it.quotedById : null;
+        const createdById = it.quotedById && known.has(it.quotedById) ? it.quotedById : null;
+        const idNum = Number(it.id);
+        const createdAt = parseTimestamp(it.createdAt);
         return {
+          id: withId && Number.isInteger(idNum) && idNum > 0 ? idNum : undefined,
           text: (it.text ?? '').trim().slice(0, 500),
           quotedUser: normalizeUser(it.user ?? ''),
           game: (it.game ?? '').toString().trim() || null,
           quoteDate: parseQuoteDate(it.date ?? '') ?? todayIso(),
           createdByName: (it.quotedByName ?? '').toString().trim() || null,
-          createdById: id,
+          createdById,
+          createdAt: createdAt ?? undefined,
         };
       })
       .filter((r) => r.text.length > 0 && r.quotedUser.length > 0);
   }
 
-  /** Add imported quotes (additive). Returns the number created. */
+  /** Add imported quotes (additive; new ids). Returns the number created. */
   async bulkImport(items: QuoteImportItem[]): Promise<number> {
-    const data = await this.toCreateRows(items);
+    const data = await this.toCreateRows(items, false);
     if (data.length === 0) return 0;
     const { count } = await this.db.quote.createMany({ data });
     return count;
   }
 
-  /** Replace ALL quotes with the imported set (atomic). Returns the number created. */
+  /** Replace ALL quotes with the imported set (atomic; preserves ids + timestamps for a true restore). */
   async replaceAllWith(items: QuoteImportItem[]): Promise<number> {
-    const data = await this.toCreateRows(items);
+    const data = await this.toCreateRows(items, true);
     const [, created] = await this.db.$transaction([
       this.db.quote.deleteMany({}),
       this.db.quote.createMany({ data }),
