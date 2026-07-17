@@ -45,6 +45,23 @@ export interface TriggerMatch {
   alias: AliasInfo | null;
 }
 
+/** One row of a CSV import (a command/phrase, or an alias). */
+export interface CommandImportItem {
+  kind: 'trigger' | 'phrase' | 'alias';
+  name: string;
+  response?: string | null;
+  group?: string | null;
+  permission?: number;
+  enabled?: boolean;
+  globalCooldown?: number;
+  userCooldown?: number;
+  usageCount?: number;
+  /** Alias only: target command word. */
+  target?: string | null;
+  /** Alias only: extra args. */
+  args?: string | null;
+}
+
 /** One row of the dashboard command list: a command/phrase, or an alias mirroring its target. */
 export interface DashboardRow {
   kind: CommandKind | 'alias';
@@ -437,6 +454,51 @@ export class CustomCommandService {
       }
     }
     return out;
+  }
+
+  /**
+   * Import commands/aliases from CSV rows. `replace` first wipes all custom
+   * commands; `add` keeps existing ones and skips conflicts. Commands are created
+   * before aliases (aliases reference commands). Per-row errors (duplicates,
+   * reserved words, missing alias targets) are skipped, not fatal. Returns counts.
+   */
+  async importCommands(items: CommandImportItem[], mode: 'add' | 'replace'): Promise<{ commands: number; aliases: number; skipped: number }> {
+    if (mode === 'replace') await this.db.customCommand.deleteMany({}); // cascades triggers/aliases
+    let commands = 0;
+    let aliases = 0;
+    let skipped = 0;
+
+    // Phase 1: commands + phrases (so alias targets exist in phase 2).
+    for (const it of items) {
+      if (it.kind === 'alias') continue;
+      const t: TargetRef = { kind: it.kind, name: it.name };
+      try {
+        await this.create(t, { response: it.response ?? null, permission: it.permission, globalCooldown: it.globalCooldown, userCooldown: it.userCooldown });
+        if (it.group) await this.setGroup(t, it.group);
+        if (it.enabled === false) await this.setEnabled(t, false);
+        if (it.usageCount) await this.setUsageCount(t, it.usageCount);
+        commands++;
+      } catch (e) {
+        if (e instanceof CommandError) skipped++;
+        else throw e;
+      }
+    }
+
+    // Phase 2: aliases.
+    for (const it of items) {
+      if (it.kind !== 'alias') continue;
+      try {
+        await this.addAlias(it.name, it.target ?? '', it.args ?? null);
+        if (it.enabled === false) await this.updateAlias(it.name, { enabled: false });
+        aliases++;
+      } catch (e) {
+        if (e instanceof CommandError) skipped++;
+        else throw e;
+      }
+    }
+
+    await this.reloadPhrases();
+    return { commands, aliases, skipped };
   }
 }
 

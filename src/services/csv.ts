@@ -112,6 +112,19 @@ export const QUOTE_CSV_SPEC: CsvColumn[] = [
   { key: 'quotedByName', aliases: ['quoted by'], pos: 5 },
   { key: 'quotedById', aliases: ['quoted by id'], pos: 6 },
 ];
+export const COMMAND_CSV_SPEC: CsvColumn[] = [
+  { key: 'type', aliases: ['type'], pos: 0 },
+  { key: 'name', aliases: ['name', 'command'], pos: 1 },
+  { key: 'response', aliases: ['response'], pos: 2 },
+  { key: 'group', aliases: ['group'], pos: 3 },
+  { key: 'access', aliases: ['access', 'permission'], pos: 4 },
+  { key: 'enabled', aliases: ['enabled', 'on'], pos: 5 },
+  { key: 'globalCooldown', aliases: ['global cooldown'], pos: 6 },
+  { key: 'userCooldown', aliases: ['user cooldown'], pos: 7 },
+  { key: 'usageCount', aliases: ['uses', 'usage count'], pos: 8 },
+  { key: 'target', aliases: ['target'], pos: 9 },
+  { key: 'args', aliases: ['args', 'arguments'], pos: 10 },
+];
 export const LIST_CSV_SPEC: CsvColumn[] = [
   { key: 'list', aliases: ['list', 'list name'], pos: 0 },
   { key: 'displayName', aliases: ['display name'], pos: 1 },

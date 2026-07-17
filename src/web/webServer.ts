@@ -11,7 +11,7 @@ import type { ListsService, ListImportItem } from '../services/lists.js';
 import { ListError } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
 import { QuoteError } from '../services/quotes.js';
-import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC } from '../services/csv.js';
+import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
@@ -139,6 +139,8 @@ export class WebServer {
           return this.getMe(req, res);
         case '/api/commands':
           return this.getCommands(res);
+        case '/api/commands/export':
+          return this.exportCommands(req, res);
         case '/api/lists':
           return this.getLists(res);
         case '/api/lists/export':
@@ -174,6 +176,8 @@ export class WebServer {
           return this.updateCommandAlias(req, res);
         case '/api/commands/alias/delete':
           return this.removeCommandAlias(req, res);
+        case '/api/commands/import':
+          return this.importCommands(req, res);
         case '/api/lists/create':
           return this.createList(req, res);
         case '/api/lists/update':
@@ -409,6 +413,54 @@ export class WebServer {
       throw e;
     }
     this.json(res, 200, { ok: true });
+  }
+
+  /** Export custom commands + aliases as CSV (built-ins are code-defined, excluded). */
+  private async exportCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args']];
+    for (const c of await this.customCommands.listForDashboard()) {
+      rows.push([
+        c.kind,
+        c.name,
+        c.response ?? '',
+        c.group ?? '',
+        LEVEL_LABELS[c.permission] ?? String(c.permission),
+        c.enabled ? 'true' : 'false',
+        c.globalCooldown,
+        c.userCooldown,
+        c.usageCount,
+        c.target ?? '',
+        c.args ?? '',
+      ]);
+    }
+    this.csvDownload(res, 'commands.csv', toCsv(rows));
+  }
+
+  private async importCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const mode = body.mode === 'replace' ? 'replace' : 'add';
+    const items = mapCsvRows(parseCsv(String(body.csv ?? '')), COMMAND_CSV_SPEC).map((m) => {
+      const type = (m.type ?? '').trim().toLowerCase();
+      const kind = type === 'phrase' ? 'phrase' : type === 'alias' ? 'alias' : 'trigger';
+      const en = (m.enabled ?? '').trim().toLowerCase();
+      return {
+        kind: kind as 'trigger' | 'phrase' | 'alias',
+        name: m.name ?? '',
+        response: m.response,
+        group: m.group,
+        permission: labelToLevel(m.access ?? ''),
+        enabled: en === '' ? true : !['false', 'no', '0', 'off', 'disabled'].includes(en),
+        globalCooldown: Number(m.globalCooldown) || 0,
+        userCooldown: Number(m.userCooldown) || 0,
+        usageCount: Number(m.usageCount) || 0,
+        target: m.target,
+        args: m.args,
+      };
+    });
+    const result = await this.customCommands.importCommands(items, mode);
+    this.json(res, 200, { ok: true, mode, ...result });
   }
 
   // ── Lists API ─────────────────────────────────────────────────────────────────

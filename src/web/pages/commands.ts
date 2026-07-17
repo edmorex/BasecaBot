@@ -18,6 +18,8 @@ export function commandsPage(): string {
       <div class="rowline" style="flex:none; gap:.5rem; justify-content:flex-end">
         <button type="button" class="pink" id="new-cmd-btn" style="display:none">+ New Command</button>
         <button type="button" class="pink" id="new-alias-btn" style="display:none">+ Add Alias</button>
+        <button type="button" class="pink" id="cmd-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink" id="cmd-export-btn" style="display:none">Export CSV</button>
       </div>
     </div>
     <div class="md-layout">
@@ -69,6 +71,33 @@ export function commandsPage(): string {
       <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
         <button type="button" class="secondary" id="del-cancel">Cancel</button>
         <button type="button" class="pink" id="del-confirm">Delete</button>
+      </div>
+    </dialog>
+
+    <dialog id="cimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+      <h2 style="margin-top:0">Import Commands from CSV</h2>
+      <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>Type, Name, Response, Group, Access, Enabled, Global Cooldown, User Cooldown, Uses, Target, Args</code>. Type is <code>trigger</code>, <code>phrase</code>, or <code>alias</code> (alias rows use Target + Args). Only custom commands are affected — built-ins are never touched. A header row is optional.</p>
+      <label class="muted">CSV file</label>
+      <input type="file" id="cimp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Mode</label>
+      <div class="radio-row" style="margin:.35rem 0 .8rem; flex-wrap:wrap">
+        <label><input type="radio" name="cimp-mode" value="add" checked /> Add (skip existing)</label>
+        <label><input type="radio" name="cimp-mode" value="replace" /> Wipe &amp; replace all custom commands</label>
+      </div>
+      <div class="toast err" id="cimp-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="cimp-cancel">Cancel</button>
+        <button type="button" class="pink" id="cimp-go">Import</button>
+      </div>
+    </dialog>
+
+    <dialog id="cwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+      <h2 style="margin-top:0">⚠️ Wipe &amp; replace all custom commands?</h2>
+      <p class="muted">This permanently deletes <strong>every custom command and alias</strong> (built-ins are unaffected) and replaces them with the rows in your CSV. This cannot be undone.</p>
+      <div class="toast err" id="cwarn-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="cwarn-cancel">Cancel</button>
+        <button type="button" class="danger" id="cwarn-confirm">Wipe &amp; replace</button>
       </div>
     </dialog>
 
@@ -155,6 +184,8 @@ export function commandsPage(): string {
         document.getElementById('cmd-sub').textContent=all.length+' command'+(all.length===1?'':'s')+' across '+state.groups.length+' plugin'+(state.groups.length===1?'':'s')+' + '+state.customs.length+' custom.'+(state.canManage?' You can manage custom commands.':'');
         document.getElementById('new-cmd-btn').style.display = state.canManage ? '' : 'none';
         document.getElementById('new-alias-btn').style.display = state.canManage ? '' : 'none';
+        document.getElementById('cmd-import-btn').style.display = state.canManage ? '' : 'none';
+        document.getElementById('cmd-export-btn').style.display = state.canManage ? '' : 'none';
         renderSide(); renderMain();
       }catch(e){ document.getElementById('cmd-sub').textContent='Could not load commands: '+e.message; }
     }
@@ -442,6 +473,63 @@ export function commandsPage(): string {
         delDlg.close?delDlg.close():delDlg.removeAttribute('open'); await load();
       }
       catch(e){ document.getElementById('del-toast').textContent='Delete failed: '+e.message; }
+    };
+
+    // ── CSV export/import (custom commands + aliases only) ──────────────────────
+    function downloadCsv(filename, text){
+      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement('a'); a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }
+    function readFileText(input){
+      return new Promise(function(resolve,reject){
+        var f=input.files && input.files[0];
+        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
+        var r=new FileReader();
+        r.onload=function(){ resolve(String(r.result||'')); };
+        r.onerror=function(){ reject(new Error('Could not read the file.')); };
+        r.readAsText(f);
+      });
+    }
+    document.getElementById('cmd-export-btn').onclick=async function(){
+      try{
+        var res=await fetch('/api/commands/export',{ credentials:'same-origin' });
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        downloadCsv('commands.csv', await res.text());
+      }catch(e){ alert('Export failed: '+e.message); }
+    };
+    var cimpDlg=document.getElementById('cimp-dlg');
+    var cwarnDlg=document.getElementById('cwarn-dlg');
+    var cPendingCsv='';
+    function cimpMode(){ var el=document.querySelector('input[name=cimp-mode]:checked'); return el?el.value:'add'; }
+    document.getElementById('cmd-import-btn').onclick=function(){
+      document.getElementById('cimp-file').value='';
+      var add=document.querySelector('input[name=cimp-mode][value=add]'); if(add) add.checked=true;
+      document.getElementById('cimp-toast').textContent='';
+      if(cimpDlg.showModal) cimpDlg.showModal(); else cimpDlg.setAttribute('open','');
+    };
+    document.getElementById('cimp-cancel').onclick=function(){ cimpDlg.close?cimpDlg.close():cimpDlg.removeAttribute('open'); };
+    async function doCmdImport(mode, csv){
+      var d=await api('POST','/api/commands/import',{ mode:mode, csv:csv });
+      cimpDlg.close?cimpDlg.close():cimpDlg.removeAttribute('open');
+      cwarnDlg.close?cwarnDlg.close():cwarnDlg.removeAttribute('open');
+      await load();
+      var sub=document.getElementById('cmd-sub');
+      sub.textContent = 'Imported '+d.commands+' command'+(d.commands===1?'':'s')+' + '+d.aliases+' alias'+(d.aliases===1?'':'es')+(d.skipped?(' ('+d.skipped+' skipped)'):'')+'. '+sub.textContent;
+    }
+    document.getElementById('cimp-go').onclick=async function(){
+      try{
+        cPendingCsv=await readFileText(document.getElementById('cimp-file'));
+        if(cimpMode()==='replace'){ document.getElementById('cwarn-toast').textContent=''; if(cwarnDlg.showModal) cwarnDlg.showModal(); else cwarnDlg.setAttribute('open',''); return; }
+        await doCmdImport('add', cPendingCsv);
+      }catch(e){ document.getElementById('cimp-toast').textContent=e.message; }
+    };
+    document.getElementById('cwarn-cancel').onclick=function(){ cwarnDlg.close?cwarnDlg.close():cwarnDlg.removeAttribute('open'); };
+    document.getElementById('cwarn-confirm').onclick=async function(){
+      try{ await doCmdImport('replace', cPendingCsv); }
+      catch(e){ document.getElementById('cwarn-toast').textContent=e.message; }
     };`;
 
   return renderLayout({ title: 'BasecaBot — Commands', active: 'commands', body, script, wide: true });

@@ -153,6 +153,37 @@ run('CustomCommandService (integration)', () => {
     }
   });
 
+  it('imports commands then aliases (additive), skipping conflicts', async () => {
+    await svc.create(trig('existing'), { response: 'old' });
+    const res = await svc.importCommands(
+      [
+        { kind: 'trigger', name: 'hello', response: 'Hi $(sender)', permission: 2, group: 'Greet', globalCooldown: 5, userCooldown: 10, usageCount: 7 },
+        { kind: 'phrase', name: 'good game', response: 'gg', enabled: false },
+        { kind: 'alias', name: 'hi', target: 'hello', args: 'x', enabled: false },
+        { kind: 'trigger', name: 'existing', response: 'dup' }, // conflict -> skipped
+        { kind: 'alias', name: 'bad', target: 'nonexistent' }, // missing target -> skipped
+      ],
+      'add',
+    );
+    expect(res).toMatchObject({ commands: 2, aliases: 1, skipped: 2 });
+    const rows = await svc.listForDashboard();
+    expect(rows.find((r) => r.kind === 'trigger' && r.name === 'hello')).toMatchObject({
+      response: 'Hi $(sender)', permission: 2, group: 'Greet', globalCooldown: 5, userCooldown: 10, usageCount: 7,
+    });
+    expect(rows.find((r) => r.kind === 'phrase' && r.name === 'good game')!.enabled).toBe(false);
+    expect(rows.find((r) => r.kind === 'alias' && r.name === 'hi')).toMatchObject({ target: 'hello', args: 'x', enabled: false });
+    expect((await svc.findByTrigger('existing'))?.command.response).toBe('old'); // not overwritten
+  });
+
+  it('imports in replace mode, wiping existing custom commands first', async () => {
+    await svc.create(trig('old1'), { response: 'a' });
+    await svc.create(trig('old2'), { response: 'b' });
+    const res = await svc.importCommands([{ kind: 'trigger', name: 'fresh', response: 'new' }], 'replace');
+    expect(res.commands).toBe(1);
+    const rows = await svc.listForDashboard();
+    expect(rows.map((r) => r.name)).toEqual(['fresh']);
+  });
+
   it('treats an empty response as silent', async () => {
     await svc.create(trig('silent'), { response: '' });
     expect((await svc.findByTrigger('silent'))?.command.response).toBeNull();

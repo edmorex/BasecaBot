@@ -6,7 +6,7 @@ import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
-import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC } from '../services/csv.js';
+import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
 import type { CommandHandler, CommandOptions, GroupOptions } from '../core/commandRouter.js';
@@ -184,6 +184,13 @@ const server = createServer(async (req, res) => {
     if (p === '/quotes') return html(quotesPage());
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
+    if (p === '/api/commands/export') {
+      const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args']];
+      for (const c of commands.filter((c) => c.kind !== 'builtin')) {
+        rows.push([c.kind, c.name, c.response ?? '', c.group ?? '', LVL[c.access] ?? String(c.access), c.enabled ? 'true' : 'false', c.globalCooldown, c.userCooldown, c.usageCount, c.target ?? '', c.args ?? '']);
+      }
+      return csv(toCsv(rows));
+    }
     if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
@@ -255,6 +262,33 @@ const server = createServer(async (req, res) => {
       const i = commands.findIndex((c) => c.kind === 'alias' && c.name === word);
       if (i >= 0) commands.splice(i, 1);
       return json(200, { ok: true });
+    }
+    if (p === '/api/commands/import') {
+      const items = mapCsvRows(parseCsv(String(body.csv ?? '')), COMMAND_CSV_SPEC);
+      const toLevel = (s: string) => { const i = LVL.findIndex((l) => l.toLowerCase() === String(s || '').toLowerCase()); return i >= 0 ? i : 0; };
+      const isOn = (s: string) => !/^(false|no|0|off|disabled)$/i.test(String(s || '').trim());
+      const has = (n: string) => commands.some((c) => c.name === n && c.kind !== 'builtin');
+      if (body.mode === 'replace') for (let i = commands.length - 1; i >= 0; i--) if (commands[i]!.kind !== 'builtin') commands.splice(i, 1);
+      let cmds = 0, aliases = 0, skipped = 0;
+      for (const m of items) {
+        const type = (m.type ?? '').toLowerCase();
+        if (type === 'alias') continue;
+        const kind = type === 'phrase' ? 'phrase' : 'trigger';
+        const name = kind === 'trigger' ? String(m.name ?? '').replace(/^!/, '').toLowerCase().trim() : String(m.name ?? '').trim();
+        if (!name || has(name)) { skipped++; continue; }
+        commands.push(mk({ kind, name, response: m.response || null, group: m.group || null, access: toLevel(m.access ?? ''), enabled: isOn(m.enabled ?? ''), globalCooldown: Number(m.globalCooldown) || 0, userCooldown: Number(m.userCooldown) || 0, usageCount: Number(m.usageCount) || 0 }));
+        cmds++;
+      }
+      for (const m of items) {
+        if ((m.type ?? '').toLowerCase() !== 'alias') continue;
+        const name = String(m.name ?? '').replace(/^!/, '').toLowerCase().trim();
+        const target = String(m.target ?? '').replace(/^!/, '').toLowerCase().trim();
+        const t = commands.find((c) => c.kind === 'trigger' && c.name === target);
+        if (!name || !t || has(name)) { skipped++; continue; }
+        commands.push(mk({ kind: 'alias', name, target: t.name, args: m.args || null, access: t.access, group: t.group, globalCooldown: t.globalCooldown, userCooldown: t.userCooldown, usageCount: t.usageCount, response: null, enabled: isOn(m.enabled ?? '') }));
+        aliases++;
+      }
+      return json(200, { ok: true, mode: body.mode, commands: cmds, aliases, skipped });
     }
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });
 

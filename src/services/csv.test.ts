@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC } from './csv.js';
+import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, COMMAND_CSV_SPEC } from './csv.js';
 
 describe('csv', () => {
   it('serializes, quoting only when needed', () => {
@@ -37,6 +37,13 @@ describe('csv', () => {
   it('mapCsvRows falls back to positional order when there is no header', () => {
     const rows = parseCsv('1,hi,baseca,Game,2024-01-02,Mod'); // no header line
     expect(mapCsvRows(rows, QUOTE_CSV_SPEC)[0]).toMatchObject({ text: 'hi', user: 'baseca' });
+  });
+
+  it('maps a command CSV row (alias with target + args)', () => {
+    const rows = parseCsv('Type,Name,Response,Group,Access,Enabled,Global Cooldown,User Cooldown,Uses,Target,Args\nalias,d6,,Fun,Everyone,false,0,0,8,roll,$(random 1-6)');
+    expect(mapCsvRows(rows, COMMAND_CSV_SPEC)).toEqual([
+      { type: 'alias', name: 'd6', response: '', group: 'Fun', access: 'Everyone', enabled: 'false', globalCooldown: '0', userCooldown: '0', usageCount: '8', target: 'roll', args: '$(random 1-6)' },
+    ]);
   });
 
   it('round-trips messy data', () => {
