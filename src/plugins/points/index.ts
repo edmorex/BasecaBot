@@ -127,9 +127,9 @@ export function pointsPlugin(): Plugin {
             await ctx.chat.say(e.channel, `Usage: !give <user> <amount>`);
             return;
           }
-          const recipient = await ctx.users.getByLogin(target.replace(/^@/, ''));
-          if (!recipient) {
-            await ctx.chat.say(e.channel, `I don't know a user called ${target} yet.`);
+          const recipient = await ctx.users.resolveUserRef(target);
+          if (recipient.kind !== 'user') {
+            await ctx.chat.say(e.channel, `I don't know a user called ${target}.`);
             return;
           }
           try {
@@ -155,8 +155,8 @@ export function pointsPlugin(): Plugin {
             await ctx.chat.say(e.channel, `Usage: !addpoints <user> <amount>`);
             return;
           }
-          const recipient = await ctx.users.getByLogin(target.replace(/^@/, ''));
-          if (!recipient) {
+          const recipient = await ctx.users.resolveUserRef(target);
+          if (recipient.kind !== 'user') {
             await ctx.chat.say(e.channel, `Unknown user ${target}.`);
             return;
           }

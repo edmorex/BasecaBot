@@ -108,11 +108,12 @@ export const QUOTE_CSV_SPEC: CsvColumn[] = [
   { key: 'id', aliases: ['id'], pos: 0 },
   { key: 'text', aliases: ['quote'], pos: 1 },
   { key: 'user', aliases: ['user'], pos: 2 },
-  { key: 'game', aliases: ['game'], pos: 3 },
-  { key: 'date', aliases: ['date'], pos: 4 },
-  { key: 'quotedByName', aliases: ['quoted by'], pos: 5 },
-  { key: 'quotedById', aliases: ['quoted by id'], pos: 6 },
-  { key: 'createdAt', aliases: ['created at'], pos: 7 },
+  { key: 'userId', aliases: ['user id'], pos: 3 },
+  { key: 'game', aliases: ['game'], pos: 4 },
+  { key: 'date', aliases: ['date'], pos: 5 },
+  { key: 'quotedByName', aliases: ['quoted by'], pos: 6 },
+  { key: 'quotedById', aliases: ['quoted by id'], pos: 7 },
+  { key: 'createdAt', aliases: ['created at'], pos: 8 },
 ];
 export const COMMAND_CSV_SPEC: CsvColumn[] = [
   { key: 'type', aliases: ['type'], pos: 0 },

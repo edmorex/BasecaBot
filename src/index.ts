@@ -36,16 +36,26 @@ async function main(): Promise<void> {
   const storage = new Storage();
   await storage.connect();
 
-  const users = new UsersService(storage);
   const points = new PointsService(storage);
   const customCommands = new CustomCommandService(storage);
   await customCommands.init(); // load the phrase-matching cache
   const lists = new ListsService(storage);
-  const quotes = new QuotesService(storage);
 
   // ── Twitch auth + chat client ──────────────────────────────────────────────
   const authProvider = await createAuthProvider(config);
   const api = new ApiClient({ authProvider });
+
+  // The Twitch lookup lets `@handle` resolve for accounts the bot has never seen
+  // (a lurker being quoted), instead of rejecting them as unknown.
+  const users = new UsersService(storage, async (login) => {
+    const u = await api.users.getUserByName(login);
+    return u ? { id: u.id, login: u.name, displayName: u.displayName, avatarUrl: u.profilePictureUrl } : null;
+  });
+
+  // Quotes attribute to a user id via `users`, so names resolve however they
+  // were typed and display follows the person's current display name.
+  const quotes = new QuotesService(storage, users);
+
   const chatAdapter = new TwitchChatAdapter(authProvider, bus, users, config);
   const chat = new TwurpleChatService(chatAdapter.client);
 

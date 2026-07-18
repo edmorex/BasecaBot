@@ -256,13 +256,19 @@ interface ResolverArgs {
 
 type Resolver = (a: ResolverArgs) => string | Promise<string>;
 
-/** Resolve a possibly-named user token to id/login/display (falls back to the sender). */
+/**
+ * Resolve a user token to id/login/display, falling back to the sender when no
+ * token is given. The token may be any of the user's names (@handle, display
+ * name, or alias); an unrecognized one echoes back as-is with no id, so a
+ * command like `$(user.points X)` degrades to 0 rather than erroring.
+ */
 async function resolveUser(token: string | undefined, a: ResolverArgs) {
   const { ctx, deps } = a;
   if (!token) return { id: ctx.sender.id as string | null, login: ctx.sender.login, display: ctx.sender.displayName };
-  const login = token.replace(/^@/, '').toLowerCase();
-  const u = await deps.users.getByLogin(login);
-  return u ? { id: u.id as string | null, login: u.login, display: u.displayName } : { id: null, login, display: token.replace(/^@/, '') };
+  const ref = await deps.users.resolveUserRef(token);
+  if (ref.kind === 'user') return { id: ref.id as string | null, login: ref.login, display: ref.displayName };
+  const bare = token.replace(/^@/, '');
+  return { id: null, login: bare.toLowerCase(), display: bare };
 }
 
 const RESOLVERS: Record<string, Resolver> = {

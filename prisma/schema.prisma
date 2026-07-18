@@ -21,7 +21,8 @@ datasource db {
 ///    starts as the Twitch display name and syncs from Twitch on every touch
 ///    UNTIL the user customizes it (`displayNameLocked` = true), after which the
 ///    bot never overwrites it.
-///  - `aliases` are additional names the user can be referenced by in commands.
+///  - `names` is the user's row in the GLOBAL name index (`UserName`), which is
+///    what commands resolve typed names against. See docs/user-accounts.md.
 ///
 /// Extensibility: add first-class structured fields (e.g. `birthday DateTime?`,
 /// `pronouns String?`) as nullable columns here; use `UserPreference` (key/value)
@@ -37,26 +38,40 @@ model User {
 
   points       PointsBalance[]
   events       EventLog[]
-  aliases      UserAlias[]
+  names        UserName[]
   preferences  UserPreference[]
   createdLists List[]           @relation("ListCreator")
   listEntries  ListEntry[]      @relation("ListEntryAuthor")
   quotes       Quote[]          @relation("QuoteCreator")
+  quotedIn     Quote[]          @relation("QuotedUser")
 }
 
-/// An alternate name a user can be referenced by (in addition to their canonical
-/// username and display name). `normalized` is the lowercased form and is unique
-/// across ALL users so a name resolves to at most one user.
-model UserAlias {
+/// The GLOBAL name index: every name any user can be referenced by, in ONE
+/// namespace. `normalized` (lowercased, '@' stripped) is unique across all users
+/// and all kinds, so a typed name resolves to at most one person — that single
+/// unique index is what makes display names and aliases unable to shadow another
+/// user's Twitch account. See docs/user-accounts.md.
+///
+/// `kind` records where the name came from and sets precedence when two claims
+/// collide (login > display > alias):
+///  - "login"   one per user, maintained from Twitch. Always wins: a real account
+///              reclaims its own name, evicting any squatter's display/alias.
+///  - "display" only when the user has locked a CUSTOM display name that differs
+///              from their login. Twitch-synced display names are just the login
+///              recapitalized, so they normalize to it and need no row.
+///  - "alias"   user-defined extra names, any number.
+model UserName {
   id         Int      @id @default(autoincrement())
   userId     String
-  alias      String // as entered, for display
-  normalized String   @unique // lowercased, for lookup + uniqueness
+  name       String // as entered, for display
+  normalized String   @unique // lowercased, '@'-stripped — one global namespace
+  kind       String // "login" | "display" | "alias"
   createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([userId, kind])
 }
 
 /// Loosely-structured per-user preferences / feature opt-in-outs. The extension
@@ -175,14 +190,22 @@ model ListEntry {
 model Quote {
   id            Int      @id @default(autoincrement())
   text          String
-  quotedUser    String // the person quoted (login/name, no '@')
+  /// Snapshot of the name as entered. For a LINKED quote this is only a fallback
+  /// — display renders the live display name of `quotedUserRef` so renames follow
+  /// automatically. For an unlinked quote (a name that matched no Twitch account)
+  /// it is the only record of who was quoted.
+  quotedUser    String
+  /// Twitch user id of the person quoted, when the name resolved to a real
+  /// account. Null for unlinked quotes (e.g. "chat", a guest, an imported name).
+  quotedUserId  String?
   game          String? // game/category at capture time
   quoteDate     String // "YYYY-MM-DD"
   createdById   String? // Twitch user id of who added it ("Quoted By")
   createdByName String? // adder display name, snapshotted
   createdAt     DateTime @default(now())
 
-  creator User? @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  creator       User? @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  quotedUserRef User? @relation("QuotedUser", fields: [quotedUserId], references: [id], onDelete: SetNull)
 }
 
 /// Runtime settings, editable without redeploying.

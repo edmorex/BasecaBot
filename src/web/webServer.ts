@@ -627,8 +627,8 @@ export class WebServer {
   private async exportQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
     const quotes = await this.quotes.listAllForDashboard();
-    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At']];
-    for (const q of quotes) rows.push([q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '', q.createdAt]);
+    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At']];
+    for (const q of quotes) rows.push([q.id, q.text, q.user, q.userId ?? '', q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '', q.createdAt]);
     this.csvDownload(res, 'quotes.csv', toCsv(rows));
   }
 
@@ -640,6 +640,7 @@ export class WebServer {
       id: m.id,
       text: m.text!,
       user: m.user!,
+      userId: m.userId,
       game: m.game,
       date: m.date,
       quotedByName: m.quotedByName,

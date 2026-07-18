@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { Storage } from './storage/index.js';
 import { QuotesService, QuoteError, parseQuoteDate, formatQuote, todayIso } from './quotes.js';
+import { UsersService } from './users.js';
 
 // Runs against an isolated, migrated prisma/test.db (prepared by the vitest
 // global setup) so it never touches the real dev database.
@@ -22,9 +23,9 @@ describe('quote helpers (unit)', () => {
   });
 
   it('formats a quote for chat', () => {
-    const base = { id: 5, text: 'hi', user: 'baseca', quotedByName: 'mod', quotedById: null, createdAt: '' };
-    expect(formatQuote({ ...base, game: 'Elden Ring', date: '2024-01-02' })).toBe('Quote 5: "hi" - @baseca [Elden Ring] [2024/01/02]');
-    expect(formatQuote({ ...base, game: null, date: '2024-01-02' })).toBe('Quote 5: "hi" - @baseca [2024/01/02]');
+    const base = { id: 5, text: 'hi', user: 'Baseca', userId: null, quotedByName: 'mod', quotedById: null, createdAt: '' };
+    expect(formatQuote({ ...base, game: 'Elden Ring', date: '2024-01-02' })).toBe('Quote 5: "hi" - Baseca [Elden Ring] [2024/01/02]');
+    expect(formatQuote({ ...base, game: null, date: '2024-01-02' })).toBe('Quote 5: "hi" - Baseca [2024/01/02]');
   });
 });
 
@@ -146,5 +147,67 @@ run('QuotesService (integration)', () => {
     const q = await quotes.add({ user: 'x', text: 'seed' }, ADDER);
     await expect(quotes.bulkImport([{ id: q.id, text: 'new', user: 'y' }])).resolves.toBe(1);
     expect(await quotes.listAllForDashboard()).toHaveLength(2);
+  });
+});
+
+// Attribution through the identity layer: any of a person's names resolves to
+// them, and what's displayed tracks their current display name.
+run('QuotesService attribution (integration)', () => {
+  const SPEAKER = 'itest_quote_speaker';
+  const ADDER = { id: 'itest_quote_adder2', displayName: 'Adder' };
+  let prisma: PrismaClient;
+  let quotes: QuotesService;
+  let users: UsersService;
+
+  beforeAll(async () => {
+    prisma = new PrismaClient({ datasources: { db: { url: `file:${DB_PATH}` } } });
+    const storage = new Storage(prisma);
+    users = new UsersService(storage);
+    quotes = new QuotesService(storage, users);
+    await prisma.user.upsert({ where: { id: ADDER.id }, create: { id: ADDER.id, login: ADDER.id, displayName: ADDER.displayName }, update: {} });
+  });
+
+  beforeEach(async () => {
+    await prisma.quote.deleteMany({});
+    await prisma.user.deleteMany({ where: { id: SPEAKER } });
+    await users.touch({ id: SPEAKER, login: 'speaker', displayName: 'Speaker' });
+  });
+
+  afterAll(async () => {
+    await prisma.quote.deleteMany({});
+    await prisma.user.deleteMany({ where: { id: { in: [SPEAKER, ADDER.id] } } });
+    await prisma.$disconnect();
+  });
+
+  it('links a quote added under any of the speaker\'s names', async () => {
+    await users.addAlias(SPEAKER, 'Speedy');
+    for (const name of ['@speaker', 'speaker', 'Speedy']) {
+      const q = await quotes.add({ user: name, text: `via ${name}` }, ADDER);
+      expect(q.userId).toBe(SPEAKER);
+      expect(q.user).toBe('Speaker'); // always displayed as the display name
+    }
+  });
+
+  it('shows the current display name on old quotes after a rename', async () => {
+    const q = await quotes.add({ user: '@speaker', text: 'timeless' }, ADDER);
+    await users.setDisplayName(SPEAKER, 'The Speaker');
+    expect((await quotes.getById(q.id)).user).toBe('The Speaker');
+  });
+
+  it('keeps an unmatched name as free text, but rejects an unknown @handle', async () => {
+    const q = await quotes.add({ user: 'a caller', text: 'guest bit' }, ADDER);
+    expect(q.userId).toBeNull();
+    expect(q.user).toBe('a caller');
+    await expect(quotes.add({ user: '@nosuchaccount', text: 'x' }, ADDER)).rejects.toBeInstanceOf(QuoteError);
+  });
+
+  it('finds a linked quote by any name, and unlinked ones by their snapshot', async () => {
+    await users.addAlias(SPEAKER, 'Speedy');
+    await quotes.add({ user: '@speaker', text: 'linked' }, ADDER);
+    await quotes.add({ user: 'a caller', text: 'unlinked' }, ADDER);
+
+    expect(await quotes.searchUser('Speedy')).toMatchObject({ text: 'linked' });
+    expect(await quotes.searchUser('a caller')).toMatchObject({ text: 'unlinked' });
+    expect(await quotes.searchUser('nobody at all')).toBeNull();
   });
 });

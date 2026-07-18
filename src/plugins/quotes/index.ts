@@ -91,12 +91,13 @@ export function quotesPlugin(): Plugin {
         }),
         subcommands: {
           add: {
-            description: 'Add a new quote: !quote add <@username> <quote text>.',
-            usage: '<@username> <quoteText>',
+            description:
+              'Add a new quote: !quote add <username> <quote text>. The name can be an @handle, display name, or alias.',
+            usage: '<username> <quoteText>',
             permission: PermissionLevel.Subscriber,
             handler: guard(async (e) => {
               const { first, rest } = firstAndRest(e.argString);
-              if (!first || !rest.trim()) throw new QuoteError('Usage: !quote add <@username> <quote text>');
+              if (!first || !rest.trim()) throw new QuoteError('Usage: !quote add <username> <quote text>');
               await ctx.users.touch(e.user);
               const game = await currentGame();
               const quote = await svc.add({ user: first, text: rest, game }, { id: e.user.id, displayName: e.user.displayName });
@@ -121,7 +122,7 @@ export function quotesPlugin(): Plugin {
             handler: editHandler('edittext', (id, v) => svc.setText(id, v)),
           },
           edituser: {
-            description: 'Edit the user a quote is attributed to.',
+            description: 'Edit the user a quote is attributed to (any of their names).',
             usage: '<quoteId> <newUsername>',
             permission: PermissionLevel.Moderator,
             handler: editHandler('edituser', (id, v) => svc.setUser(id, v)),
@@ -147,8 +148,8 @@ export function quotesPlugin(): Plugin {
             }),
           },
           searchuser: {
-            description: 'Print a random quote said by the given user.',
-            usage: '<@username>',
+            description: 'Print a random quote said by the given user (any of their names).',
+            usage: '<username>',
             handler: guard(async (e) => {
               const q = await svc.searchUser(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that user.');

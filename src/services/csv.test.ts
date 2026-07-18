@@ -27,11 +27,11 @@ describe('csv', () => {
   it('mapCsvRows maps by header (any column order), dropping the header row', () => {
     const rows = parseCsv('ID,Quote,User,Game,Date,Quoted By,Quoted By ID,Created At\n1,hi there,baseca,Elden Ring,2024-01-02,Mod,u9,2024-01-02T00:00:00.000Z');
     expect(mapCsvRows(rows, QUOTE_CSV_SPEC)).toEqual([
-      { id: '1', text: 'hi there', user: 'baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod', quotedById: 'u9', createdAt: '2024-01-02T00:00:00.000Z' },
+      { id: '1', text: 'hi there', user: 'baseca', userId: '', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'Mod', quotedById: 'u9', createdAt: '2024-01-02T00:00:00.000Z' },
     ]);
     // Header without some columns still maps the rest correctly by name.
     const noId = parseCsv('Quote,User\nhello,alice');
-    expect(mapCsvRows(noId, QUOTE_CSV_SPEC)).toEqual([{ id: '', text: 'hello', user: 'alice', game: '', date: '', quotedByName: '', quotedById: '', createdAt: '' }]);
+    expect(mapCsvRows(noId, QUOTE_CSV_SPEC)).toEqual([{ id: '', text: 'hello', user: 'alice', userId: '', game: '', date: '', quotedByName: '', quotedById: '', createdAt: '' }]);
   });
 
   it('mapCsvRows falls back to positional order when there is no header', () => {

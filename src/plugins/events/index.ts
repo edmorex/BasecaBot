@@ -1,5 +1,6 @@
 import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
+import type { EventUser } from '../../core/events.js';
 
 /**
  * Reacts to stream events with chat shout-outs and writes an audit trail to the
@@ -21,24 +22,43 @@ export function eventsPlugin(): Plugin {
           .create({ data: { type, userId, amount, meta: meta ? JSON.stringify(meta) : null } })
           .catch((err) => ctx.logger.error({ err }, 'eventLog write failed'));
 
+      /**
+       * Log an event attributed to a user. `EventLog.userId` is a foreign key, and
+       * these events routinely come from people who have never chatted (follows,
+       * lurker subs/bits), so the user must be persisted first. If that fails we
+       * still record the event with a null user rather than losing the row.
+       */
+      const logFor = async (type: string, u: EventUser | null, amount: number | null, meta?: unknown) => {
+        let userId: string | null = null;
+        if (u?.id) {
+          try {
+            await ctx.users.touch(u);
+            userId = u.id;
+          } catch (err) {
+            ctx.logger.error({ err, login: u.login }, 'users.touch failed before eventLog write');
+          }
+        }
+        await log(type, userId, amount, meta);
+      };
+
       ctx.bus.on('sub', async (e) => {
         await ctx.chat.say(e.channel, `🎉 Thanks for subscribing, @${e.user.displayName}!`);
-        await log('sub', e.user.id, null, { tier: e.tier });
+        await logFor('sub', e.user, null, { tier: e.tier });
       });
 
       ctx.bus.on('resub', async (e) => {
         await ctx.chat.say(e.channel, `🎉 @${e.user.displayName} resubbed for ${e.months} months!`);
-        await log('resub', e.user.id, e.months, { tier: e.tier });
+        await logFor('resub', e.user, e.months, { tier: e.tier });
       });
 
       ctx.bus.on('subgift', async (e) => {
         await ctx.chat.say(e.channel, `🎁 ${e.gifter.displayName} gifted ${e.count} sub(s)!`);
-        await log('subgift', e.gifter.id || null, e.count);
+        await logFor('subgift', e.gifter, e.count); // gifter.id is '' when anonymous
       });
 
       ctx.bus.on('bits', async (e) => {
         await ctx.chat.say(e.channel, `✨ ${e.user.displayName} cheered ${e.amount} bits!`);
-        await log('bits', e.user.id || null, e.amount);
+        await logFor('bits', e.user, e.amount); // user.id is '' for anonymous cheers
       });
 
       ctx.bus.on('raid', async (e) => {
@@ -48,7 +68,7 @@ export function eventsPlugin(): Plugin {
 
       ctx.bus.on('follow', async (e) => {
         await ctx.chat.say(e.channel, `👋 Thanks for the follow, @${e.user.displayName}!`);
-        await log('follow', e.user.id, null);
+        await logFor('follow', e.user, null);
       });
 
       ctx.bus.on('donation', async (e) => {

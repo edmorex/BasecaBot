@@ -1,7 +1,11 @@
 import type { Storage } from './storage/index.js';
+import type { UsersService } from './users.js';
 
 /** User-facing error (message is safe to show in chat / API responses). */
 export class QuoteError extends Error {}
+
+/** Pull the live display name of the linked user alongside each quote. */
+const WITH_QUOTED_USER = { quotedUserRef: { select: { displayName: true } } } as const;
 
 /** Who added a quote — id (for the FK) plus a snapshot of the display name. */
 export interface Actor {
@@ -20,6 +24,8 @@ export interface QuoteImportItem {
   quotedByName?: string | null;
   /** Twitch user id of who added it; restored only if that user still exists. */
   quotedById?: string | null;
+  /** Twitch user id of the person quoted; restored only if that user still exists. */
+  userId?: string | null;
   /** Row creation timestamp (ISO); honored on import. */
   createdAt?: string;
 }
@@ -35,7 +41,14 @@ function parseTimestamp(s: string | null | undefined): Date | null {
 export interface QuoteView {
   id: number;
   text: string;
+  /**
+   * Who was quoted, ready to display: the linked user's CURRENT display name, so
+   * renames flow through to old quotes. Falls back to the stored snapshot when
+   * the quote isn't linked to a Twitch account.
+   */
   user: string;
+  /** Twitch user id of the person quoted, or null if unlinked. */
+  userId: string | null;
   game: string | null;
   date: string; // "YYYY-MM-DD"
   quotedByName: string | null;
@@ -69,11 +82,16 @@ export function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Format a quote for chat: `Quote 5: "text" - @user [Game] [2024/01/02]`. */
+/**
+ * Format a quote for chat: `Quote 5: "text" - Name [Game] [2024/01/02]`.
+ *
+ * No '@' prefix: the name shown is a display name, which often differs from the
+ * Twitch login, so "@Name" would imply a handle that may not exist.
+ */
 export function formatQuote(q: QuoteView): string {
   const game = q.game && q.game.trim() ? ` [${q.game.trim()}]` : '';
   const date = q.date ? ` [${q.date.replace(/-/g, '/')}]` : '';
-  return `Quote ${q.id}: "${q.text}" - @${q.user}${game}${date}`;
+  return `Quote ${q.id}: "${q.text}" - ${q.user}${game}${date}`;
 }
 
 /**
@@ -83,18 +101,27 @@ export function formatQuote(q: QuoteView): string {
  * reference User by foreign key.
  */
 export class QuotesService {
-  constructor(private readonly storage: Storage) {}
+  /**
+   * `users` is optional so the service can be constructed without the identity
+   * layer (unit tests); without it names are stored as typed and never linked.
+   */
+  constructor(
+    private readonly storage: Storage,
+    private readonly users?: UsersService,
+  ) {}
 
   private get db() {
     return this.storage.prisma;
   }
 
   private toView = (q: {
-    id: number; text: string; quotedUser: string; game: string | null; quoteDate: string; createdByName: string | null; createdById: string | null; createdAt: Date;
+    id: number; text: string; quotedUser: string; quotedUserId: string | null; game: string | null; quoteDate: string; createdByName: string | null; createdById: string | null; createdAt: Date;
+    quotedUserRef?: { displayName: string } | null;
   }): QuoteView => ({
     id: q.id,
     text: q.text,
-    user: q.quotedUser,
+    user: q.quotedUserRef?.displayName ?? q.quotedUser,
+    userId: q.quotedUserId,
     game: q.game,
     date: q.quoteDate,
     quotedByName: q.createdByName,
@@ -102,9 +129,32 @@ export class QuotesService {
     createdAt: q.createdAt.toISOString(),
   });
 
+  /**
+   * Turn the name someone typed into who to attribute the quote to.
+   *
+   * A name that matches nobody is kept as free text — quotes are routinely
+   * attributed to guests, callers, or "chat" — but an explicit `@handle` that
+   * exists on neither our records nor Twitch is a typo worth reporting.
+   */
+  private async resolveQuoted(input: string): Promise<{ name: string; id: string | null }> {
+    const typed = normalizeUser(input);
+    if (!typed) throw new QuoteError('Provide the username being quoted.');
+    if (!this.users) return { name: typed, id: null };
+
+    const ref = await this.users.resolveUserRef(input);
+    switch (ref.kind) {
+      case 'user':
+        return { name: ref.displayName, id: ref.id };
+      case 'unknown-handle':
+        throw new QuoteError(`There's no Twitch account called @${ref.name}.`);
+      default:
+        return { name: typed, id: null };
+    }
+  }
+
   private async resolveOrThrow(id: number) {
     if (!Number.isInteger(id) || id <= 0) throw new QuoteError('Provide a numeric quote ID.');
-    const quote = await this.db.quote.findUnique({ where: { id } });
+    const quote = await this.db.quote.findUnique({ where: { id }, include: WITH_QUOTED_USER });
     if (!quote) throw new QuoteError(`No quote found with ID ${id}.`);
     return quote;
   }
@@ -113,8 +163,7 @@ export class QuotesService {
     data: { user: string; text: string; game?: string | null; date?: string },
     creator?: Actor,
   ): Promise<QuoteView> {
-    const user = normalizeUser(data.user);
-    if (!user) throw new QuoteError('Provide the @username being quoted.');
+    const quoted = await this.resolveQuoted(data.user);
     const text = data.text.trim();
     if (!text) throw new QuoteError('Provide the quote text.');
     if (text.length > 500) throw new QuoteError('Quote is too long (max 500).');
@@ -122,12 +171,14 @@ export class QuotesService {
     const quote = await this.db.quote.create({
       data: {
         text,
-        quotedUser: user,
+        quotedUser: quoted.name,
+        quotedUserId: quoted.id,
         game: (data.game ?? '').trim() || null,
         quoteDate: date,
         createdById: creator?.id ?? null,
         createdByName: creator?.displayName ?? null,
       },
+      include: WITH_QUOTED_USER,
     });
     return this.toView(quote);
   }
@@ -146,26 +197,31 @@ export class QuotesService {
     const value = text.trim();
     if (!value) throw new QuoteError('Quote text cannot be empty.');
     if (value.length > 500) throw new QuoteError('Quote is too long (max 500).');
-    return this.toView(await this.db.quote.update({ where: { id }, data: { text: value } }));
+    return this.toView(await this.db.quote.update({ where: { id }, data: { text: value }, include: WITH_QUOTED_USER }));
   }
 
   async setUser(id: number, user: string): Promise<QuoteView> {
     await this.resolveOrThrow(id);
-    const value = normalizeUser(user);
-    if (!value) throw new QuoteError('Provide a username.');
-    return this.toView(await this.db.quote.update({ where: { id }, data: { quotedUser: value } }));
+    const quoted = await this.resolveQuoted(user);
+    return this.toView(
+      await this.db.quote.update({
+        where: { id },
+        data: { quotedUser: quoted.name, quotedUserId: quoted.id },
+        include: WITH_QUOTED_USER,
+      }),
+    );
   }
 
   async setGame(id: number, game: string): Promise<QuoteView> {
     await this.resolveOrThrow(id);
-    return this.toView(await this.db.quote.update({ where: { id }, data: { game: game.trim() || null } }));
+    return this.toView(await this.db.quote.update({ where: { id }, data: { game: game.trim() || null }, include: WITH_QUOTED_USER }));
   }
 
   async setDate(id: number, date: string): Promise<QuoteView> {
     await this.resolveOrThrow(id);
     const iso = parseQuoteDate(date);
     if (!iso) throw new QuoteError('Use a date like YYYY MM DD.');
-    return this.toView(await this.db.quote.update({ where: { id }, data: { quoteDate: iso } }));
+    return this.toView(await this.db.quote.update({ where: { id }, data: { quoteDate: iso }, include: WITH_QUOTED_USER }));
   }
 
   /** A random quote, or null if there are none. */
@@ -178,10 +234,16 @@ export class QuotesService {
     return this.randomWhere({ text: { contains: term.trim() } });
   }
 
+  /**
+   * A random quote by the given person, found under any of their names. Linked
+   * quotes match on id — so they're found even if the person has since renamed —
+   * while the name is still matched against the stored snapshot to catch quotes
+   * that were never linked (guests, imports).
+   */
   async searchUser(user: string): Promise<QuoteView | null> {
-    const value = normalizeUser(user);
-    if (!value) throw new QuoteError('Provide a username.');
-    return this.randomWhere({ quotedUser: { contains: value } });
+    const quoted = await this.resolveQuoted(user);
+    const byName = { quotedUser: { contains: quoted.name } };
+    return this.randomWhere(quoted.id ? { OR: [{ quotedUserId: quoted.id }, byName] } : byName);
   }
 
   async searchGame(term: string): Promise<QuoteView | null> {
@@ -200,13 +262,13 @@ export class QuotesService {
     const count = await this.db.quote.count({ where });
     if (count === 0) return null;
     const skip = Math.floor(Math.random() * count);
-    const [quote] = await this.db.quote.findMany({ where, orderBy: { id: 'asc' }, skip, take: 1 });
+    const [quote] = await this.db.quote.findMany({ where, orderBy: { id: 'asc' }, skip, take: 1, include: WITH_QUOTED_USER });
     return quote ? this.toView(quote) : null;
   }
 
   /** Every quote, newest ID first, for the dashboard. */
   async listAllForDashboard(): Promise<QuoteView[]> {
-    const rows = await this.db.quote.findMany({ orderBy: { id: 'desc' } });
+    const rows = await this.db.quote.findMany({ orderBy: { id: 'desc' }, include: WITH_QUOTED_USER });
     return rows.map((r) => this.toView(r));
   }
 
@@ -226,16 +288,21 @@ export class QuotesService {
    * are the primary key); `createdAt` is honored when present.
    */
   private async toCreateRows(items: QuoteImportItem[], withId: boolean) {
-    const known = await this.existingUserIds(items.map((it) => it.quotedById));
+    const known = await this.existingUserIds([
+      ...items.map((it) => it.quotedById),
+      ...items.map((it) => it.userId),
+    ]);
     return items
       .map((it) => {
         const createdById = it.quotedById && known.has(it.quotedById) ? it.quotedById : null;
+        const quotedUserId = it.userId && known.has(it.userId) ? it.userId : null;
         const idNum = Number(it.id);
         const createdAt = parseTimestamp(it.createdAt);
         return {
           id: withId && Number.isInteger(idNum) && idNum > 0 ? idNum : undefined,
           text: (it.text ?? '').trim().slice(0, 500),
           quotedUser: normalizeUser(it.user ?? ''),
+          quotedUserId,
           game: (it.game ?? '').toString().trim() || null,
           quoteDate: parseQuoteDate(it.date ?? '') ?? todayIso(),
           createdByName: (it.quotedByName ?? '').toString().trim() || null,

@@ -53,6 +53,11 @@ Required Twitch setup (two accounts, two tokens):
 | `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`remove` on a `!trigger` or `"phrase"` |
 | `!startgame` / `!endgame` / `!vote <x>` | mod / everyone | Sample web-app game |
 
+Anywhere a command takes `<user>`, you can type the person's `@handle`, their
+display name, or any alias they've added — it resolves to the same account, and
+output always shows their current display name. See
+**[docs/user-accounts.md](docs/user-accounts.md)**.
+
 ## Try the web-app loop
 
 1. Run the bot (`npm run dev`).

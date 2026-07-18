@@ -6,7 +6,12 @@ const noopLogger = { debug() {}, info() {}, warn() {}, error() {}, child() { ret
 function makeDeps(over: Partial<VarDeps> = {}): VarDeps {
   return {
     points: { getBalance: async (id: string) => (id === 'u1' ? 100 : 0) },
-    users: { getByLogin: async (l: string) => (l === 'bob' ? { id: 'u2', login: 'bob', displayName: 'Bob' } : null) },
+    users: {
+      resolveUserRef: async (n: string) =>
+        n.replace(/^@/, '').toLowerCase() === 'bob'
+          ? ({ kind: 'user', id: 'u2', login: 'bob', displayName: 'Bob' } as const)
+          : ({ kind: 'unlinked', name: n } as const),
+    },
     quotes: {
       getById: async (n: number) => ({ id: n, text: 'hi', user: 'baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'm', createdAt: '' }),
       random: async () => ({ id: 7, text: 'rand', user: 'baseca', game: null, date: '2024-05-06', quotedByName: 'm', createdAt: '' }),
@@ -104,7 +109,7 @@ describe('CommandVarEngine — math/escape/repeat/random', () => {
 
 describe('CommandVarEngine — quote/list', () => {
   it('quote by id (formatted)', async () => {
-    expect(await render('$(quote 3)')).toBe('Quote 3: "hi" - @baseca [Elden Ring] [2024/01/02]');
+    expect(await render('$(quote 3)')).toBe('Quote 3: "hi" - baseca [Elden Ring] [2024/01/02]');
   });
   it('list name, nth entry, and random entry', async () => {
     expect(await render('$(list games)')).toBe('Completed Games');

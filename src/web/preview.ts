@@ -195,7 +195,7 @@ const server = createServer(async (req, res) => {
     if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
-      const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
+      const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
       return csv(toCsv(rows));
     }
     if (p === '/api/lists/export') {
