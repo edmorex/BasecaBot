@@ -123,7 +123,7 @@ export function quotesPage(): string {
         return '<tr>'
           +'<td>'+q.id+'</td>'
           +'<td class="wrap">'+esc(q.text)+'</td>'
-          +'<td>@'+esc(q.user)+'</td>'
+          +'<td>'+esc(q.user)+'</td>'
           +'<td>'+(q.game?esc(q.game):'<span class="muted">—</span>')+'</td>'
           +'<td>'+fmtDate(q.date)+'</td>'
           +'<td class="muted">'+esc(q.quotedByName||'—')+'</td>'

@@ -22,13 +22,4 @@ export default [
       'no-undef': 'off',
     },
   },
-  {
-    // One-off Node utility scripts (plain ESM, outside the app build).
-    files: ['scripts/**/*.mjs'],
-    languageOptions: {
-      sourceType: 'module',
-      ecmaVersion: 2022,
-      globals: { process: 'readonly', Buffer: 'readonly', console: 'readonly' },
-    },
-  },
 ];

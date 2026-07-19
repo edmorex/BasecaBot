@@ -4,8 +4,15 @@ import type { UsersService } from './users.js';
 /** User-facing error (message is safe to show in chat / API responses). */
 export class QuoteError extends Error {}
 
-/** Pull the live display name of the linked user alongside each quote. */
-const WITH_QUOTED_USER = { quotedUserRef: { select: { displayName: true } } } as const;
+/**
+ * Pull the live display names of both people attached to a quote — who was
+ * quoted, and who added it — so either can be rendered current rather than from
+ * the stored snapshot.
+ */
+const WITH_QUOTED_USER = {
+  quotedUserRef: { select: { displayName: true } },
+  creator: { select: { displayName: true } },
+} as const;
 
 /** Who added a quote — id (for the FK) plus a snapshot of the display name. */
 export interface Actor {
@@ -51,6 +58,10 @@ export interface QuoteView {
   userId: string | null;
   game: string | null;
   date: string; // "YYYY-MM-DD"
+  /**
+   * Who added the quote, ready to display — the adder's CURRENT display name,
+   * falling back to the snapshot taken when it was added.
+   */
   quotedByName: string | null;
   quotedById: string | null;
   createdAt: string;
@@ -117,14 +128,17 @@ export class QuotesService {
   private toView = (q: {
     id: number; text: string; quotedUser: string; quotedUserId: string | null; game: string | null; quoteDate: string; createdByName: string | null; createdById: string | null; createdAt: Date;
     quotedUserRef?: { displayName: string } | null;
+    creator?: { displayName: string } | null;
   }): QuoteView => ({
     id: q.id,
     text: q.text,
+    // Both names render from the linked account when there is one, so they track
+    // renames; the stored snapshot is only a fallback for unlinked rows.
     user: q.quotedUserRef?.displayName ?? q.quotedUser,
     userId: q.quotedUserId,
     game: q.game,
     date: q.quoteDate,
-    quotedByName: q.createdByName,
+    quotedByName: q.creator?.displayName ?? q.createdByName,
     quotedById: q.createdById,
     createdAt: q.createdAt.toISOString(),
   });

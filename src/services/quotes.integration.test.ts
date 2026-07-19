@@ -194,6 +194,30 @@ run('QuotesService attribution (integration)', () => {
     expect((await quotes.getById(q.id)).user).toBe('The Speaker');
   });
 
+  // "Quoted By" is a display name too. A CSV restore snapshots whatever the file
+  // held (an import stored logins), so the adder must render from the linked
+  // account rather than that stored string.
+  it('shows the adder\'s current display name, not the stored snapshot', async () => {
+    await prisma.quote.create({
+      data: { text: 'imported', quotedUser: 'Speaker', quotedUserId: SPEAKER, quoteDate: '2026-01-01', createdById: ADDER.id, createdByName: 'itest_quote_adder2' },
+    });
+    const [view] = await quotes.listAllForDashboard();
+    expect(view?.quotedByName).toBe('Adder'); // the account's display name, not the login
+    expect(view?.user).toBe('Speaker');
+
+    await users.setDisplayName(ADDER.id, 'Renamed Adder');
+    expect((await quotes.listAllForDashboard())[0]?.quotedByName).toBe('Renamed Adder');
+    await users.setDisplayName(ADDER.id, 'Adder');
+  });
+
+  it('falls back to the snapshot when the adder has no account', async () => {
+    await prisma.quote.create({
+      data: { text: 'orphan', quotedUser: 'a guest', quoteDate: '2026-01-01', createdById: null, createdByName: 'someone' },
+    });
+    const [view] = await quotes.listAllForDashboard();
+    expect(view?.quotedByName).toBe('someone');
+  });
+
   it('keeps an unmatched name as free text, but rejects an unknown @handle', async () => {
     const q = await quotes.add({ user: 'a caller', text: 'guest bit' }, ADDER);
     expect(q.userId).toBeNull();
