@@ -7,6 +7,7 @@ import type { QuotesService } from './quotes.js';
 import type { ListsService } from './lists.js';
 import type { CustomCommandService } from './customCommands.js';
 import { formatQuote } from './quotes.js';
+import { toCsv } from './csv.js';
 
 /**
  * Custom-command variable engine — a StreamElements-style templating layer.
@@ -379,6 +380,11 @@ const RESOLVERS: Record<string, Resolver> = {
     if (subs[0] === undefined) return (await deps.lists.displayNameOf(ref)) ?? '';
     if (subs[0] === '0') return (await deps.lists.random(ref)) ?? '';
     if (/^\d+$/.test(subs[0])) return (await deps.lists.entryAt(ref, Number(subs[0]))) ?? '';
+    // all/dump/show → every entry as one CSV line.
+    if (['all', 'dump', 'show'].includes(subs[0])) {
+      const entries = await deps.lists.entriesOf(ref);
+      return entries?.length ? toCsv([entries]) : '';
+    }
     return '';
   },
 

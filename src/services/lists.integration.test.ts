@@ -65,6 +65,15 @@ run('ListsService (integration)', () => {
     expect(await lists.random('quotes')).toBe('only one');
   });
 
+  it('entriesOf returns every entry in order, [] when empty, null when unknown', async () => {
+    expect(await lists.entriesOf('quotes')).toBeNull(); // unknown list
+    await lists.create('quotes');
+    expect(await lists.entriesOf('quotes')).toEqual([]); // exists, empty
+    await lists.addEntry('quotes', 'first', ADDER);
+    await lists.addEntry('quotes', 'second', ADDER);
+    expect(await lists.entriesOf('quotes')).toEqual(['first', 'second']);
+  });
+
   it('clears entries but keeps the list', async () => {
     await lists.create('quotes');
     await lists.addEntry('quotes', 'a', ADDER);

@@ -38,6 +38,8 @@ export interface SubcommandSpec {
   cooldownSeconds?: number;
   /** Global cooldown, seconds (0 = none). */
   globalCooldownSeconds?: number;
+  /** Alternate names for this subcommand (e.g. `dump`/`show` for `all`). */
+  aliases?: string[];
   /** Handler; receives the event with the subcommand token stripped from args/argString. */
   handler: CommandHandler;
 }
@@ -141,7 +143,7 @@ export class CommandRouter {
     const defaultPerm = options.permission ?? PermissionLevel.Viewer;
     const subcommands = new Map<string, RegisteredSubcommand>();
     for (const [subName, spec] of Object.entries(options.subcommands)) {
-      subcommands.set(subName.toLowerCase(), {
+      const registered: RegisteredSubcommand = {
         name: subName.toLowerCase(),
         description: spec.description ?? '',
         usage: spec.usage,
@@ -151,7 +153,11 @@ export class CommandRouter {
         handler: spec.handler,
         perUserLastRun: new Map(),
         lastGlobalRun: 0,
-      });
+      };
+      subcommands.set(registered.name, registered);
+      // Aliases share the same object, so they resolve to one handler and one
+      // cooldown, and `list()` can dedupe them by identity.
+      for (const alias of spec.aliases ?? []) subcommands.set(alias.toLowerCase(), registered);
     }
     const cmd: RegisteredCommand = {
       name: key,
@@ -179,7 +185,8 @@ export class CommandRouter {
 
     if (!sub) {
       if (cmd.onUnknown) return void cmd.onUnknown(e);
-      const usage = cmd.description || `Usage: !${cmd.name} <${[...cmd.subcommands.keys()].join('|')}>`;
+      const primaries = [...new Set([...cmd.subcommands.values()].map((s) => s.name))];
+      const usage = cmd.description || `Usage: !${cmd.name} <${primaries.join('|')}>`;
       await this.chat.say(e.channel, usage);
       return;
     }
@@ -241,7 +248,11 @@ export class CommandRouter {
         globalCooldown: c.globalCooldownSeconds, userCooldown: c.cooldownSeconds,
       });
       if (c.subcommands) {
+        // Aliases point at the same object as their primary; list each once.
+        const seen = new Set<RegisteredSubcommand>();
         for (const s of c.subcommands.values()) {
+          if (seen.has(s)) continue;
+          seen.add(s);
           out.push({
             name: `${c.name} ${s.name}`, description: s.description, usage: s.usage, permission: s.permission, group: c.group,
             globalCooldown: s.globalCooldownSeconds, userCooldown: s.cooldownSeconds,

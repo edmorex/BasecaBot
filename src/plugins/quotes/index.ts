@@ -90,6 +90,16 @@ export function quotesPlugin(): Plugin {
           await say(e.channel, q ? formatQuote(q) : 'No quotes yet.');
         }),
         subcommands: {
+          help: {
+            description: 'Show how to use the quote commands.',
+            handler: guard(async (e) => {
+              await say(
+                e.channel,
+                'Quotes: "!quote" shows a random quote · "!quote <id>" shows a specific one · ' +
+                  '"!quote add <username> <text>" adds one (subs+). See them all at https://bot.edmorex.com/quotes',
+              );
+            }),
+          },
           add: {
             description:
               'Add a new quote: !quote add <username> <quote text>. The name can be an @handle, display name, or alias.',

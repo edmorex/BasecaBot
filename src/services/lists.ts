@@ -226,6 +226,17 @@ export class ListsService {
     return list ? (list.displayName?.trim() || list.name) : null;
   }
 
+  /**
+   * Every entry's text, in order, or null if the list is unknown. Non-throwing,
+   * so both `!list all` and `$(list.all)` can build a CSV dump from it.
+   */
+  async entriesOf(name: string): Promise<string[] | null> {
+    const list = await this.db.list.findUnique({ where: { name: normalizeListName(name) } });
+    if (!list) return null;
+    const rows = await this.db.listEntry.findMany({ where: { listId: list.id }, orderBy: { id: 'asc' }, select: { text: true } });
+    return rows.map((r) => r.text);
+  }
+
   /** The nth entry (1-based) of a list, or null if out of range / unknown. Non-throwing — for $(list.n). */
   async entryAt(name: string, n: number): Promise<string | null> {
     const list = await this.db.list.findUnique({ where: { name: normalizeListName(name) } });

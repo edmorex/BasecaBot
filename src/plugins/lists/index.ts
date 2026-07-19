@@ -3,6 +3,7 @@ import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
 import { ListError, listRestrictKeywordToLevel, normalizeListName, type Actor } from '../../services/lists.js';
+import { toCsv } from '../../services/csv.js';
 
 const LEVEL_LABEL = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
 
@@ -155,6 +156,18 @@ export function listsPlugin(): Plugin {
               await assertMayManage(first, e);
               const entry = await svc.random(first);
               await say(e.channel, entry ? entry : `"${normalizeListName(first)}" has no entries yet.`);
+            }),
+          },
+          all: {
+            description: 'Dump a whole list as a comma-separated line: "<Display Name>: a, b, c".',
+            usage: '<listName>',
+            aliases: ['dump', 'show'],
+            handler: guard(async (e) => {
+              const { first } = firstAndRest(e.argString);
+              await assertMayManage(first, e);
+              const entries = await svc.entriesOf(first); // null only if unknown, which assertMayManage already rejected
+              const title = label(first, await svc.displayNameOf(first));
+              await say(e.channel, `${title}: ${entries?.length ? toCsv([entries]) : '(empty)'}`);
             }),
           },
         },

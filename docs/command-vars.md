@@ -513,3 +513,18 @@ Displays a random entry of the list.
 
 `Did you know we beat Half-Life?`
 
+### $(list.all <list_ref_name>)
+Displays every entry of the list as a single comma-separated (CSV) line. Entries
+that contain a comma or quote are quoted per CSV rules. Resolves to an empty
+string if the list is unknown or has no entries.
+
+**Aliases:** `$(list.dump)`, `$(list.show)`
+
+**Example:**
+
+`Games we've beaten: $(list.all gamesdone)`
+
+**Output:**
+
+`Games we've beaten: Half-Life,Metal Gear,"Portal 2, Co-op"`
+

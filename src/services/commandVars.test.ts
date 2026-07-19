@@ -20,6 +20,7 @@ function makeDeps(over: Partial<VarDeps> = {}): VarDeps {
       displayNameOf: async (r: string) => (r === 'games' ? 'Completed Games' : null),
       entryAt: async (r: string, n: number) => (r === 'games' && n === 2 ? 'Metal Gear' : null),
       random: async (r: string) => (r === 'games' ? 'Half-Life' : null),
+      entriesOf: async (r: string) => (r === 'games' ? ['Half-Life', 'Metal Gear', 'Portal 2, Co-op'] : null),
     },
     customCommands: { getUsageCount: async (t: { name: string }) => (t.name === 'death' ? 41 : null) },
     api: {} as never,
@@ -116,6 +117,14 @@ describe('CommandVarEngine — quote/list', () => {
     expect(await render('$(list.2 games)')).toBe('Metal Gear');
     expect(await render('$(list.0 games)')).toBe('Half-Life');
     expect(await render('$(list nope)')).toBe(''); // unknown list
+  });
+  it('list.all dumps every entry as CSV, with dump/show aliases', async () => {
+    // The entry containing a comma is CSV-quoted.
+    const csv = 'Half-Life,Metal Gear,"Portal 2, Co-op"';
+    expect(await render('$(list.all games)')).toBe(csv);
+    expect(await render('$(list.dump games)')).toBe(csv);
+    expect(await render('$(list.show games)')).toBe(csv);
+    expect(await render('$(list.all nope)')).toBe(''); // unknown list → empty
   });
 });
 

@@ -144,4 +144,32 @@ describe('CommandRouter.registerGroup', () => {
     expect(list.find((c) => c.name === 'wheel')).toMatchObject({ description: 'Wheel.' });
     expect(list.find((c) => c.name === 'wheel add')).toMatchObject({ description: 'Add.', userCooldown: 1, globalCooldown: 2 });
   });
+
+  it('dispatches subcommand aliases to the same handler', async () => {
+    const all = vi.fn();
+    router.registerGroup('list', { subcommands: { all: { aliases: ['dump', 'show'], handler: all } } });
+    await bus.publish(chat('!list all games'));
+    await bus.publish(chat('!list dump games'));
+    await bus.publish(chat('!list show games'));
+    expect(all).toHaveBeenCalledTimes(3);
+    expect((all.mock.calls[1]![0] as CommandEvent).argString).toBe('games'); // token stripped
+  });
+
+  it('shares one cooldown across a subcommand and its aliases', async () => {
+    const all = vi.fn();
+    router.registerGroup('list', {
+      subcommands: { all: { aliases: ['dump'], cooldownSeconds: 60, handler: all } },
+    });
+    await bus.publish(chat('!list all games'));
+    await bus.publish(chat('!list dump games')); // same window, via the alias
+    expect(all).toHaveBeenCalledOnce();
+  });
+
+  it('lists an aliased subcommand once, under its primary name', async () => {
+    router.registerGroup('list', { subcommands: { all: { aliases: ['dump', 'show'], handler: vi.fn() } } });
+    const names = router.list().map((c) => c.name);
+    expect(names).toContain('list all');
+    expect(names).not.toContain('list dump');
+    expect(names).not.toContain('list show');
+  });
 });
