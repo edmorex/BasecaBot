@@ -110,14 +110,4 @@ export class PointsService {
       `;
     });
   }
-
-  /** Top N balances, joined with display names. */
-  async leaderboard(limit = 10) {
-    const rows = await this.storage.prisma.pointsBalance.findMany({
-      orderBy: { balance: 'desc' },
-      take: limit,
-      include: { user: true },
-    });
-    return rows.map((r) => ({ displayName: r.user.displayName, balance: r.balance }));
-  }
 }

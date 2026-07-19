@@ -47,9 +47,9 @@ Required Twitch setup (two accounts, two tokens):
 
 | Command | Who | What |
 | --- | --- | --- |
-| `!points` / `!p` | everyone | Show your balance (`!points top` for leaderboard) |
-| `!give <user> <n>` | everyone | Transfer points |
-| `!addpoints <user> <n>` | mod | Grant/deduct points |
+| `!points` (alias `!p`) | everyone | Show your own balance |
+| `!points give <user> <n>` | sub | Transfer your points to someone else |
+| `!points grant <user> <n>` | broadcaster | Create/deduct points (negative removes) |
 | `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`remove` on a `!trigger` or `"phrase"` |
 | `!startgame` / `!endgame` / `!vote <x>` | mod / everyone | Sample web-app game |
 

@@ -1,7 +1,7 @@
 import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import { InsufficientPointsError } from '../../services/points.js';
-import { PermissionLevel } from '../../core/events.js';
+import { PermissionLevel, type CommandEvent } from '../../core/events.js';
 
 const PAYOUT_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const SUB_POINTS = 30; // subscribers (and VIP/Mod/Broadcaster/Admin) per payout
@@ -14,7 +14,12 @@ const NONSUB_CAP = 3000; // non-subscribers stop accruing past this
  * lurkers, via Twitch's Get Chatters endpoint) is paid out — 30 for
  * subscribers/VIPs/mods/broadcaster/admins, 25 for everyone else (capped at
  * 3000 for non-subscribers). No points for chatting per-message, subs, bits, or
- * events. Mods/broadcaster can also grant points directly with !addpoints.
+ * events.
+ *
+ * Commands follow the `!<command> <subcommand>` shape used by the other
+ * plugins: `!points` (balance), `!points give` (sub+), `!points grant`
+ * (broadcaster). There is deliberately no leaderboard — balances are private to
+ * the user who asks.
  *
  * Requires broadcaster-token scopes: moderator:read:chatters, channel:read:vips,
  * channel:read:subscriptions, moderation:read.
@@ -103,68 +108,72 @@ export function pointsPlugin(): Plugin {
       const CURRENCY = ctx.config.points.name;
 
       // ── Commands ──────────────────────────────────────────────────────────
-      ctx.commands.register(
-        'points',
-        async (e) => {
-          if (e.args[0]?.toLowerCase() === 'top') {
-            const board = await ctx.points.leaderboard(5);
-            const rendered = board.map((r, i) => `${i + 1}. ${r.displayName} (${r.balance})`).join(', ');
-            await ctx.chat.say(e.channel, `Top ${CURRENCY}: ${rendered || 'nobody yet'}`);
-            return;
-          }
+
+      /** Resolve a `<user> <amount>` argument pair, or explain what's wrong. */
+      const parseTarget = async (
+        e: CommandEvent,
+        label: string,
+        allowNegative: boolean,
+      ): Promise<{ id: string; displayName: string; amount: number } | null> => {
+        const [target, amountRaw] = e.args;
+        const amount = Number(amountRaw);
+        const validAmount = Number.isInteger(amount) && (allowNegative ? amount !== 0 : amount > 0);
+        if (!target || !validAmount) {
+          await ctx.chat.say(e.channel, `Usage: !points ${label} <user> <amount>`);
+          return null;
+        }
+        // Any of the user's names works here — @handle, display name, or alias.
+        const recipient = await ctx.users.resolveUserRef(target);
+        if (recipient.kind !== 'user') {
+          await ctx.chat.say(e.channel, `I don't know a user called ${target}.`);
+          return null;
+        }
+        return { id: recipient.id, displayName: recipient.displayName, amount };
+      };
+
+      ctx.commands.registerGroup('points', {
+        description: `Check your ${CURRENCY}. Subs can "give" to someone else; the broadcaster can "grant".`,
+        permission: PermissionLevel.Viewer,
+        aliases: ['p'],
+        // Bare `!points` — and anything unrecognized — just reports the balance.
+        onUnknown: async (e) => {
           const balance = await ctx.points.getBalance(e.user.id);
           await ctx.chat.say(e.channel, `@${e.user.displayName} you have ${balance} ${CURRENCY}.`);
         },
-        { aliases: ['p'], description: `Check your ${CURRENCY} (or "!points top").`, usage: '[top]', cooldownSeconds: 3 },
-      );
-
-      ctx.commands.register(
-        'give',
-        async (e) => {
-          const [target, amountRaw] = e.args;
-          const amount = Number(amountRaw);
-          if (!target || !Number.isInteger(amount) || amount <= 0) {
-            await ctx.chat.say(e.channel, `Usage: !give <user> <amount>`);
-            return;
-          }
-          const recipient = await ctx.users.resolveUserRef(target);
-          if (recipient.kind !== 'user') {
-            await ctx.chat.say(e.channel, `I don't know a user called ${target}.`);
-            return;
-          }
-          try {
-            await ctx.points.transfer(e.user.id, recipient.id, amount);
-            await ctx.chat.say(e.channel, `@${e.user.displayName} gave ${amount} ${CURRENCY} to ${recipient.displayName}.`);
-          } catch (err) {
-            if (err instanceof InsufficientPointsError) {
-              await ctx.chat.say(e.channel, `@${e.user.displayName} you only have ${err.balance} ${CURRENCY}.`);
-            } else {
-              throw err;
-            }
-          }
+        subcommands: {
+          give: {
+            description: `(Sub+) Transfer your own ${CURRENCY} to another user.`,
+            usage: '<user> <amount>',
+            permission: PermissionLevel.Subscriber,
+            cooldownSeconds: 3,
+            handler: async (e) => {
+              const t = await parseTarget(e, 'give', false);
+              if (!t) return;
+              try {
+                await ctx.points.transfer(e.user.id, t.id, t.amount);
+                await ctx.chat.say(e.channel, `@${e.user.displayName} gave ${t.amount} ${CURRENCY} to ${t.displayName}.`);
+              } catch (err) {
+                if (err instanceof InsufficientPointsError) {
+                  await ctx.chat.say(e.channel, `@${e.user.displayName} you only have ${err.balance} ${CURRENCY}.`);
+                } else {
+                  throw err;
+                }
+              }
+            },
+          },
+          grant: {
+            description: `(Broadcaster) Create or deduct ${CURRENCY} for a user; a negative amount removes.`,
+            usage: '<user> <amount>',
+            permission: PermissionLevel.Broadcaster,
+            handler: async (e) => {
+              const t = await parseTarget(e, 'grant', true);
+              if (!t) return;
+              const balance = await ctx.points.award(t.id, t.amount);
+              await ctx.chat.say(e.channel, `${t.displayName} now has ${balance} ${CURRENCY}.`);
+            },
+          },
         },
-        { permission: PermissionLevel.Subscriber, description: `(Sub+) Give ${CURRENCY} to another user.`, usage: '<user> <amount>', cooldownSeconds: 3 },
-      );
-
-      ctx.commands.register(
-        'addpoints',
-        async (e) => {
-          const [target, amountRaw] = e.args;
-          const amount = Number(amountRaw);
-          if (!target || !Number.isInteger(amount)) {
-            await ctx.chat.say(e.channel, `Usage: !addpoints <user> <amount>`);
-            return;
-          }
-          const recipient = await ctx.users.resolveUserRef(target);
-          if (recipient.kind !== 'user') {
-            await ctx.chat.say(e.channel, `Unknown user ${target}.`);
-            return;
-          }
-          const balance = await ctx.points.award(recipient.id, amount);
-          await ctx.chat.say(e.channel, `${recipient.displayName} now has ${balance} ${CURRENCY}.`);
-        },
-        { permission: PermissionLevel.Broadcaster, description: `(Broadcaster) Grant/deduct ${CURRENCY}.`, usage: '<user> <amount>' },
-      );
+      });
     },
 
     start() {

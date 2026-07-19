@@ -92,9 +92,9 @@ a Twitch handle," and it is treated as one.
 
 ## What this looks like in commands
 
-Any command taking a username accepts any variant — `!give`, `!addpoints`,
-`!quote add`, `!quote edituser`, `!quote searchuser`, and `$(user …)` in custom
-command variables all go through the same resolver.
+Any command taking a username accepts any variant — `!points give`,
+`!points grant`, `!quote add`, `!quote edituser`, `!quote searchuser`, and
+`$(user …)` in custom command variables all go through the same resolver.
 
 ```
 !quote add @baseca      Just a bit tired.     → linked, if the account exists

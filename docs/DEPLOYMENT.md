@@ -224,7 +224,9 @@ docker compose up -d
 ```
 Copy those off-server periodically (e.g. `scp` to your laptop, or a cron job).
 
-**Rotating Twitch tokens.** The bot refreshes access tokens automatically and persists them to the `bottokens` volume, so it keeps working across restarts. You only need to touch tokens again if you **revoke** them or **change scopes** — then update `.env` and `docker compose up -d --build`. (To force a clean re-seed from `.env`, remove the token volume: `docker compose down && docker volume rm basecabot_bottokens`.)
+**Rotating Twitch tokens.** The bot refreshes access tokens automatically and persists them to the `bottokens` volume, so it keeps working across restarts. You only need to touch tokens again if you **revoke** them or **change scopes** — then update `.env` and delete the persisted token for that role (`docker compose exec bot rm -f /app/.tokens/broadcaster.json`, or `bot.json`), since the persisted copy overrides `.env`. Removing the whole volume re-seeds *both* roles from `.env`, which only works if both seeds are still current.
+
+**Moving to a different channel/broadcaster.** See **[changing-broadcaster.md](changing-broadcaster.md)** — covers new broadcaster tokens without the Twitch CLI, plus what to do about the existing data.
 
 **Updating the web apps only.** They're bind-mounted into Caddy from `./webapps`, so a `git pull` picks up changes; run `docker compose restart caddy` if needed.
 
@@ -315,24 +317,86 @@ https://bot.edmorex.com/auth/callback
 
 (Keep the existing `http://localhost:3000` for token generation; an app can have several.)
 
-### I2. Broadcaster-token scopes (dashboard + points payouts)
+### I2. Token scopes — what each one is for
 
-A few Helix features need scopes on the **broadcaster** token beyond the EventSub read scopes.
-Regenerate the broadcaster token with the full set:
+Two accounts, two tokens, two scope sets. Authorize each **while logged in as that account**.
+
+#### Bot-account token
+
+```
+chat:read chat:edit
+```
+
+| Scope | Grants | Used for — and what breaks without it |
+|---|---|---|
+| `chat:read` | Read messages in channels the account has joined. | Everything the bot reacts to: `!commands`, phrase triggers, chat-derived game input. Without it the bot connects but is deaf — **no command ever fires**. |
+| `chat:edit` | Send messages as the account. | Every reply, event shout-out, and timer. Without it the bot reads chat but **can never speak**. |
+
+Neither is channel-specific, so this token survives a channel change ([changing-broadcaster.md](changing-broadcaster.md)).
+
+#### Broadcaster-account token
 
 ```
 channel:read:subscriptions bits:read moderator:read:followers moderation:read moderator:read:chatters channel:read:vips
 ```
 
-- `moderation:read` — dashboard's **Moderator** row (without it, that row just shows false).
-- `moderator:read:chatters` — **required for point payouts.** The points plugin lists everyone
-  connected to chat (incl. lurkers) every 5 min via Get Chatters; without this scope the call
-  throws and **no points are awarded**.
-- `channel:read:vips` — lets VIPs (who aren't also subs/mods) get the higher 30-point tier;
-  without it they fall back to the 25-point tier.
+These can only be granted by the channel owner — that's the whole reason the bot holds a second token.
 
-Update `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`, then clear the token
-cache so the new token is used: `docker compose down && docker volume rm basecabot_bottokens && docker compose up -d`.
+| Scope | Grants | Used for — and what breaks without it |
+|---|---|---|
+| `channel:read:subscriptions` | Read the channel's subscriber list, and whether one user subscribes. | **EventSub** `channel.subscribe` / `.subscription.message` / `.subscription.gift` — no sub, resub, or gift-sub announcements or point bonuses. **Points payout**: subscribers silently drop to the lower 25-point tier. **Dashboard**: the Subscriber row always reads false. **Admin → Users**: nobody shows as "Subscriber". |
+| `bits:read` | Read cheer (bits) events. | **EventSub** `channel.cheer` — bit cheers get no shout-out and no point bonus. Nothing else uses it. |
+| `moderator:read:followers` | Read the follower list and check whether a specific user follows. | **EventSub** `channel.follow` — new follows are never announced or logged. **Dashboard**: the Follower row always reads false. (`$(channel.followers)` reads only the total count, which Twitch returns regardless.) |
+| `moderation:read` | Read the channel's moderator list. | **Points payout**: mods drop to the 25-point tier. **Dashboard**: the Moderator row always reads false. **Admin → Users**: nobody shows as "Moderator". |
+| `moderator:read:chatters` | List everyone currently connected to chat, including lurkers. | **Point payouts, entirely.** Every 5 minutes the points plugin calls Get Chatters; without this scope that call throws and the payout aborts before awarding anyone — **nobody earns points at all**. Also powers `$(random.chatter)`. This is the highest-impact scope on the list. |
+| `channel:read:vips` | Read the channel's VIP list. | **Points payout**: VIPs who aren't also subs or mods drop to the 25-point tier. **Admin → Users**: nobody shows as "VIP". |
+
+**Degradation is silent by design.** Except for `moderator:read:chatters`, a missing scope is caught
+and logged, then treated as an empty list — the bot keeps running and simply reports less. That means
+an under-scoped token looks healthy: chat works, commands work, the dashboard loads. See
+[I2b](#i2b-verifying-the-scopes-actually-took) for checks that actually prove the scopes landed.
+
+Some things need **no** scope and keep working regardless: user lookups, stream/live status, channel
+info (`$(game)`, `$(title)`, `$(uptime)`), channel emotes, and the EventSub `channel.raid` topic — so
+raid shout-outs still fire even on a minimally-scoped token.
+
+#### Applying a regenerated token
+
+Update `TWITCH_BROADCASTER_ACCESS_TOKEN` / `TWITCH_BROADCASTER_REFRESH_TOKEN`, then delete the
+**persisted** broadcaster token so the new one is actually used — on startup `.tokens/broadcaster.json`
+takes precedence over `.env`:
+
+```bash
+docker compose exec bot rm -f /app/.tokens/broadcaster.json
+docker compose restart bot
+```
+
+> Delete only that file. Removing the whole `basecabot_bottokens` volume also destroys `bot.json`,
+> and since Twitch rotates refresh tokens the bot's `.env` seed is usually stale — the bot would
+> then be unable to authenticate to chat at all.
+
+#### I2b. Verifying the scopes actually took
+
+Ask Twitch what the token really has:
+
+```bash
+curl -H "Authorization: OAuth <broadcaster access token>" https://id.twitch.tv/oauth2/validate
+```
+
+Check `login` is the broadcaster and `scopes` lists all six. Then confirm in the running bot:
+
+| Check | Proves |
+|---|---|
+| **Admin → Users**: the Permission column shows real Moderator/VIP/Subscriber values, not all "Everyone" | `moderation:read`, `channel:read:vips`, `channel:read:subscriptions` |
+| Wait ~5 min with someone in chat, then `!points` — the balance rose | `moderator:read:chatters` |
+| `docker compose logs bot` at startup shows no EventSub subscription errors | EventSub accepted the sub/cheer/follow topics |
+
+The first two are the ones worth doing — everything else on the dashboard passes even on a badly
+under-scoped token.
+
+> **Admin → EventSimulator cannot verify scopes.** It publishes events straight onto the internal
+> bus, so it behaves identically whether or not Twitch would have sent them. It tests your
+> reactions, not your token.
 
 ### I3. Set the web env vars (server `.env`)
 
