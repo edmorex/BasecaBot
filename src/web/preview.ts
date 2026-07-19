@@ -6,6 +6,7 @@ import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
+import { adminPage } from './pages/admin.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
@@ -18,9 +19,10 @@ import type { CommandHandler, CommandOptions, GroupOptions } from '../core/comma
  *
  *   npm run preview:mod              # logged-in as a MODERATOR (can manage commands)
  *   npm run preview:viewer           # logged-in as a plain VIEWER (read-only)
+ *   npm run preview:admin            # logged-in as the BROADCASTER (sees /admin)
  *   PREVIEW=out npm run preview:web  # logged-out (welcome page)
  *
- * (PREVIEW_USER=viewer|mod selects the identity; defaults to mod.)
+ * (PREVIEW_USER=viewer|mod|admin selects the identity; defaults to mod.)
  * Not imported by the bot.
  */
 const PORT = Number(process.env.PORT ?? 8099);
@@ -38,9 +40,15 @@ const PROFILES = {
     relationship: { broadcaster: false, botAdmin: false, moderator: false, subscriber: false, follower: false },
     aliases: [] as string[],
   },
+  admin: {
+    user: { twitchId: '303', login: 'basecampfoster', canonical: '@basecampfoster', displayName: 'BasecampFoster', avatar: AVATAR('xarth') },
+    relationship: { broadcaster: true, botAdmin: true, moderator: true, subscriber: true, follower: true },
+    aliases: ['Sharon'] as string[],
+  },
 };
 
-const which: keyof typeof PROFILES = process.env.PREVIEW_USER === 'viewer' ? 'viewer' : 'mod';
+const which: keyof typeof PROFILES =
+  process.env.PREVIEW_USER === 'viewer' ? 'viewer' : process.env.PREVIEW_USER === 'admin' ? 'admin' : 'mod';
 const me = structuredClone(PROFILES[which]);
 
 const mk = (o: Partial<Record<string, unknown>>) => ({
@@ -86,7 +94,7 @@ async function collectBuiltins() {
     points: {},
     storage: { prisma: {} },
     ws: { broadcast: noop },
-    config: { twitch: { botUsername: 'bot', channel: 'preview', broadcasterUsername: 'preview', admins: [] }, points: { name: 'points' }, eventSim: { enabled: false } },
+    config: { twitch: { botUsername: 'bot', channel: 'preview', broadcasterUsername: 'preview', admins: [] }, points: { name: 'points' } },
     logger: { info: noop, warn: noop, debug: noop, error: noop, child: () => ({}) },
   } as unknown as ServiceContext;
 
@@ -122,6 +130,33 @@ const mockCustoms = [
     mk({ name: `custom${i + 1}`, access: i % 6, response: i % 5 === 0 ? null : `Response #${i + 1}`, enabled: i % 7 !== 0, usageCount: i, group: GROUPS[i % 4] })),
 ];
 const commands = [...builtins, ...mockCustoms];
+
+// Mock admin users (exercises the table, aliases, permission spread, actions).
+const LEVEL_LABELS = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
+const dAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+interface MockUser {
+  id: string; login: string; canonical: string; displayName: string; aliases: string[];
+  points: number; quotes: number; permission: number; permissionLabel: string;
+  lastSeenAt: string; firstSeenAt: string;
+}
+const mkUser = (login: string, displayName: string, o: Partial<MockUser> = {}): MockUser => ({
+  id: String(100000 + login.length * 7919), login, canonical: '@' + login, displayName,
+  aliases: [], points: 0, quotes: 0, permission: 0,
+  lastSeenAt: dAgo(1), firstSeenAt: dAgo(400),
+  ...o,
+  // Always derived from the final permission, so callers only pass the number.
+  permissionLabel: LEVEL_LABELS[o.permission ?? 0] ?? 'Everyone',
+});
+const mockAdminUsers: MockUser[] = [
+  mkUser('basecampfoster', 'BasecampFoster', { aliases: ['Sharon'], points: 99999, quotes: 412, permission: 5, lastSeenAt: dAgo(0) }),
+  mkUser('modmandy', 'ModMandy', { aliases: ['Mandy', 'MM'], points: 4820, quotes: 37, permission: 3 }),
+  mkUser('botenredwolf', 'BotenRedWolf', { aliases: ['Andrea'], points: 15200, quotes: 88, permission: 3, lastSeenAt: dAgo(2) }),
+  mkUser('edmorex', 'Ed', { aliases: ['Ed', 'Tulcats'], points: 7310, quotes: 64, permission: 2, lastSeenAt: dAgo(3) }),
+  mkUser('hellokatiejoey', 'Joe', { points: 2200, quotes: 19, permission: 1, lastSeenAt: dAgo(9) }),
+  mkUser('catnipchloe', 'Chloe', { points: 640, quotes: 5, permission: 1, lastSeenAt: dAgo(21) }),
+  mkUser('viewervince', 'ViewerVince', { points: 15, quotes: 0, lastSeenAt: dAgo(45) }),
+  mkUser('sim_testuser', 'TestUser', { points: 300, quotes: 0, lastSeenAt: dAgo(0) }),
+];
 
 // Mock named lists (exercises the sidebar, entries table, and permission gating).
 interface MockEntry { id: number; text: string; addedByName: string | null; addedAt: string }
@@ -183,6 +218,8 @@ const server = createServer(async (req, res) => {
     if (p === '/commands') return html(commandsPage());
     if (p === '/lists') return html(listsPage());
     if (p === '/quotes') return html(quotesPage());
+    if (p === '/admin') return html(adminPage());
+    if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
     if (p === '/api/commands/export') {
@@ -222,6 +259,48 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'POST') {
     const body = await readJson(req);
+    // ── Admin (mock) ────────────────────────────────────────────────────────
+    if (p === '/api/admin/users/init') {
+      const handle = String(body.handle ?? '').replace(/^@/, '').toLowerCase();
+      if (!handle) return json(400, { error: 'Provide a Twitch username.' });
+      if (handle.startsWith('nope')) return json(404, { error: `There's no Twitch account called @${handle}.` });
+      const existing = mockAdminUsers.find((u) => u.login === handle);
+      if (existing) return json(200, { ok: true, user: existing });
+      const created = mkUser(handle, handle, { lastSeenAt: dAgo(0), firstSeenAt: dAgo(0) });
+      mockAdminUsers.unshift(created);
+      return json(200, { ok: true, user: created });
+    }
+    if (p === '/api/admin/users/update') {
+      const u = mockAdminUsers.find((x) => x.id === String(body.id ?? ''));
+      if (!u) return json(404, { error: 'Unknown user.' });
+      if (typeof body.displayName === 'string' && body.displayName.trim()) u.displayName = body.displayName.trim();
+      for (const a of Array.isArray(body.addAliases) ? body.addAliases : []) {
+        const alias = String(a);
+        if (mockAdminUsers.some((x) => x.aliases.some((y) => y.toLowerCase() === alias.toLowerCase()))) {
+          return json(400, { error: `"${alias}" is already taken.` });
+        }
+        u.aliases.push(alias);
+      }
+      for (const a of Array.isArray(body.removeAliases) ? body.removeAliases : []) {
+        u.aliases = u.aliases.filter((x) => x !== String(a));
+      }
+      if (body.points != null && body.points !== '') u.points = Math.max(0, Math.floor(Number(body.points)));
+      return json(200, { ok: true });
+    }
+    if (p === '/api/admin/users/delete') {
+      const i = mockAdminUsers.findIndex((x) => x.id === String(body.id ?? ''));
+      if (i < 0) return json(404, { error: 'Unknown user.' });
+      if (mockAdminUsers[i]!.permission === 5) return json(400, { error: 'The broadcaster account cannot be deleted.' });
+      mockAdminUsers.splice(i, 1);
+      return json(200, { ok: true });
+    }
+    if (p === '/api/admin/simulate') {
+      const type = String(body.type ?? '');
+      const known = ['sub', 'resub', 'subgift', 'bits', 'raid', 'follow', 'donation'];
+      if (!known.includes(type)) return json(400, { error: `Unknown event type "${type}".` });
+      return json(200, { ok: true, injected: type });
+    }
+
     if (p === '/api/me/display-name') { me.user.displayName = String(body.displayName ?? me.user.displayName); return json(200, { displayName: me.user.displayName }); }
     if (p === '/api/me/aliases') { me.aliases.push(String(body.alias ?? '')); return json(200, { aliases: me.aliases }); }
     if (p === '/api/me/aliases/delete') { me.aliases = me.aliases.filter((a) => a.toLowerCase() !== String(body.alias ?? '').toLowerCase()); return json(200, { aliases: me.aliases }); }

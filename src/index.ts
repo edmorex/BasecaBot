@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────

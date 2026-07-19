@@ -45,6 +45,19 @@ export type TwitchUserLookup = (
   login: string,
 ) => Promise<{ id: string; login: string; displayName: string; avatarUrl?: string | null } | null>;
 
+/** One row of the admin Users table. */
+export interface AdminUserRow {
+  id: string;
+  login: string;
+  canonical: string;
+  displayName: string;
+  aliases: string[];
+  points: number;
+  quotes: number;
+  lastSeenAt: string;
+  firstSeenAt: string;
+}
+
 /** A user's profile as surfaced to the dashboard. */
 export interface UserProfile {
   twitchId: string;
@@ -226,6 +239,67 @@ export class UsersService {
       avatarUrl: user.avatarUrl,
       aliases: user.names.map((n) => n.name),
     };
+  }
+
+  /**
+   * Every known user with the aggregates the admin Users table shows. Points and
+   * quote counts are gathered in two grouped queries rather than per row, so the
+   * cost stays flat as the user table grows.
+   */
+  async listForAdmin(): Promise<AdminUserRow[]> {
+    const [users, balances, quoteCounts] = await Promise.all([
+      this.db.user.findMany({
+        include: { names: { where: { kind: 'alias' }, orderBy: { createdAt: 'asc' } } },
+        orderBy: { lastSeenAt: 'desc' },
+      }),
+      this.db.pointsBalance.groupBy({ by: ['userId'], _sum: { balance: true } }),
+      this.db.quote.groupBy({ by: ['quotedUserId'], _count: { _all: true } }),
+    ]);
+
+    const points = new Map(balances.map((b) => [b.userId, b._sum.balance ?? 0]));
+    const quotes = new Map(
+      quoteCounts.filter((q) => q.quotedUserId).map((q) => [q.quotedUserId as string, q._count._all]),
+    );
+
+    return users.map((u) => ({
+      id: u.id,
+      login: u.login,
+      canonical: `@${u.login}`,
+      displayName: u.displayName,
+      aliases: u.names.map((n) => n.name),
+      points: points.get(u.id) ?? 0,
+      quotes: quotes.get(u.id) ?? 0,
+      lastSeenAt: u.lastSeenAt.toISOString(),
+      firstSeenAt: u.firstSeenAt.toISOString(),
+    }));
+  }
+
+  /**
+   * Create a user the bot has never seen, by Twitch handle. Lets an admin set
+   * someone up (points, aliases) before they ever chat. Returns null if no such
+   * Twitch account exists.
+   */
+  async initByHandle(handle: string): Promise<AdminUserRow | null> {
+    const login = normalizeName(handle);
+    if (!login) throw new AliasError('Provide a Twitch username.');
+
+    const existing = await this.getByLogin(login);
+    const fetched = existing ? null : await this.lookupTwitchUser?.(login).catch(() => null);
+    if (!existing && !fetched) return null;
+    if (fetched) await this.touch(fetched);
+
+    const id = existing?.id ?? fetched!.id;
+    const rows = await this.listForAdmin();
+    return rows.find((r) => r.id === id) ?? null;
+  }
+
+  /**
+   * Delete a user and everything keyed to them. Points, aliases, and preferences
+   * cascade away; quotes and list entries they authored survive with their name
+   * snapshots, since removing a person shouldn't erase channel history.
+   */
+  async deleteUser(id: string): Promise<void> {
+    await this.db.user.delete({ where: { id } });
   }
 
   // ── writes ────────────────────────────────────────────────────────────────────

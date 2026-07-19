@@ -127,7 +127,6 @@ Fill in, at minimum:
 | `WS_HUB_SECRET` | a long random string (`openssl rand -hex 24`) |
 | `DOMAIN` | `bot.example.com` |
 | `ACME_EMAIL` | your email (for cert notices) |
-| `EVENT_SIM_ENABLED` | **leave blank** in production |
 
 Leave `DATABASE_URL` as-is — Compose overrides it to the volume path (`file:/data/basecabot.db`) inside the container.
 

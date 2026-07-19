@@ -5,6 +5,9 @@ import type { ChannelRelationship, SessionUser } from './types.js';
 
 const log = scopedLogger('channelRelationship');
 
+/** How long bulk role lists are reused before Twitch is asked again. */
+const ROLE_CACHE_MS = 60_000;
+
 /**
  * Computes a visitor's relationship to the bot's channel: broadcaster, bot
  * admin, moderator, subscriber, follower.
@@ -49,6 +52,46 @@ export class ChannelRelationshipService {
 
     return { broadcaster: false, botAdmin, moderator, subscriber, follower };
   }
+
+  /**
+   * Bulk role lookup for the admin Users table: one pass over the channel's
+   * moderators, VIPs, and subscribers rather than three Helix calls per user.
+   *
+   * Results are cached briefly because the table refetches on every edit, and
+   * each list degrades to empty independently — a missing scope costs that one
+   * role, not the whole table. Callers still resolve broadcaster/admin from
+   * config, which needs no API at all.
+   */
+  async roleSets(): Promise<{ moderators: Set<string>; vips: Set<string>; subscribers: Set<string> }> {
+    const now = Date.now();
+    if (this.roleCache && now - this.roleCache.at < ROLE_CACHE_MS) return this.roleCache.sets;
+
+    const ids = async (label: string, fn: () => Promise<string[]>): Promise<Set<string>> => {
+      try {
+        return new Set(await fn());
+      } catch (err) {
+        log.warn({ err, check: label }, 'bulk role lookup failed (missing scope?) — treating as empty');
+        return new Set<string>();
+      }
+    };
+
+    const [moderators, vips, subscribers] = await Promise.all([
+      ids('moderators', async () =>
+        (await this.api.moderation.getModeratorsPaginated(this.broadcasterId).getAll()).map((m) => m.userId),
+      ),
+      // VIPs come back as plain user relations, keyed by `id` rather than `userId`.
+      ids('vips', async () => (await this.api.channels.getVipsPaginated(this.broadcasterId).getAll()).map((v) => v.id)),
+      ids('subscribers', async () =>
+        (await this.api.subscriptions.getSubscriptionsPaginated(this.broadcasterId).getAll()).map((s) => s.userId),
+      ),
+    ]);
+
+    const sets = { moderators, vips, subscribers };
+    this.roleCache = { at: now, sets };
+    return sets;
+  }
+
+  private roleCache?: { at: number; sets: { moderators: Set<string>; vips: Set<string>; subscribers: Set<string> } };
 
   private async check(label: string, fn: () => Promise<boolean>): Promise<boolean> {
     try {

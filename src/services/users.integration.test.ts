@@ -151,6 +151,54 @@ run('UsersService (integration)', () => {
     expect((await users.getProfile(A))?.aliases).not.toContain('bob');
   });
 
+  it('lists users for the admin table with points, quotes, and aliases', async () => {
+    await users.touch({ id: A, login: 'alice', displayName: 'Alice' });
+    await users.addAlias(A, 'Ace');
+    await prisma.pointsBalance.upsert({ where: { userId: A }, create: { userId: A, balance: 250 }, update: { balance: 250 } });
+    await prisma.quote.createMany({
+      data: [
+        { text: 'one', quotedUser: 'Alice', quotedUserId: A, quoteDate: '2026-01-01' },
+        { text: 'two', quotedUser: 'Alice', quotedUserId: A, quoteDate: '2026-01-02' },
+        { text: 'other', quotedUser: 'a guest', quoteDate: '2026-01-03' },
+      ],
+    });
+
+    const row = (await users.listForAdmin()).find((r) => r.id === A);
+    expect(row).toMatchObject({ canonical: '@alice', displayName: 'Alice', aliases: ['Ace'], points: 250, quotes: 2 });
+
+    await prisma.quote.deleteMany({ where: { quoteDate: { startsWith: '2026-01-0' } } });
+  });
+
+  it('creates a user from a Twitch handle they have never chatted under', async () => {
+    const withLookup = new UsersService(new Storage(prisma), async (login) =>
+      login === 'alice' ? { id: A, login: 'alice', displayName: 'Alice' } : null,
+    );
+    expect(await withLookup.initByHandle('@alice')).toMatchObject({ id: A, canonical: '@alice' });
+    expect(await withLookup.initByHandle('@ghost')).toBeNull();
+    await expect(withLookup.initByHandle('   ')).rejects.toBeInstanceOf(AliasError);
+  });
+
+  // Deleting a person clears what is keyed to them, but must not erase channel
+  // history — quotes keep their text snapshot and simply become unlinked.
+  it('deletes a user without deleting the quotes about them', async () => {
+    await users.touch({ id: A, login: 'alice', displayName: 'Alice' });
+    await users.addAlias(A, 'Ace');
+    await prisma.pointsBalance.create({ data: { userId: A, balance: 10 } });
+    const quote = await prisma.quote.create({
+      data: { text: 'remembered', quotedUser: 'Alice', quotedUserId: A, quoteDate: '2026-02-02' },
+    });
+
+    await users.deleteUser(A);
+
+    expect(await users.getById(A)).toBeNull();
+    expect(await users.resolveNameToUserId('ace')).toBeNull(); // names released
+    expect(await prisma.pointsBalance.findUnique({ where: { userId: A } })).toBeNull();
+    const kept = await prisma.quote.findUnique({ where: { id: quote.id } });
+    expect(kept).toMatchObject({ text: 'remembered', quotedUser: 'Alice', quotedUserId: null });
+
+    await prisma.quote.delete({ where: { id: quote.id } });
+  });
+
   it('drops the old indexed name when a user renames on Twitch', async () => {
     await users.touch({ id: A, login: 'alice', displayName: 'Alice' });
     await users.touch({ id: A, login: 'alicia', displayName: 'Alicia' });

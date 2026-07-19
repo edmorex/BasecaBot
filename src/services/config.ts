@@ -31,10 +31,6 @@ const EnvSchema = z.object({
   // $(pointsname) command variable). e.g. "points", "BascaPoints".
   POINTS_NAME: z.string().default('points'),
   DISABLED_PLUGINS: z.string().optional(),
-  // Dev-only: when 'true', enables the eventSimulator plugin that injects fake
-  // events from the WebSocket hub. Keep OFF in production (it can fabricate
-  // subs/donations that award points).
-  EVENT_SIM_ENABLED: z.string().optional(),
   // ── Web dashboard / "Login with Twitch" ──────────────────────────────────
   // Port for the bot's HTTP server (dashboard + auth + API). Behind Caddy.
   HTTP_PORT: z.coerce.number().int().positive().default(8090),
@@ -67,7 +63,6 @@ export interface AppConfig {
   databaseUrl: string;
   ws: { port: number; secret: string };
   disabledPlugins: string[];
-  eventSim: { enabled: boolean };
   points: { name: string };
   web: {
     httpPort: number;
@@ -119,7 +114,6 @@ export function loadConfig(): AppConfig {
     databaseUrl: env.DATABASE_URL,
     ws: { port: env.WS_HUB_PORT, secret: env.WS_HUB_SECRET },
     disabledPlugins: csv(env.DISABLED_PLUGINS),
-    eventSim: { enabled: env.EVENT_SIM_ENABLED === 'true' },
     points: { name: env.POINTS_NAME },
     web: {
       httpPort: env.HTTP_PORT,

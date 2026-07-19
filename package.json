@@ -20,7 +20,8 @@
     "format": "prettier --write .",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "preview:admin": "PREVIEW_USER=admin tsx watch src/web/preview.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

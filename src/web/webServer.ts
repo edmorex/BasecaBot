@@ -11,6 +11,9 @@ import type { ListsService, ListImportItem } from '../services/lists.js';
 import { ListError } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
 import { QuoteError } from '../services/quotes.js';
+import type { PointsService } from '../services/points.js';
+import type { EventBus } from '../core/eventBus.js';
+import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
 import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
@@ -31,6 +34,7 @@ import { userPage } from './pages/user.js';
 import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
+import { adminPage } from './pages/admin.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -84,6 +88,8 @@ export class WebServer {
     private readonly commands: CommandRouter,
     private readonly lists: ListsService,
     private readonly quotes: QuotesService,
+    private readonly points: PointsService,
+    private readonly bus: EventBus,
   ) {}
 
   start(): void {
@@ -129,6 +135,10 @@ export class WebServer {
         case '/quotes':
           // Public: logged-out visitors browse read-only (viewer access).
           return this.html(res, quotesPage());
+        case '/admin':
+          // Broadcaster / bot admins only — the page itself is the gate, and
+          // every /api/admin route re-checks rather than trusting the redirect.
+          return this.requireAdminPage(req, res) ? this.html(res, adminPage()) : undefined;
         case '/auth/login':
           return this.handleLogin(res);
         case '/auth/callback':
@@ -149,6 +159,8 @@ export class WebServer {
           return this.getQuotes(res);
         case '/api/quotes/export':
           return this.exportQuotes(req, res);
+        case '/api/admin/users':
+          return this.getAdminUsers(req, res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -198,6 +210,14 @@ export class WebServer {
           return this.deleteQuote(req, res);
         case '/api/quotes/import':
           return this.importQuotes(req, res);
+        case '/api/admin/users/init':
+          return this.initAdminUser(req, res);
+        case '/api/admin/users/update':
+          return this.updateAdminUser(req, res);
+        case '/api/admin/users/delete':
+          return this.deleteAdminUser(req, res);
+        case '/api/admin/simulate':
+          return this.simulateEvent(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -585,6 +605,127 @@ export class WebServer {
     this.json(res, 200, { ok: true });
   }
 
+  // ── Admin API (broadcaster / bot admin only) ──────────────────────────────────
+
+  /**
+   * Every user with their aggregates and effective permission level.
+   *
+   * Broadcaster and admin come from config (no API call). The chat roles are
+   * resolved from three cached bulk lists rather than per-user lookups, and each
+   * degrades to "not in that role" independently if a scope is missing — so the
+   * table still renders when Twitch is unreachable, just with everyone as Viewer.
+   */
+  private async getAdminUsers(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const [rows, roles] = await Promise.all([this.users.listForAdmin(), this.relationships.roleSets()]);
+    const broadcaster = this.config.twitch.channel.toLowerCase();
+    const admins = new Set(this.config.twitch.admins.map((a) => a.toLowerCase()));
+
+    const users = rows.map((u) => {
+      let permission = PermissionLevel.Viewer;
+      if (roles.subscribers.has(u.id)) permission = PermissionLevel.Subscriber;
+      if (roles.vips.has(u.id)) permission = PermissionLevel.Vip;
+      if (roles.moderators.has(u.id)) permission = PermissionLevel.Moderator;
+      if (u.login === broadcaster) permission = PermissionLevel.Broadcaster;
+      if (admins.has(u.login)) permission = PermissionLevel.Admin;
+      return { ...u, permission, permissionLabel: LEVEL_LABELS[permission] ?? String(permission) };
+    });
+
+    this.json(res, 200, { users });
+  }
+
+  /** Create a user from a Twitch handle, before they have ever chatted. */
+  private async initAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const body = await this.readJson(req);
+    const handle = String(body.handle ?? '');
+    try {
+      const user = await this.users.initByHandle(handle);
+      if (!user) throw new HttpError(404, `There's no Twitch account called @${handle.replace(/^@/, '')}.`);
+      this.json(res, 200, { ok: true, user });
+    } catch (e) {
+      if (e instanceof AliasError) throw new HttpError(400, e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * Apply an admin's edits to one user: display name, alias add/remove, and an
+   * outright points balance. Each field is optional and applied independently so
+   * a rejected alias doesn't silently discard a valid name change.
+   */
+  private async updateAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const body = await this.readJson(req);
+    const id = String(body.id ?? '');
+    if (!id) throw new HttpError(400, 'Provide a user id.');
+    if (!(await this.users.getById(id))) throw new HttpError(404, 'Unknown user.');
+
+    try {
+      if (typeof body.displayName === 'string' && body.displayName.trim()) {
+        await this.users.setDisplayName(id, body.displayName);
+      }
+      for (const alias of Array.isArray(body.addAliases) ? body.addAliases : []) {
+        await this.users.addAlias(id, String(alias));
+      }
+      for (const alias of Array.isArray(body.removeAliases) ? body.removeAliases : []) {
+        await this.users.removeAlias(id, String(alias));
+      }
+      if (body.points != null && body.points !== '') {
+        const points = Number(body.points);
+        if (!Number.isFinite(points) || points < 0) throw new HttpError(400, 'Points must be zero or more.');
+        await this.points.setBalance(id, points);
+      }
+    } catch (e) {
+      if (e instanceof AliasError) throw new HttpError(400, e.message);
+      throw e;
+    }
+
+    this.json(res, 200, { ok: true });
+  }
+
+  /** Delete a user. Their points and names go; authored content keeps its snapshot. */
+  private async deleteAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const session = this.requireAdmin(req);
+    const body = await this.readJson(req);
+    const id = String(body.id ?? '');
+    const target = id ? await this.users.getById(id) : null;
+    if (!target) throw new HttpError(404, 'Unknown user.');
+    if (target.login === this.config.twitch.channel.toLowerCase()) {
+      throw new HttpError(400, 'The broadcaster account cannot be deleted.');
+    }
+    if (id === session.user.id) throw new HttpError(400, 'You cannot delete your own account.');
+
+    await this.users.deleteUser(id);
+    this.json(res, 200, { ok: true });
+  }
+
+  /**
+   * Inject a simulated stream event.
+   *
+   * The admin session is the only gate — this replaced a WebSocket harness that
+   * had to be kept off in production because anyone reaching the hub could post
+   * to its room. Effects are real: the bot posts to chat and writes points and
+   * EventLog rows.
+   */
+  private async simulateEvent(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const body = await this.readJson(req);
+    const type = String(body.type ?? '');
+    if (!isSimEventType(type)) throw new HttpError(400, `Unknown event type "${type}".`);
+
+    const payload = (body.payload ?? {}) as Record<string, unknown>;
+    const event = await buildSimEvent(
+      { users: this.users, defaultChannel: this.config.twitch.channel },
+      type,
+      payload,
+    );
+    if (!event) throw new HttpError(400, `Could not build a "${type}" event.`);
+
+    await this.bus.publish(event);
+    this.json(res, 200, { ok: true, injected: event.type });
+  }
+
   // ── Quotes API ────────────────────────────────────────────────────────────────
 
   /** Every quote (public read — logged-out sees viewer access). */
@@ -734,6 +875,26 @@ export class WebServer {
   /** For page routes: if unauthenticated, redirect to `/` and return false. */
   private requireSession(req: IncomingMessage, res: ServerResponse): boolean {
     if (this.getSession(req)) return true;
+    this.redirect(res, '/');
+    return false;
+  }
+
+  /**
+   * Require the caller to be the broadcaster or a bot admin. Stricter than
+   * `requireManager` — moderators can manage content, but not other people's
+   * accounts, points, or event injection.
+   */
+  private requireAdmin(req: IncomingMessage): SessionData {
+    const session = this.requireApiSession(req);
+    const r = session.relationship;
+    if (!(r.broadcaster || r.botAdmin)) throw new HttpError(403, 'Broadcaster or bot admin access required.');
+    return session;
+  }
+
+  /** Page-level admin gate: redirect rather than error, like `requireSession`. */
+  private requireAdminPage(req: IncomingMessage, res: ServerResponse): boolean {
+    const session = this.getSession(req);
+    if (session && (session.relationship.broadcaster || session.relationship.botAdmin)) return true;
     this.redirect(res, '/');
     return false;
   }

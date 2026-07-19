@@ -60,6 +60,22 @@ export class PointsService {
     return this.getBalance(userId);
   }
 
+  /**
+   * Set a balance outright, ignoring whatever it was. Unlike `award` this is not
+   * a delta, so it's for administrative correction only — anything driven by
+   * chat activity should use `award`/`spend` to stay race-safe.
+   */
+  async setBalance(userId: string, balance: number): Promise<number> {
+    const value = Math.max(0, Math.floor(balance));
+    await this.storage.prisma.$executeRaw`
+      INSERT INTO "PointsBalance" ("userId", "balance")
+      VALUES (${userId}, ${value})
+      ON CONFLICT ("userId")
+      DO UPDATE SET "balance" = ${value}
+    `;
+    return this.getBalance(userId);
+  }
+
   /** Spend points atomically; throws InsufficientPointsError if too poor. */
   async spend(userId: string, amount: number): Promise<number> {
     if (amount < 0) throw new Error('spend amount must be non-negative');

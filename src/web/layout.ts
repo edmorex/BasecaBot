@@ -9,7 +9,7 @@
 export interface LayoutOptions {
   title: string;
   /** Which nav item to highlight. */
-  active?: 'commands' | 'lists' | 'quotes' | 'user' | '';
+  active?: 'commands' | 'lists' | 'quotes' | 'user' | 'admin' | '';
   /** Page body markup (inside <main>). */
   body: string;
   /** Optional page script (runs after the shell script; may define window.onMe). */
@@ -139,6 +139,15 @@ const SHARED_STYLE = /* css */ `
   .radio-row label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
   .radio-row input { accent-color: var(--pink); }
   .rowline { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  /* Admin: users table stays readable, ids/dates don't wrap. */
+  table.admin-users { width: 100%; }
+  table.admin-users td, table.admin-users th { vertical-align: top; }
+  table.admin-users td:nth-child(2) { font-size: 0.8rem; white-space: nowrap; }
+  table.admin-users td:nth-child(5), table.admin-users td:nth-child(8) { white-space: nowrap; }
+  table.admin-users .chip { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
+  /* Admin: event-simulator cards. */
+  .sim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.85rem; }
+  .sim-grid .card { padding: 0.85rem; }
   .toast { margin-top: 0.5rem; font-size: 0.9rem; min-height: 1.2em; }
   .toast.err { color: #ff6b6b; }
   .toast.ok { color: var(--green); }
@@ -165,6 +174,12 @@ const SHELL_SCRIPT = /* js */ `
         ? '<a class="nav-user" id="nav-user" href="/user"><img src="' + esc(me.user.avatar) + '" alt=""><span>' + esc(me.user.displayName) + '</span></a>'
         : '<a class="btn pink" href="/auth/login">Login with Twitch</a>';
     }
+    // The Admin link is hidden unless this visitor can actually use it. The
+    // server gates /admin regardless; this only avoids showing a dead end.
+    const navAdmin = document.getElementById('nav-admin');
+    if (navAdmin && me && me.relationship && (me.relationship.broadcaster || me.relationship.botAdmin)) {
+      navAdmin.style.display = '';
+    }
     if (typeof window.onMe === 'function') window.onMe(me);
   })();
 `;
@@ -173,6 +188,7 @@ export function renderLayout(opts: LayoutOptions): string {
   const commandsActive = opts.active === 'commands' ? ' active' : '';
   const listsActive = opts.active === 'lists' ? ' active' : '';
   const quotesActive = opts.active === 'quotes' ? ' active' : '';
+  const adminActive = opts.active === 'admin' ? ' active' : '';
   const mainClass = opts.wide ? ' class="wide"' : '';
 
   return /* html */ `<!doctype html>
@@ -193,6 +209,7 @@ export function renderLayout(opts: LayoutOptions): string {
         <a href="/commands" class="${commandsActive.trim()}">Commands</a>
         <a href="/lists" class="${listsActive.trim()}">Lists</a>
         <a href="/quotes" class="${quotesActive.trim()}">Quotes</a>
+        <a href="/admin" id="nav-admin" class="${adminActive.trim()}" style="display:none">Admin</a>
       </nav>
       <span class="spacer"></span>
       <span id="nav-right"></span>
