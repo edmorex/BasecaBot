@@ -125,8 +125,6 @@ export function commandsPage(): string {
     // Inline Lucide icons (CSP blocks external assets, so paths are embedded).
     var ICONS={
       'pencil':'<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/>',
-      'circle-pause':'<circle cx="12" cy="12" r="10"/><line x1="10" x2="10" y1="15" y2="9"/><line x1="14" x2="14" y1="15" y2="9"/>',
-      'circle-play':'<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>',
       'trash-2':'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
       'globe':'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
       'user-round':'<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
@@ -252,27 +250,27 @@ export function commandsPage(): string {
       var paginate=total>PAGE_SIZE && !state.showAll;
       var rows=paginate ? list.slice(state.page*PAGE_SIZE, state.page*PAGE_SIZE+PAGE_SIZE) : list;
       var title = state.view.indexOf('group:')===0 ? esc(state.view.slice(6)) : 'All Custom Commands';
-      var head='<tr><th>Command</th><th>Type</th><th>Access</th><th>On</th><th>Uses</th><th>Cooldown</th><th class="wrap">Response</th><th>Group</th><th class="col-actions">Actions</th></tr>';
+      var head='<tr><th class="col-toggle"></th><th>Command</th><th>Type</th><th>Access</th><th>Uses</th><th>Cooldown</th><th class="wrap">Response</th><th>Group</th><th class="col-actions">Actions</th></tr>';
       var b=rows.map(customRow).join('') || '<tr><td colspan="9" class="muted">No custom commands here. Add one in chat with <code>!command add</code>.</td></tr>';
       return '<h2>'+title+' <span class="count">('+total+')</span></h2>'
         +'<div style="overflow-x:auto"><table><thead>'+head+'</thead><tbody>'+b+'</tbody></table></div>';
     }
 
     function customRow(c){
-      var on = c.enabled?'<span class="yes">✓</span>':'<span class="no">✗</span>';
-      // Always render the buttons so the column layout is identical for everyone;
-      // non-mods just see them disabled/greyed out. Alias rows edit via a separate modal.
+      // Always render controls so the column layout is identical for everyone;
+      // non-mods just see them disabled. Alias rows edit via a separate modal.
       var dis = state.canManage ? '' : ' disabled';
       var editAttr = c.kind==='alias' ? 'data-aedit' : 'data-edit';
+      var toggle = '<td class="col-toggle"><label class="switch" title="'+(c.enabled?'Enabled — click to disable':'Disabled — click to enable')+'">'
+        +'<input type="checkbox" data-toggle="'+c.__i+'"'+(c.enabled?' checked':'')+dis+'><span class="slider"></span></label></td>';
       var actions = '<td class="col-actions"><div class="actions-cell">'
         +'<button class="secondary icon-btn" '+editAttr+'="'+c.__i+'"'+dis+' title="Edit">'+icon('pencil')+'</button>'
-        +'<button class="secondary icon-btn" data-toggle="'+c.__i+'"'+dis+' title="'+(c.enabled?'Disable':'Enable')+'">'+icon(c.enabled?'circle-pause':'circle-play')+'</button>'
         +'<button class="danger icon-btn" data-del="'+c.__i+'"'+dis+' title="Delete">'+icon('trash-2')+'</button></div></td>';
-      return '<tr>'
+      return '<tr'+(c.enabled?'':' class="row-off"')+'>'
+        +toggle
         +'<td>'+nameCell(c)+'</td>'
         +'<td>'+typePill(c)+'</td>'
         +'<td>'+esc(accessLabel(c.access))+'</td>'
-        +'<td>'+on+'</td>'
         +'<td>'+String(c.usageCount||0)+'</td>'
         +'<td>'+cdCell(c)+'</td>'
         +'<td class="wrap muted">'+respCell(c)+'</td>'
@@ -285,7 +283,7 @@ export function commandsPage(): string {
       var q=function(sel,fn){ Array.prototype.forEach.call(root.querySelectorAll(sel), fn); };
       q('button[data-edit]', function(b){ b.onclick=function(){ openEdit(+b.getAttribute('data-edit')); }; });
       q('button[data-aedit]', function(b){ b.onclick=function(){ openAliasEdit(+b.getAttribute('data-aedit')); }; });
-      q('button[data-toggle]', function(b){ b.onclick=function(){ toggleEnabled(+b.getAttribute('data-toggle')); }; });
+      q('input[data-toggle]', function(b){ b.onchange=function(){ toggleEnabled(+b.getAttribute('data-toggle')); }; });
       q('button[data-del]', function(b){ b.onclick=function(){ delCommand(+b.getAttribute('data-del')); }; });
     }
 
@@ -408,7 +406,9 @@ export function commandsPage(): string {
         else await api('POST','/api/commands',{ kind:c.kind, name:c.name, enabled:!c.enabled });
         await load();
       }
-      catch(e){ alert(e.message); }
+      // The switch already flipped optimistically; re-render from unchanged state
+      // to snap it back to the true value before reporting the failure.
+      catch(e){ renderMain(); alert(e.message); }
     }
 
     // ── Alias create/edit dialog ──────────────────────────────────────────────

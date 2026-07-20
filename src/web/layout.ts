@@ -114,7 +114,21 @@ const SHARED_STYLE = /* css */ `
   .icon-btn svg { display: block; }
   button:disabled, .icon-btn:disabled { background: #2a2a2d; color: var(--off); cursor: not-allowed; opacity: 0.6; }
   button:disabled:hover, .icon-btn:disabled:hover { background: #2a2a2d; }
-  .cd-cell { display: inline-flex; gap: 0.35rem; flex-wrap: wrap; }
+  /* Cooldown pills (global + user) always sit side by side, never stacking. */
+  .cd-cell { display: inline-flex; gap: 0.35rem; flex-wrap: nowrap; white-space: nowrap; }
+  /* Enable/disable toggle switch (leftmost custom-command column). */
+  .col-toggle { width: 1%; }
+  .switch { position: relative; display: inline-block; width: 2.2rem; height: 1.2rem; flex: none; vertical-align: middle; }
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch .slider { position: absolute; inset: 0; border-radius: 999px; background: var(--off); transition: background 0.15s; }
+  .switch .slider::before { content: ''; position: absolute; height: 0.9rem; width: 0.9rem; left: 0.15rem; top: 0.15rem; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+  .switch input:checked + .slider { background: var(--pink); }
+  .switch input:checked + .slider::before { transform: translateX(1rem); }
+  .switch input:disabled { cursor: not-allowed; }
+  .switch input:disabled + .slider { opacity: 0.5; }
+  /* A disabled command's whole row reads dimmer, so its state is obvious at a glance. */
+  tr.row-off td { opacity: 0.5; }
+  tr.row-off td:first-child { opacity: 1; } /* keep the toggle itself legible */
   .aliases { display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.3rem; }
   .alias { display: inline-flex; align-items: center; gap: 0.3rem; width: fit-content; color: var(--muted); font-size: 0.8rem; }
   .alias code { font-size: 0.8rem; }

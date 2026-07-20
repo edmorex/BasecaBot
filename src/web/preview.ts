@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { welcomePage } from './pages/welcome.js';
@@ -204,7 +204,20 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   try { return chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}; } catch { return {}; }
 }
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
+  // A rejected handler must never leave the socket hanging: an unanswered
+  // /api/me stalls the shell script's window.onMe(), so the page sits on
+  // "Loading…" forever with no error. Convert any throw into a response (mirrors
+  // webServer.ts). If headers already went out we can only cut the socket, which
+  // at least makes the fetch reject so the page can report it.
+  handle(req, res).catch((err) => {
+    console.error('preview handler error:', err);
+    if (res.headersSent) res.destroy();
+    else { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'preview server error' })); }
+  });
+});
+
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknown> {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const p = url.pathname;
   const html = (body: string) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(body); };
@@ -468,7 +481,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(404); return res.end('Not Found');
   }
   res.writeHead(405); res.end('Method Not Allowed');
-});
+}
 
 server.listen(PORT, () => {
   const who = loggedOut ? 'logged-out' : `logged-in as ${me.user.displayName} (${which})`;
