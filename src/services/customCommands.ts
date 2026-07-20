@@ -33,7 +33,7 @@ interface RuntimeCommand {
 /** The alias half of a trigger match (null when the word is the command's own trigger). */
 export interface AliasInfo {
   word: string;
-  /** Extra args to prepend to the caller's (may contain $() vars). */
+  /** The command's full args when fired via this alias (may contain $() vars); caller's args are forwarded only via $(args). */
   args: string;
   /** The alias's own enable flag. */
   enabled: boolean;
@@ -44,7 +44,7 @@ export interface BuiltinAliasInfo {
   word: string;
   /** The built-in command word to re-dispatch to (e.g. `wheel`). */
   targetWord: string;
-  /** Pre-baked args prepended to the caller's (may contain $() vars). */
+  /** The built-in's full args when fired via this alias (may contain $() vars); caller's args are forwarded only via $(args). */
   args: string;
   enabled: boolean;
 }
@@ -91,7 +91,7 @@ export interface DashboardRow {
   usageCount: number;
   /** Alias only: the command it points to. */
   target: string | null;
-  /** Alias only: the extra args it prepends. */
+  /** Alias only: the target command's full args (caller's forwarded via $(args)). */
   args: string | null;
   /** Command/phrase only (aliases have no timestamps). ISO strings or null. */
   createdAt: string | null;

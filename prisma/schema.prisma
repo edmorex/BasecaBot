@@ -127,24 +127,20 @@ model CustomCommand {
   @@index([kind, enabled])
 }
 
-/// A trigger word that maps to a trigger-kind CustomCommand. `word` is normalized
-/// (lowercase, no '!') and globally unique, so trigger words never collide.
-///  - `isPrimary` = true: the command's own trigger word (== command.name).
-///  - `isPrimary` = false: an ALIAS. It runs the target command, optionally
-///    prepending `args` (which may contain $() variables resolved at call time),
-///    and can be enabled/disabled independently (`enabled`). Aliases always point
-///    to a primary command, never to another alias.
-/// A trigger word. Three shapes:
-///  - primary (isPrimary=true): a custom command's own word; `commandId` set.
+/// A trigger word (normalized: lowercase, no '!', globally unique). Three shapes:
+///  - primary (isPrimary=true): a custom command's own word (== command.name); `commandId` set.
 ///  - custom alias: `commandId` set (points at another custom command).
 ///  - built-in alias: `builtinTarget` set (re-dispatches to a built-in command,
 ///    e.g. `!addme` -> `!wheel add $(sender)`); `commandId` is null.
-/// Exactly one of `commandId` / `builtinTarget` is set (enforced in code).
+/// Exactly one of `commandId` / `builtinTarget` is set (enforced in code). An
+/// alias can be enabled/disabled independently (`enabled`) and never points to
+/// another alias.
 model CommandTrigger {
   id        Int     @id @default(autoincrement())
   word      String  @unique
   isPrimary Boolean @default(false)
-  /// Alias only: extra argument string prepended to the caller's args (may hold $() vars).
+  /// Alias only: the target command's FULL argument string (may hold $() vars).
+  /// It is NOT combined with the caller's args — forward those with $(args).
   args      String?
   /// Alias only: independent enable flag (a disabled alias is a no-op).
   enabled   Boolean @default(true)

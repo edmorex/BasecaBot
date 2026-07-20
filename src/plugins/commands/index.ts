@@ -224,8 +224,9 @@ export function commandsPlugin(): Plugin {
                 })
               ).trim()
             : '';
-          // !<builtin> <baked args> <caller's args>
-          const message = ['!' + a.targetWord, baked, e.argString].filter((s) => s).join(' ');
+          // The baked args ARE the built-in's full args — the caller's are not
+          // appended (use $(args) in the alias to forward them). `!<builtin> <baked>`.
+          const message = '!' + a.targetWord + (baked ? ' ' + baked : '');
           await ctx.commands.dispatchBuiltin(message, { channel: e.channel, ts: e.ts, user: e.user });
           return;
         }
@@ -240,18 +241,22 @@ export function commandsPlugin(): Plugin {
 
         let argString = e.argString;
         let args = e.args;
-        if (alias && alias.args) {
-          // Resolve the alias's extra args ($() vars included), then prepend to the caller's.
-          const resolved = (
-            await vars.render(alias.args, {
-              sender: { id: e.user.id, login: e.user.login, displayName: e.user.displayName },
-              channel: e.channel,
-              args: e.args,
-              argString: e.argString,
-              command: { name: command.name, count },
-            })
-          ).trim();
-          argString = `${resolved} ${e.argString}`.trim();
+        if (alias) {
+          // The alias's args template IS the command's full argument list — the
+          // caller's args are NOT auto-appended. To forward them, the alias must
+          // reference them explicitly with $(args) / $(1) / $(2) / …, which
+          // resolve against the CALLER's input below.
+          argString = alias.args
+            ? (
+                await vars.render(alias.args, {
+                  sender: { id: e.user.id, login: e.user.login, displayName: e.user.displayName },
+                  channel: e.channel,
+                  args: e.args,
+                  argString: e.argString,
+                  command: { name: command.name, count },
+                })
+              ).trim()
+            : '';
           args = argString.length ? argString.split(/\s+/) : [];
         }
         await say(e.channel, await renderResponse(command.name, command.response, e, argString, args, count));

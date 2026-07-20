@@ -162,8 +162,8 @@ export function commandModalsHtml(): string {
       <input type="text" id="alias-word" maxlength="60" placeholder="e.g. d6" style="width:100%; margin:.35rem 0 .8rem" />
       <label class="muted">Aliases to command <span class="muted">(a custom <code>!trigger</code> or a built-in like <code>!wheel</code>; not another alias)</span></label>
       <input type="text" id="alias-target" maxlength="60" placeholder="e.g. roll or wheel" style="width:100%; margin:.35rem 0 .8rem" />
-      <label class="muted">Extra arguments <span class="muted">(optional; pre-pended to the caller's, may use $() variables)</span></label>
-      <input type="text" id="alias-args" maxlength="200" placeholder="e.g. $(random 1-6) or add $(sender)" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Arguments <span class="muted">(optional; the command's full args — forward the caller's with $(args), may use $() variables)</span></label>
+      <input type="text" id="alias-args" maxlength="200" placeholder="e.g. add $(sender) or $(2) $(1)" style="width:100%; margin:.35rem 0 .8rem" />
       <div class="toast err" id="alias-toast"></div>
       <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
         <button type="button" class="secondary" id="alias-cancel">Cancel</button>
