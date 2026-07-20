@@ -173,7 +173,7 @@ export function commandsPlugin(): Plugin {
             }),
           },
           addalias: {
-            description: 'Add an alias for a command, with optional extra args (may contain $() vars): !command addalias <!alias> <!trigger> [args].',
+            description: 'Add an alias for a custom OR built-in command, with optional pre-baked args (may contain $() vars): !command addalias <!alias> <!trigger> [args]. E.g. !command addalias !addme !wheel add $(sender).',
             usage: '<!alias> <!trigger> [arguments]',
             handler: guard(async (e) => {
               const first = parseTarget(e.argString);
@@ -206,6 +206,30 @@ export function commandsPlugin(): Plugin {
       ctx.commands.setFallback(async (e) => {
         const match = await svc.findByTrigger(e.name);
         if (!match) return;
+
+        // A built-in alias re-dispatches to a built-in command with pre-baked
+        // args: `!addme` -> `!wheel add $(sender)`. The built-in's own
+        // permission/cooldown apply (checked by dispatchBuiltin).
+        if (match.kind === 'builtin') {
+          const a = match.builtin;
+          if (!a.enabled) return; // a disabled alias is a no-op
+          const baked = a.args
+            ? (
+                await vars.render(a.args, {
+                  sender: { id: e.user.id, login: e.user.login, displayName: e.user.displayName },
+                  channel: e.channel,
+                  args: e.args,
+                  argString: e.argString,
+                  command: { name: a.word, count: 0 },
+                })
+              ).trim()
+            : '';
+          // !<builtin> <baked args> <caller's args>
+          const message = ['!' + a.targetWord, baked, e.argString].filter((s) => s).join(' ');
+          await ctx.commands.dispatchBuiltin(message, { channel: e.channel, ts: e.ts, user: e.user });
+          return;
+        }
+
         const { command, alias } = match;
         if (alias && !alias.enabled) return; // a disabled alias is a no-op
         // The COMMAND's enable/permission/cooldown gate applies (so a disabled

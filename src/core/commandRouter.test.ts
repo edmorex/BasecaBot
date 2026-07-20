@@ -173,3 +173,40 @@ describe('CommandRouter.registerGroup', () => {
     expect(names).not.toContain('list show');
   });
 });
+
+describe('CommandRouter.dispatchBuiltin (built-in aliases)', () => {
+  let bus: EventBus;
+  let router: CommandRouter;
+  const base = { channel: 'test', ts: 0, user: user() };
+
+  beforeEach(() => {
+    bus = new EventBus();
+    router = new CommandRouter(bus, noopChat);
+  });
+
+  it('runs a registered built-in with the synthesized args', async () => {
+    const add = vi.fn();
+    router.registerGroup('wheel', { subcommands: { add: { handler: add } } });
+    const ran = await router.dispatchBuiltin('!wheel add Sharon', base);
+    expect(ran).toBe(true);
+    expect(add).toHaveBeenCalledOnce();
+    expect((add.mock.calls[0]![0] as CommandEvent).argString).toBe('Sharon'); // subcommand token stripped
+  });
+
+  it('no-ops (no throw, returns false) when the target is not a built-in — so an alias cannot recurse', async () => {
+    const fallback = vi.fn();
+    router.setFallback(fallback);
+    const ran = await router.dispatchBuiltin('!addme whatever', base);
+    expect(ran).toBe(false);
+    expect(fallback).not.toHaveBeenCalled(); // deliberately does NOT reach the custom fallback
+  });
+
+  it('enforces the built-in permission and cooldown', async () => {
+    const handler = vi.fn();
+    router.register('secret', handler, { permission: PermissionLevel.Moderator });
+    expect(await router.dispatchBuiltin('!secret', base)).toBe(false); // viewer blocked
+    expect(handler).not.toHaveBeenCalled();
+    expect(await router.dispatchBuiltin('!secret', { ...base, user: user({ permission: PermissionLevel.Moderator }) })).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+});

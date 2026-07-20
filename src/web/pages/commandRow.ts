@@ -160,10 +160,10 @@ export function commandModalsHtml(): string {
       <h2 id="alias-title" style="margin-top:0">New Alias</h2>
       <label class="muted">Alias word</label>
       <input type="text" id="alias-word" maxlength="60" placeholder="e.g. d6" style="width:100%; margin:.35rem 0 .8rem" />
-      <label class="muted">Aliases to command <span class="muted">(a <code>!trigger</code> command, not another alias)</span></label>
-      <input type="text" id="alias-target" maxlength="60" placeholder="e.g. roll" style="width:100%; margin:.35rem 0 .8rem" />
-      <label class="muted">Extra arguments <span class="muted">(optional; passed to the command, may use $() variables)</span></label>
-      <input type="text" id="alias-args" maxlength="200" placeholder="e.g. $(random 1-6)" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Aliases to command <span class="muted">(a custom <code>!trigger</code> or a built-in like <code>!wheel</code>; not another alias)</span></label>
+      <input type="text" id="alias-target" maxlength="60" placeholder="e.g. roll or wheel" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Extra arguments <span class="muted">(optional; pre-pended to the caller's, may use $() variables)</span></label>
+      <input type="text" id="alias-args" maxlength="200" placeholder="e.g. $(random 1-6) or add $(sender)" style="width:100%; margin:.35rem 0 .8rem" />
       <div class="toast err" id="alias-toast"></div>
       <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
         <button type="button" class="secondary" id="alias-cancel">Cancel</button>

@@ -134,6 +134,12 @@ model CustomCommand {
 ///    prepending `args` (which may contain $() variables resolved at call time),
 ///    and can be enabled/disabled independently (`enabled`). Aliases always point
 ///    to a primary command, never to another alias.
+/// A trigger word. Three shapes:
+///  - primary (isPrimary=true): a custom command's own word; `commandId` set.
+///  - custom alias: `commandId` set (points at another custom command).
+///  - built-in alias: `builtinTarget` set (re-dispatches to a built-in command,
+///    e.g. `!addme` -> `!wheel add $(sender)`); `commandId` is null.
+/// Exactly one of `commandId` / `builtinTarget` is set (enforced in code).
 model CommandTrigger {
   id        Int     @id @default(autoincrement())
   word      String  @unique
@@ -142,9 +148,11 @@ model CommandTrigger {
   args      String?
   /// Alias only: independent enable flag (a disabled alias is a no-op).
   enabled   Boolean @default(true)
-  commandId Int
+  commandId Int?
+  /// Built-in alias only: the built-in command word this re-dispatches to.
+  builtinTarget String?
 
-  command CustomCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+  command CustomCommand? @relation(fields: [commandId], references: [id], onDelete: Cascade)
 
   @@index([commandId])
 }

@@ -39,11 +39,24 @@ export interface AliasInfo {
   enabled: boolean;
 }
 
-/** Result of resolving a `!word`: the target command plus alias info if it was an alias. */
-export interface TriggerMatch {
-  command: RuntimeCommand;
-  alias: AliasInfo | null;
+/** A built-in alias: re-dispatches to a built-in command (e.g. `!wheel`) with pre-baked args. */
+export interface BuiltinAliasInfo {
+  word: string;
+  /** The built-in command word to re-dispatch to (e.g. `wheel`). */
+  targetWord: string;
+  /** Pre-baked args prepended to the caller's (may contain $() vars). */
+  args: string;
+  enabled: boolean;
 }
+
+/**
+ * Result of resolving a `!word`:
+ *  - `custom`: a custom command's own trigger, or an alias to a custom command.
+ *  - `builtin`: an alias that re-dispatches to a built-in command.
+ */
+export type TriggerMatch =
+  | { kind: 'custom'; command: RuntimeCommand; alias: AliasInfo | null }
+  | { kind: 'builtin'; builtin: BuiltinAliasInfo };
 
 /** One row of a CSV import (a command/phrase, or an alias). */
 export interface CommandImportItem {
@@ -186,8 +199,15 @@ export class CustomCommandService {
       include: { command: true },
     });
     if (!trigger) return null;
+    if (trigger.builtinTarget) {
+      return {
+        kind: 'builtin',
+        builtin: { word: trigger.word, targetWord: trigger.builtinTarget, args: trigger.args ?? '', enabled: trigger.enabled },
+      };
+    }
     return {
-      command: this.toRuntime(trigger.command),
+      kind: 'custom',
+      command: this.toRuntime(trigger.command!), // non-builtin triggers always have a command
       alias: trigger.isPrimary ? null : { word: trigger.word, args: trigger.args ?? '', enabled: trigger.enabled },
     };
   }
@@ -353,28 +373,20 @@ export class CustomCommandService {
       });
       if (!trigger) throw new CommandError(`No command !${word} found.`);
       if (!trigger.isPrimary) {
+        // An alias (custom or built-in): delete just the alias row.
+        const points = trigger.command ? `!${trigger.command.name}` : `!${trigger.builtinTarget}`;
         await this.db.commandTrigger.delete({ where: { id: trigger.id } });
-        return { type: 'alias', alias: `!${word}`, command: `!${trigger.command.name}` };
+        return { type: 'alias', alias: `!${word}`, command: points };
       }
-      const aliases = trigger.command.triggers.filter((t) => !t.isPrimary).map((t) => `!${t.word}`);
-      await this.db.customCommand.delete({ where: { id: trigger.command.id } }); // cascades triggers
+      const aliases = trigger.command!.triggers.filter((t) => !t.isPrimary).map((t) => `!${t.word}`);
+      await this.db.customCommand.delete({ where: { id: trigger.command!.id } }); // cascades triggers
       await this.reloadPhrases();
-      return { type: 'command', label: `!${trigger.command.name}`, aliases };
+      return { type: 'command', label: `!${trigger.command!.name}`, aliases };
     }
     const cmd = await this.resolveOrThrow(target);
     await this.db.customCommand.delete({ where: { id: cmd.id } });
     await this.reloadPhrases();
     return { type: 'command', label: describeTarget(target), aliases: [] };
-  }
-
-  /** Resolve a word to the PRIMARY (root) command it triggers, or throw. Aliases rejected. */
-  private async primaryCommandForWord(targetWord: string) {
-    const word = normalizeWord(targetWord);
-    if (!word) throw new CommandError('Provide the command to alias like !command.');
-    const t = await this.db.commandTrigger.findUnique({ where: { word }, include: { command: true } });
-    if (!t) throw new CommandError(`No command !${word} found to alias.`);
-    if (!t.isPrimary) throw new CommandError(`!${word} is itself an alias — an alias must point to a command.`);
-    return t.command;
   }
 
   /**
@@ -387,8 +399,7 @@ export class CustomCommandService {
     if (!word || /\s/.test(word)) throw new CommandError('An alias must be a single word.');
     if (this.isReserved(word)) throw new CommandError(`!${word} is a built-in command and can't be used as an alias.`);
     if (await this.wordTaken(word)) throw new CommandError(`The trigger !${word} is already in use.`);
-    const command = await this.primaryCommandForWord(targetWord);
-    await this.db.commandTrigger.create({ data: { word, isPrimary: false, args: emptyToNull(args), enabled: true, commandId: command.id } });
+    await this.db.commandTrigger.create({ data: { word, isPrimary: false, args: emptyToNull(args), enabled: true, ...(await this.aliasTargetData(targetWord)) } });
   }
 
   /** Edit an alias: repoint it (`targetWord`), change its `args`, and/or toggle `enabled`. */
@@ -397,11 +408,30 @@ export class CustomCommandService {
     const t = await this.db.commandTrigger.findUnique({ where: { word } });
     if (!t) throw new CommandError(`No alias !${word} found.`);
     if (t.isPrimary) throw new CommandError(`!${word} is a command, not an alias.`);
-    const data: { commandId?: number; args?: string | null; enabled?: boolean } = {};
-    if (opts.targetWord !== undefined) data.commandId = (await this.primaryCommandForWord(opts.targetWord)).id;
+    const data: { commandId?: number | null; builtinTarget?: string | null; args?: string | null; enabled?: boolean } = {};
+    if (opts.targetWord !== undefined) Object.assign(data, await this.aliasTargetData(opts.targetWord));
     if (opts.args !== undefined) data.args = emptyToNull(opts.args);
     if (opts.enabled !== undefined) data.enabled = opts.enabled;
     await this.db.commandTrigger.update({ where: { id: t.id }, data });
+  }
+
+  /**
+   * Resolve an alias's target word to the columns that store it — a custom
+   * command (`commandId`) or a built-in (`builtinTarget`, e.g. `!addme` ->
+   * `!wheel add $(sender)`). Exactly one field is set; the other is nulled so a
+   * repoint can flip between the two kinds.
+   */
+  private async aliasTargetData(targetWord: string): Promise<{ commandId: number | null; builtinTarget: string | null }> {
+    const word = normalizeWord(targetWord);
+    if (!word) throw new CommandError('Provide the command to alias like !command.');
+    const t = await this.db.commandTrigger.findUnique({ where: { word } });
+    if (t) {
+      if (!t.isPrimary) throw new CommandError(`!${word} is itself an alias — an alias must point to a command.`);
+      return { commandId: t.commandId, builtinTarget: null };
+    }
+    // No custom command by that word — allow it only if it's a real built-in.
+    if (this.isReserved(word)) return { commandId: null, builtinTarget: word };
+    throw new CommandError(`No command !${word} found to alias.`);
   }
 
   /** Remove a single alias by its word (must be a non-primary alias, not a command). */
@@ -463,6 +493,31 @@ export class CustomCommandService {
         });
       }
     }
+
+    // Built-in aliases have no parent custom command, so the loop above never
+    // reaches them. They defer to the built-in's own access/cooldown at runtime;
+    // the target + args columns tell the story.
+    const builtinAliases = await this.db.commandTrigger.findMany({
+      where: { builtinTarget: { not: null } },
+      orderBy: { word: 'asc' },
+    });
+    for (const t of builtinAliases) {
+      out.push({
+        kind: 'alias',
+        name: t.word,
+        response: null,
+        group: null,
+        permission: 0,
+        globalCooldown: 0,
+        userCooldown: 0,
+        enabled: t.enabled,
+        usageCount: 0,
+        target: t.builtinTarget,
+        args: t.args,
+        createdAt: null,
+        updatedAt: null,
+      });
+    }
     return out;
   }
 
@@ -473,7 +528,10 @@ export class CustomCommandService {
    * reserved words, missing alias targets) are skipped, not fatal. Returns counts.
    */
   async importCommands(items: CommandImportItem[], mode: 'add' | 'replace'): Promise<{ commands: number; aliases: number; skipped: number }> {
-    if (mode === 'replace') await this.db.customCommand.deleteMany({}); // cascades triggers/aliases
+    if (mode === 'replace') {
+      await this.db.customCommand.deleteMany({}); // cascades primary triggers + custom aliases
+      await this.db.commandTrigger.deleteMany({ where: { builtinTarget: { not: null } } }); // built-in aliases have no parent to cascade from
+    }
     let commands = 0;
     let aliases = 0;
     let skipped = 0;

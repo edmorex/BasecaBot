@@ -214,6 +214,34 @@ export class CommandRouter {
   }
 
   /**
+   * Parse and run a synthesized command message against a REGISTERED (built-in)
+   * command only, applying its permission + cooldown checks. Used by custom
+   * aliases that target a built-in (e.g. `!addme` -> `!wheel add $(sender)`).
+   *
+   * Deliberately does NOT fall through to the custom-command fallback: an alias
+   * can therefore only ever drive a real built-in, never another alias, so this
+   * cannot recurse. Returns whether a built-in actually ran.
+   */
+  async dispatchBuiltin(
+    message: string,
+    base: Pick<CommandEvent, 'channel' | 'ts' | 'user'>,
+  ): Promise<boolean> {
+    const parsed = CommandRouter.parse(message, base);
+    if (!parsed) return false;
+    const cmd = this.resolve(parsed.name);
+    if (!cmd) return false; // not a built-in — do nothing (no fallback, no loop)
+    if (!this.checkPermission(parsed.user, cmd.permission)) return false;
+    if (!this.checkCooldown(cmd, parsed.user.id)) return false;
+    try {
+      await cmd.handler(parsed);
+    } catch (err) {
+      log.error({ err, command: cmd.name }, 'aliased built-in handler threw');
+      await this.chat.say(base.channel, `Something went wrong running !${cmd.name}.`).catch(() => {});
+    }
+    return true;
+  }
+
+  /**
    * Whether `name` resolves to a registered (built-in) command or alias
    * (case-insensitive). Used to stop custom commands/aliases from shadowing a
    * built-in — the router resolves built-ins before the custom fallback, so such
