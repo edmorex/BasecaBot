@@ -66,6 +66,11 @@ const SHARED_STYLE = /* css */ `
   .md-side .subgroups .item:last-child::after { content: ''; position: absolute; left: calc(-0.85rem - 2px); top: calc(50% + 1px); bottom: -0.6rem; width: 4px; background: var(--panel); }
   .md-main { flex: 1 1 auto; min-width: 0; }
   .md-main > h2 { margin-top: 0; }
+  /* Right-hand column: stacks the main panel and any panels beneath it (e.g. the
+     Lists page's "Commands Referencing …" card) so they share the main width and
+     never extend under the sidebar. */
+  .md-col { flex: 1 1 auto; min-width: 0; }
+  .md-col > * + * { margin-top: 1.25rem; }
   /* Slightly denser tables in the command panels so more columns fit without scroll. */
   .md-main table { font-size: 0.9rem; }
   .md-main th, .md-main td { padding: 0.5rem 0.5rem; }
@@ -133,6 +138,8 @@ const SHARED_STYLE = /* css */ `
   .alias { display: inline-flex; align-items: center; gap: 0.3rem; width: fit-content; color: var(--muted); font-size: 0.8rem; }
   .alias code { font-size: 0.8rem; }
   .args { color: var(--muted); font-size: 0.85rem; font-family: ui-monospace, monospace; }
+  /* A list's reference name beside its display-name heading: dimmer + lighter so it reads as secondary. */
+  .ref-name { color: var(--muted); font-weight: 400; font-size: 0.82em; }
   /* Only the copy icon is clickable/flashes; the command text is not. */
   .namecopy { display: inline-flex; align-items: center; gap: 0.3rem; }
   .copy-btn { display: inline-flex; cursor: pointer; flex: none; }

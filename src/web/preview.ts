@@ -125,6 +125,12 @@ const mockCustoms = [
   mk({ kind: 'alias', name: 'dc', target: 'discord', args: null, usageCount: 42, globalCooldown: 10, userCooldown: 30, group: 'Links', response: null }),
   mk({ kind: 'trigger', name: 'roll', response: 'You rolled $(1)', usageCount: 8, group: 'Fun' }),
   mk({ kind: 'alias', name: 'd6', target: 'roll', args: '$(random 1-6)', usageCount: 8, group: 'Fun', response: null, enabled: false }),
+  // List references (exercise the "Commands Referencing …" table on the Lists page):
+  mk({ kind: 'trigger', name: 'songlist', response: 'Queued: $(list.all songs)', usageCount: 5, group: 'Music' }),      // direct
+  mk({ kind: 'alias', name: 'sl', target: 'songlist', args: null, usageCount: 5, group: 'Music', response: null }),      // via target
+  mk({ kind: 'phrase', name: 'what songs', response: 'We have $(list.dump songs) queued.', usageCount: 3, group: 'Music' }), // phrase, direct
+  mk({ kind: 'trigger', name: 'quotecount', response: 'Random quote: $(list.0 quotes)', usageCount: 9, group: 'Fun' }),   // references "quotes" list
+  mk({ kind: 'alias', name: 'randq', target: 'roll', args: 'pick $(list quotes)', usageCount: 1, group: 'Fun', response: null }), // via its own args
   // Enough to span many pages so the ellipsis pager is visible in the preview.
   ...Array.from({ length: 420 }, (_, i) =>
     mk({ name: `custom${i + 1}`, access: i % 6, response: i % 5 === 0 ? null : `Response #${i + 1}`, enabled: i % 7 !== 0, usageCount: i, group: GROUPS[i % 4] })),

@@ -1,4 +1,5 @@
 import { renderLayout } from '../layout.js';
+import { commandTableScript, commandModalsHtml, commandModalsScript } from './commandRow.js';
 
 /**
  * Lists page — a master/detail view modeled on the Commands page. The left
@@ -23,7 +24,10 @@ export function listsPage(): string {
     </div>
     <div class="md-layout">
       <nav class="md-side card" id="list-side"></nav>
-      <div class="md-main card" id="list-main"></div>
+      <div class="md-col">
+        <div class="md-main card" id="list-main"></div>
+        <div class="card" id="list-refs" style="display:none"></div>
+      </div>
     </div>
 
     <dialog id="list-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
@@ -64,13 +68,13 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="del-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+    <dialog id="ldel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
       <h2 style="margin-top:0" id="del-title">Delete?</h2>
-      <p class="muted" id="del-msg"></p>
-      <div class="toast err" id="del-toast"></div>
+      <p class="muted" id="ldel-msg"></p>
+      <div class="toast err" id="ldel-toast"></div>
       <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
-        <button type="button" class="secondary" id="del-cancel">Cancel</button>
-        <button type="button" class="pink" id="del-confirm">Delete</button>
+        <button type="button" class="secondary" id="ldel-cancel">Cancel</button>
+        <button type="button" class="pink" id="ldel-confirm">Delete</button>
       </div>
     </dialog>
 
@@ -113,22 +117,83 @@ export function listsPage(): string {
         <button type="button" class="secondary" id="lwarn-cancel">Cancel</button>
         <button type="button" class="danger" id="lwarn-confirm">Wipe &amp; replace</button>
       </div>
-    </dialog>`;
+    </dialog>
+
+    ${commandModalsHtml()}`;
 
   const script = `
-    var state={ lists:[], view:null, canManage:false, myLevel:0 };
-    var LABELS=['Everyone','Subscriber','VIP','Moderator','Broadcaster','Admin'];
-    function accessLabel(a){ return LABELS[a] || ('Level '+a); }
-    var ICONS={
-      'pencil':'<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="m15 5 4 4"/>',
-      'trash-2':'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>'
-    };
-    function icon(name, size){ size=size||16; return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[name]+'</svg>'; }
+    var state={ lists:[], commands:[], view:null, canManage:false, myLevel:0 };
+    // Shared custom-command row/table formatting + edit/delete modals — the
+    // "Commands Referencing …" table below reuses the exact rows AND the same
+    // edit/delete/toggle behavior as the Commands page (see commandRow.ts).
+    // Provides: customRow, customTableHtml, openEdit, openAliasEdit, delCommand, setEnabled, …
+    ${commandTableScript()}
+    ${commandModalsScript()}
     function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }catch(e){ return ''; } }
     function levelFromRel(r){ if(!r) return 0; if(r.botAdmin) return 5; if(r.broadcaster) return 4; if(r.moderator) return 3; if(r.subscriber) return 1; return 0; }
     function current(){ return state.lists.filter(function(l){ return l.name===state.view; })[0] || null; }
     function canManageList(l){ return state.canManage && l && state.myLevel >= l.permission; }
     function canAddTo(l){ return l && state.myLevel >= l.permission; }
+
+    // ── Commands referencing a list ────────────────────────────────────────────
+    // The list reference names used in a $(list <name>) / $(list.n <name>) /
+    // $(list.all <name>) variable within a string. Case-insensitive on the
+    // keyword; a leading '!' on the name is stripped, mirroring normalizeListName.
+    function listRefsIn(str){
+      var out={}; if(!str) return out;
+      // Char classes instead of backslash escapes: this whole script is a
+      // template literal, which would eat regex backslashes before the browser
+      // sees them. Matches $(list NAME) and $(list.SUB NAME).
+      var re=/[$][(]list(?:[.][^ )]+)?[ ]+([^ )]+)/gi, m;
+      while((m=re.exec(str))){ out[m[1].replace(/^!/,'').toLowerCase()]=true; }
+      return out;
+    }
+    // Custom commands + aliases that reference the given list. An alias counts if
+    // its own args reference the list, or the command it targets does.
+    function commandsReferencing(name){
+      name=String(name).toLowerCase();
+      var targets={};
+      state.commands.forEach(function(c){ if(c.kind==='trigger'||c.kind==='phrase') targets[String(c.name).toLowerCase()]=c; });
+      return state.commands.filter(function(c){
+        if(c.kind==='alias'){
+          if(listRefsIn(c.args)[name]) return true;
+          var t=c.target?targets[String(c.target).toLowerCase()]:null;
+          return !!(t && listRefsIn(t.response)[name]);
+        }
+        if(c.kind==='builtin') return false; // built-ins have no editable response to scan
+        return !!listRefsIn(c.response)[name];
+      }).sort(function(a,b){ return String(a.name).localeCompare(String(b.name)); });
+    }
+
+    // Populate the separate "Commands Referencing …" panel using the SHARED
+    // command-row rendering, so it matches the Commands page exactly. Each row's
+    // __i indexes state.refCmds, which the panel's wiring resolves back.
+    function renderRefs(){
+      var panel=document.getElementById('list-refs');
+      var l=current();
+      state.refCmds=l?commandsReferencing(l.name):[];
+      // Only shown when a list is selected AND something references it.
+      if(!l || !state.refCmds.length){ panel.style.display='none'; panel.innerHTML=''; return; }
+      var title=(l.displayName && l.displayName.trim()) || l.name;
+      for(var i=0;i<state.refCmds.length;i++) state.refCmds[i].__i=i;
+      panel.style.display='';
+      panel.innerHTML='<h2 style="margin-top:0">Commands Referencing '+esc(title)+' <span class="count">('+state.refCmds.length+')</span></h2>'
+        +customTableHtml(state.refCmds, 'No commands reference this list.');
+      wireRefs(panel);
+      wireCopy(panel);
+    }
+
+    // Toggle + edit + delete all use the SHARED command modals, so they behave
+    // exactly as on the Commands page. load() reloads lists+commands and
+    // re-renders (which repaints this panel via renderRefs).
+    function wireRefs(panel){
+      var q=function(sel,fn){ Array.prototype.forEach.call(panel.querySelectorAll(sel), fn); };
+      var at=function(b,name){ return state.refCmds[+b.getAttribute(name)]; };
+      q('input[data-toggle]', function(b){ b.onchange=function(){ setEnabled(at(b,'data-toggle'), load, renderRefs); }; });
+      q('button[data-edit]', function(b){ b.onclick=function(){ openEdit(at(b,'data-edit'), load); }; });
+      q('button[data-aedit]', function(b){ b.onclick=function(){ openAliasEdit(at(b,'data-aedit'), load); }; });
+      q('button[data-del]', function(b){ b.onclick=function(){ delCommand(at(b,'data-del'), load); }; });
+    }
 
     window.onMe=function(me){
       var rel = me && me.relationship;
@@ -139,6 +204,9 @@ export function listsPage(): string {
     async function load(){
       try{
         var d=await api('GET','/api/lists'); state.lists=(d.lists||[]).slice();
+        // Commands are fetched to show which reference each list; a failure here
+        // must not stop the lists themselves from rendering.
+        try{ state.commands=((await api('GET','/api/commands')).commands)||[]; }catch(_e){ state.commands=[]; }
         if(!state.lists.some(function(l){ return l.name===state.view; })) state.view = state.lists.length ? state.lists[0].name : null;
         var n=state.lists.length;
         document.getElementById('list-sub').textContent = n+' list'+(n===1?'':'s')+'.'+(state.canManage?' You can manage lists.':'');
@@ -163,6 +231,7 @@ export function listsPage(): string {
     }
 
     function renderMain(){
+      renderRefs(); // keep the referencing-commands panel in step with the selection
       var main=document.getElementById('list-main');
       if(!state.lists.length){
         main.innerHTML='<p class="muted">No lists yet.'+(state.canManage?' Use <strong>+ Add List</strong> above, or <code>!list new &lt;name&gt;</code> in chat.':'')+'</p>';
@@ -177,7 +246,7 @@ export function listsPage(): string {
       if(canAddTo(l)) btns+='<button type="button" class="pink" id="add-entry-btn">+ Add Entry</button>';
 
       var head='<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem">'
-        +'<div><h2 style="margin:0 0 .35rem">'+esc(title)+' <code>'+esc(l.name)+'</code></h2>'
+        +'<div><h2 style="margin:0 0 .35rem">'+esc(title)+' <span class="ref-name">('+esc(l.name)+')</span></h2>'
         +'<p class="muted" style="margin:.15rem 0 .5rem">'+(l.description?esc(l.description):'<em>No description.</em>')+'</p>'+meta+'</div>'
         +'<div class="rowline" style="flex:none; justify-content:flex-end">'+btns+'</div></div>';
 
@@ -291,31 +360,31 @@ export function listsPage(): string {
     };
 
     // ── Delete dialog (list or entry) ────────────────────────────────────────
-    var delDlg=document.getElementById('del-dlg');
+    var lDelDlg=document.getElementById('ldel-dlg');
     var delKind=null; var delListName=null; var delEntryId=null;
     function askDeleteList(l){
       delKind='list'; delListName=l.name; delEntryId=null;
       document.getElementById('del-title').textContent='Delete list?';
-      document.getElementById('del-msg').textContent='This permanently deletes "'+((l.displayName&&l.displayName.trim())||l.name)+'" and all '+l.entries.length+' of its entries.';
-      document.getElementById('del-toast').textContent='';
-      if(delDlg.showModal) delDlg.showModal(); else delDlg.setAttribute('open','');
+      document.getElementById('ldel-msg').textContent='This permanently deletes "'+((l.displayName&&l.displayName.trim())||l.name)+'" and all '+l.entries.length+' of its entries.';
+      document.getElementById('ldel-toast').textContent='';
+      if(lDelDlg.showModal) lDelDlg.showModal(); else lDelDlg.setAttribute('open','');
     }
     function askDeleteEntry(l, id){
       delKind='entry'; delListName=l.name; delEntryId=id;
       document.getElementById('del-title').textContent='Delete entry?';
-      document.getElementById('del-msg').textContent='This permanently removes the entry from "'+((l.displayName&&l.displayName.trim())||l.name)+'".';
-      document.getElementById('del-toast').textContent='';
-      if(delDlg.showModal) delDlg.showModal(); else delDlg.setAttribute('open','');
+      document.getElementById('ldel-msg').textContent='This permanently removes the entry from "'+((l.displayName&&l.displayName.trim())||l.name)+'".';
+      document.getElementById('ldel-toast').textContent='';
+      if(lDelDlg.showModal) lDelDlg.showModal(); else lDelDlg.setAttribute('open','');
     }
-    document.getElementById('del-cancel').onclick=function(){ delDlg.close?delDlg.close():delDlg.removeAttribute('open'); };
-    document.getElementById('del-confirm').onclick=async function(){
+    document.getElementById('ldel-cancel').onclick=function(){ lDelDlg.close?lDelDlg.close():lDelDlg.removeAttribute('open'); };
+    document.getElementById('ldel-confirm').onclick=async function(){
       try{
         if(delKind==='list') await api('POST','/api/lists/delete',{ name:delListName });
         else await api('POST','/api/lists/entries/delete',{ list:delListName, id:delEntryId });
-        delDlg.close?delDlg.close():delDlg.removeAttribute('open');
+        lDelDlg.close?lDelDlg.close():lDelDlg.removeAttribute('open');
         if(delKind==='list') state.view=null;
         await load();
-      }catch(e){ document.getElementById('del-toast').textContent='Delete failed: '+e.message; }
+      }catch(e){ document.getElementById('ldel-toast').textContent='Delete failed: '+e.message; }
     };
 
     // ── CSV export/import ───────────────────────────────────────────────────────
