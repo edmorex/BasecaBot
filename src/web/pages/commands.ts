@@ -25,7 +25,10 @@ export function commandsPage(): string {
     </div>
     <div class="md-layout">
       <nav class="md-side card" id="cmd-side"></nav>
-      <div class="md-main card" id="cmd-main"></div>
+      <div class="md-col">
+        <div class="md-main card" id="cmd-main"></div>
+        <div class="card" id="cmd-aliases" style="display:none"></div>
+      </div>
     </div>
     <div class="pager-wrap" id="cmd-pager"></div>
 
@@ -132,9 +135,28 @@ export function commandsPage(): string {
         var sec=state.groups.filter(function(s){return s.group===state.view.slice(7);})[0];
         main.innerHTML = sec ? builtinView(sec) : '<p class="muted">Nothing here.</p>';
         wireCopy(main);
+        renderBuiltinAliases(sec); // second panel: aliases pointing at these built-ins
         return;
       }
+      hideAliasPanel(); // custom views already list aliases inline
       main.innerHTML=customView(); wireCustom(); wireCopy(main); renderPager();
+    }
+
+    function hideAliasPanel(){ var p=document.getElementById('cmd-aliases'); p.style.display='none'; p.innerHTML=''; }
+
+    // A second card listing the custom aliases that target the built-in commands
+    // in this plugin group (e.g. !addme -> !wheel add $(sender)). Uses the SHARED
+    // rows, so each is editable/deletable/toggleable exactly like a custom row.
+    function renderBuiltinAliases(sec){
+      if(!sec){ hideAliasPanel(); return; }
+      var names={}; sec.cmds.forEach(function(c){ names[c.name]=true; });
+      var aliases=state.customs.filter(function(c){ return c.kind==='alias' && names[c.target]; });
+      if(!aliases.length){ hideAliasPanel(); return; }
+      var panel=document.getElementById('cmd-aliases');
+      panel.style.display='';
+      panel.innerHTML='<h2 style="margin-top:0">Aliases for '+esc(pretty(sec.group))+' <span class="count">('+aliases.length+')</span></h2>'
+        +customTableHtml(aliases, 'No aliases.');
+      wireCommandRows(panel); wireCopy(panel);
     }
 
     function builtinView(sec){
@@ -155,14 +177,16 @@ export function commandsPage(): string {
         +customTableHtml(rows, 'No custom commands here. Add one in chat with <code>!command add</code>.');
     }
 
-    function wireCustom(){
-      var root=document.getElementById('cmd-main');
+    // Wire the shared row controls within an element (used by both the main
+    // custom table and the aliases panel). Rows carry __i = index into state.customs.
+    function wireCommandRows(root){
       var q=function(sel,fn){ Array.prototype.forEach.call(root.querySelectorAll(sel), fn); };
       q('button[data-edit]', function(b){ b.onclick=function(){ openEdit(state.customs[+b.getAttribute('data-edit')], load); }; });
       q('button[data-aedit]', function(b){ b.onclick=function(){ openAliasEdit(state.customs[+b.getAttribute('data-aedit')], load); }; });
       q('input[data-toggle]', function(b){ b.onchange=function(){ setEnabled(state.customs[+b.getAttribute('data-toggle')], load, renderMain); }; });
       q('button[data-del]', function(b){ b.onclick=function(){ delCommand(state.customs[+b.getAttribute('data-del')], load); }; });
     }
+    function wireCustom(){ wireCommandRows(document.getElementById('cmd-main')); }
 
     // Page tokens to show. <=7 pages: show them all. Otherwise ALWAYS 7 boxes:
     //   near start:  1 2 3 4 5 … last

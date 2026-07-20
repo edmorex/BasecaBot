@@ -131,6 +131,10 @@ const mockCustoms = [
   mk({ kind: 'phrase', name: 'what songs', response: 'We have $(list.dump songs) queued.', usageCount: 3, group: 'Music' }), // phrase, direct
   mk({ kind: 'trigger', name: 'quotecount', response: 'Random quote: $(list.0 quotes)', usageCount: 9, group: 'Fun' }),   // references "quotes" list
   mk({ kind: 'alias', name: 'randq', target: 'roll', args: 'pick $(list quotes)', usageCount: 1, group: 'Fun', response: null }), // via its own args
+  // Built-in aliases (target a built-in root word) — exercise the "Aliases for …"
+  // panel on a plugin's built-in command view.
+  mk({ kind: 'alias', name: 'addme', target: 'wheel', args: 'add $(sender)', group: null, response: null }),
+  mk({ kind: 'alias', name: 'spinit', target: 'wheel', args: 'spin', group: null, response: null, enabled: false }),
   // Enough to span many pages so the ellipsis pager is visible in the preview.
   ...Array.from({ length: 420 }, (_, i) =>
     mk({ name: `custom${i + 1}`, access: i % 6, response: i % 5 === 0 ? null : `Response #${i + 1}`, enabled: i % 7 !== 0, usageCount: i, group: GROUPS[i % 4] })),
