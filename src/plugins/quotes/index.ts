@@ -152,6 +152,7 @@ export function quotesPlugin(): Plugin {
           search: {
             description: 'Print a random quote matching the search term(s).',
             usage: '<searchTerm>',
+            aliases: ['about'],
             handler: guard(async (e) => {
               const q = await svc.searchText(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes matched that search.');
@@ -160,6 +161,7 @@ export function quotesPlugin(): Plugin {
           searchuser: {
             description: 'Print a random quote said by the given user (any of their names).',
             usage: '<username>',
+            aliases: ['by'],
             handler: guard(async (e) => {
               const q = await svc.searchUser(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that user.');
