@@ -256,8 +256,13 @@ export class QuotesService {
    */
   async searchUser(user: string): Promise<QuoteView | null> {
     const quoted = await this.resolveQuoted(user);
-    const byName = { quotedUser: { contains: quoted.name } };
-    return this.randomWhere(quoted.id ? { OR: [{ quotedUserId: quoted.id }, byName] } : byName);
+    // Resolved to a real account → their quotes are exactly the ones LINKED to
+    // it. A substring match on the display name is wrong here: "Ed" is a
+    // substring of "Teledahn", so `contains` would pull in unrelated people.
+    // Only an unlinked name (a guest, with no id) falls back to the snapshot.
+    return this.randomWhere(
+      quoted.id ? { quotedUserId: quoted.id } : { quotedUser: { contains: quoted.name } },
+    );
   }
 
   async searchGame(term: string): Promise<QuoteView | null> {

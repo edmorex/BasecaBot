@@ -234,4 +234,27 @@ run('QuotesService attribution (integration)', () => {
     expect(await quotes.searchUser('a caller')).toMatchObject({ text: 'unlinked' });
     expect(await quotes.searchUser('nobody at all')).toBeNull();
   });
+
+  // Regression: searching a user whose display name is a SUBSTRING of another
+  // person's attributed name must not leak the other person's quotes. ("Ed" is
+  // a substring of "Teledahn"; searchUser once did a `contains` on the display
+  // name and pulled Teledahn quotes in.)
+  it('does not match a user whose display name is a substring of another attribution', async () => {
+    const ED = 'itest_quote_ed';
+    await prisma.user.deleteMany({ where: { id: ED } });
+    await users.touch({ id: ED, login: 'edmorex', displayName: 'Edmorex' });
+    await users.setDisplayName(ED, 'Ed'); // a CUSTOM display name — indexed + resolvable
+    await users.addAlias(ED, 'edmo');
+
+    await quotes.add({ user: '@edmorex', text: 'the ed quote' }, ADDER);   // linked to Ed
+    await quotes.add({ user: 'Teledahn', text: 'the teledahn quote' }, ADDER); // unlinked; "Teledahn" contains "ed"
+
+    // Every one of Ed's indexed names resolves to him and returns ONLY his
+    // quote — never Teledahn's, even though "Ed" is a substring of "Teledahn".
+    for (const name of ['edmorex', 'edmo', 'Ed', '@edmorex']) {
+      const q = await quotes.searchUser(name);
+      expect(q?.text, `search "${name}"`).toBe('the ed quote');
+    }
+    await prisma.user.deleteMany({ where: { id: ED } });
+  });
 });
