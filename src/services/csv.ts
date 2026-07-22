@@ -87,9 +87,14 @@ export interface CsvColumn {
 export function mapCsvRows(rows: string[][], spec: CsvColumn[]): Record<string, string>[] {
   if (rows.length === 0) return [];
   const first = rows[0]!.map((c) => c.trim().toLowerCase());
-  // Treat row 0 as a header only if 2+ expected column names appear in it — a
-  // single data value happening to equal a header name shouldn't trigger it.
-  const hasHeader = spec.filter((s) => s.aliases.some((a) => first.includes(a))).length >= 2;
+  const specMatches = spec.filter((s) => s.aliases.some((a) => first.includes(a))).length;
+  const allAliases = new Set(spec.flatMap((s) => s.aliases));
+  const nonEmpty = first.filter((c) => c !== '');
+  // Row 0 is a header when either 2+ expected column names appear (so a lone
+  // data value that happens to equal a column name doesn't trigger it) OR every
+  // non-empty cell is a known column name (so a minimal single-column header
+  // like just "Entry" is still recognized).
+  const hasHeader = specMatches >= 2 || (specMatches >= 1 && nonEmpty.length > 0 && nonEmpty.every((c) => allAliases.has(c)));
   const index: Record<string, number> = {};
   for (const s of spec) index[s.key] = hasHeader ? first.findIndex((c) => s.aliases.includes(c)) : s.pos;
   const data = hasHeader ? rows.slice(1) : rows;

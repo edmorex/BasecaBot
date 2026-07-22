@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, COMMAND_CSV_SPEC } from './csv.js';
+import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, COMMAND_CSV_SPEC, LIST_CSV_SPEC } from './csv.js';
 
 describe('csv', () => {
   it('serializes, quoting only when needed', () => {
@@ -37,6 +37,13 @@ describe('csv', () => {
   it('mapCsvRows falls back to positional order when there is no header', () => {
     const rows = parseCsv('1,hi,baseca,Game,2024-01-02,Mod'); // no header line
     expect(mapCsvRows(rows, QUOTE_CSV_SPEC)[0]).toMatchObject({ text: 'hi', user: 'baseca' });
+  });
+
+  // A minimal single-column header ("Entry") must be recognized so its data maps
+  // to `text`, not positionally to `list` (which would drop every row).
+  it('recognizes a lone column-name header row', () => {
+    const rows = parseCsv('Entry\nthis is line one\nthis is line two');
+    expect(mapCsvRows(rows, LIST_CSV_SPEC).map((m) => m.text)).toEqual(['this is line one', 'this is line two']);
   });
 
   it('maps a command CSV row (alias with target + args)', () => {
