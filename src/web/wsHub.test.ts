@@ -5,7 +5,7 @@ import { EventBus } from '../core/eventBus.js';
 
 const PORT = 8199;
 const SECRET = 'test-secret';
-const ROOM = 'sample-game';
+const ROOM = 'test-room';
 
 let hub: WsHub | undefined;
 

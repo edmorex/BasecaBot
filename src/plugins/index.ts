@@ -4,7 +4,6 @@ import { commandsPlugin } from './commands/index.js';
 import { listsPlugin } from './lists/index.js';
 import { quotesPlugin } from './quotes/index.js';
 import { eventsPlugin } from './events/index.js';
-import { sampleGamePlugin } from './sampleGame/index.js';
 import { basecaWheelPlugin } from './basecaWheel/index.js';
 
 /**
@@ -18,6 +17,5 @@ export const pluginRegistry: PluginFactory[] = [
   listsPlugin,
   quotesPlugin,
   eventsPlugin,
-  sampleGamePlugin,
   basecaWheelPlugin,
 ];

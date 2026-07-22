@@ -429,7 +429,7 @@ with:
 	}
 ```
 
-Leave the `/ws`, `/wheel`, `/sample`, `/events` blocks as they are — they're matched first. Then
+Leave the `/ws`, `/wheel`, `/events` blocks as they are — they're matched first. Then
 `docker compose up -d` in `edge-server` to reload.
 
 Verify: visit `https://bot.edmorex.com/` → "Login with Twitch" → after authorizing you're back on the

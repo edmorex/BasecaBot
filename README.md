@@ -15,8 +15,8 @@ Web apps (games) ◀────── WebSocket hub ◀──────┘
 - **Core** (`src/core/`): `eventBus`, `commandRouter`, `pluginManager`, `serviceContext`, canonical `events`.
 - **Services** (`src/services/`): `users`, `points`, `chat`, `storage` (Prisma), `config`, `logger`.
 - **Adapters** (`src/adapters/`): Twitch chat + EventSub (donation adapter is a future stub).
-- **Plugins** (`src/plugins/`): `points`, `commands`, `events`, `sampleGame`, `basecaWheel`.
-- **Web** (`src/web/wsHub.ts`): WebSocket hub for web apps. Companion demo in `webapps/sample-game/`.
+- **Plugins** (`src/plugins/`): `points`, `commands`, `lists`, `quotes`, `events`, `basecaWheel`.
+- **Web** (`src/web/wsHub.ts`): WebSocket hub for web apps. Companion app in `webapps/baseca-wheel/`.
 
 **Adding a feature** = add a folder under `src/plugins/`, export a `Plugin`, and register it in `src/plugins/index.ts`. No kernel changes.
 
@@ -51,20 +51,22 @@ Required Twitch setup (two accounts, two tokens):
 | `!points give <user> <n>` | sub | Transfer your points to someone else |
 | `!points grant <user> <n>` | broadcaster | Create/deduct points (negative removes) |
 | `!command` (alias `!cmd`) | mod | Manage custom commands — `add`/`response`/`setgroup`/`cooldown`/`restrict`/`setcount`/`enable`/`disable`/`addalias`/`remove` on a `!trigger` or `"phrase"` |
-| `!startgame` / `!endgame` / `!vote <x>` | mod / everyone | Sample web-app game |
+| `!quote` | everyone | Show/search quotes; subs `add`, mods edit |
+| `!list` | mod | Manage named lists (`new`/`add`/`all`/…) |
+| `!wheel` | everyone | Drive the BasecaWheel web app (`add`/`spin`/`title`/…) |
 
 Anywhere a command takes `<user>`, you can type the person's `@handle`, their
 display name, or any alias they've added — it resolves to the same account, and
 output always shows their current display name. See
 **[docs/user-accounts.md](docs/user-accounts.md)**.
 
-## Try the web-app loop
+## Web-app integration
 
-1. Run the bot (`npm run dev`).
-2. Open `webapps/sample-game/index.html` in a browser and click **Connect**
-   (default URL uses `WS_HUB_SECRET=change-me`).
-3. In chat: `!startgame`, then viewers `!vote red` / `!vote blue`. Votes appear live in the page.
-4. Click **Declare winner** in the page → the bot announces the winner in chat and awards points.
+The bot drives external web apps in real time over the WebSocket hub
+(`src/web/wsHub.ts`): chat commands push updates to a connected page, which can
+push results back to chat. The live example is **BasecaWheel** — chat runs
+`!wheel add`/`!wheel spin` and the wheel page (`webapps/baseca-wheel/`) reacts.
+See **[docs/basecawheel-integration.md](docs/basecawheel-integration.md)**.
 
 ## Testing
 
