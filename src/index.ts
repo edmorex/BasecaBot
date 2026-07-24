@@ -10,6 +10,7 @@ import { PointsService } from './services/points.js';
 import { CustomCommandService } from './services/customCommands.js';
 import { ListsService } from './services/lists.js';
 import { QuotesService } from './services/quotes.js';
+import { FirstService } from './services/first.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
 import { WebServer } from './web/webServer.js';
@@ -55,6 +56,7 @@ async function main(): Promise<void> {
   // Quotes attribute to a user id via `users`, so names resolve however they
   // were typed and display follows the person's current display name.
   const quotes = new QuotesService(storage, users);
+  const first = new FirstService(storage);
 
   const chatAdapter = new TwitchChatAdapter(authProvider, bus, users, config);
   const chat = new TwurpleChatService(chatAdapter.client);
@@ -90,6 +92,7 @@ async function main(): Promise<void> {
     customCommands,
     lists,
     quotes,
+    first,
     storage,
     ws,
     api,

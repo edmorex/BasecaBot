@@ -5,6 +5,7 @@ import { listsPlugin } from './lists/index.js';
 import { quotesPlugin } from './quotes/index.js';
 import { eventsPlugin } from './events/index.js';
 import { basecaWheelPlugin } from './basecaWheel/index.js';
+import { firstPlugin } from './first/index.js';
 
 /**
  * The plugin registry. To add a feature/mode/game: create a folder under
@@ -18,4 +19,5 @@ export const pluginRegistry: PluginFactory[] = [
   quotesPlugin,
   eventsPlugin,
   basecaWheelPlugin,
+  firstPlugin,
 ];

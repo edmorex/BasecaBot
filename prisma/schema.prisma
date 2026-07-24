@@ -44,6 +44,39 @@ model User {
   listEntries  ListEntry[]      @relation("ListEntryAuthor")
   quotes       Quote[]          @relation("QuoteCreator")
   quotedIn     Quote[]          @relation("QuotedUser")
+  firstStat     FirstStat?
+  firstCheckins FirstCheckin[]
+}
+
+/// Cumulative all-time "!first" scoreboard for a user. Only top-10 finishes
+/// contribute; averages are stored as running sums so they update atomically
+/// (avgTime = sumTimeSeconds/topTens, avgPlace = sumPlace/topTens).
+model FirstStat {
+  userId         String @id
+  firsts         Int    @default(0) // literal 1st-place finishes
+  topTens        Int    @default(0) // finishes in places 1..10 (the averages' divisor)
+  sumTimeSeconds Int    @default(0) // Σ check-in seconds over top-10 finishes
+  sumPlace       Int    @default(0) // Σ place over top-10 finishes
+  points         Int    @default(0) // cumulative ranking points (11 - place, per top-10 finish)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// One "!first" check-in. Recorded for EVERY place (incl. 11+) so repeats are
+/// detectable and the place counter keeps climbing; only places 1..10 feed
+/// FirstStat. `streamKey` is the live stream's start time — one race per stream.
+model FirstCheckin {
+  id          Int      @id @default(autoincrement())
+  streamKey   String
+  userId      String
+  place       Int // 1-based check-in order this stream
+  timeSeconds Int // seconds after the stream started
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([streamKey, userId]) // one check-in per user per stream
+  @@index([streamKey])
 }
 
 /// The GLOBAL name index: every name any user can be referenced by, in ONE

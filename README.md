@@ -15,7 +15,7 @@ Web apps (games) ◀────── WebSocket hub ◀──────┘
 - **Core** (`src/core/`): `eventBus`, `commandRouter`, `pluginManager`, `serviceContext`, canonical `events`.
 - **Services** (`src/services/`): `users`, `points`, `chat`, `storage` (Prisma), `config`, `logger`.
 - **Adapters** (`src/adapters/`): Twitch chat + EventSub (donation adapter is a future stub).
-- **Plugins** (`src/plugins/`): `points`, `commands`, `lists`, `quotes`, `events`, `basecaWheel`.
+- **Plugins** (`src/plugins/`): `points`, `commands`, `lists`, `quotes`, `events`, `basecaWheel`, `first`.
 - **Web** (`src/web/wsHub.ts`): WebSocket hub for web apps. Companion app in `webapps/baseca-wheel/`.
 
 **Adding a feature** = add a folder under `src/plugins/`, export a `Plugin`, and register it in `src/plugins/index.ts`. No kernel changes.
@@ -54,6 +54,7 @@ Required Twitch setup (two accounts, two tokens):
 | `!quote` | everyone | Show/search quotes; subs `add`, mods edit |
 | `!list` | mod | Manage named lists (`new`/`add`/`all`/…) |
 | `!wheel` | everyone | Drive the BasecaWheel web app (`add`/`spin`/`title`/…) |
+| `!first` | everyone | Race to be FIRST when the stream goes live; `top [firsts\|points\|time]` (alias `leaderboard`) and `stats [user]` (alias `rank`) show the all-time scoreboard |
 
 Anywhere a command takes `<user>`, you can type the person's `@handle`, their
 display name, or any alias they've added — it resolves to the same account, and
