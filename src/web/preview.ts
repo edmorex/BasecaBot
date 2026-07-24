@@ -90,6 +90,7 @@ async function collectBuiltins() {
     customCommands: {},
     lists: {},
     quotes: {},
+    timers: { configure: noop, resumeLoops: asyncNoop, stopAllRuntime: noop, list: async () => [], status: () => 0 },
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -193,6 +194,15 @@ const mockLists: MockList[] = [
 ];
 const listByName = (n: string) => mockLists.find((l) => l.name === String(n).toLowerCase().replace(/^!/, '').trim());
 
+// Mock timers (exercises the Timers plugin view: table + loop toggles).
+interface MockTimer { name: string; periodSeconds: number; command: string; looping: boolean; running: boolean; mode: 'once' | 'loop' | null; secondsLeft: number }
+const mockTimers: MockTimer[] = [
+  { name: 'socials', periodSeconds: 900, command: '!socials', looping: true, running: true, mode: 'loop', secondsLeft: 612 },
+  { name: 'discord', periodSeconds: 1800, command: '!discord', looping: true, running: true, mode: 'loop', secondsLeft: 1204 },
+  { name: 'raidprep', periodSeconds: 60, command: '!shoutout @baseca', looping: false, running: false, mode: null, secondsLeft: 0 },
+];
+const timerByName = (n: string) => mockTimers.find((t) => t.name === String(n).toLowerCase().trim());
+
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
 const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
@@ -253,6 +263,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       return csv(toCsv(rows));
     }
     if (p === '/api/lists') return json(200, { lists: mockLists });
+    if (p === '/api/timers') return json(200, { timers: mockTimers });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
@@ -396,6 +407,28 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });
 
     // ── Lists (mock CRUD) ──────────────────────────────────────────────────
+    if (p === '/api/timers/create') {
+      const name = String(body.name ?? '').trim();
+      if (name && !timerByName(name)) {
+        mockTimers.push({ name, periodSeconds: Number(body.periodSeconds) || 60, command: String(body.command ?? ''), looping: false, running: false, mode: null, secondsLeft: 0 });
+      }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/timers/update') {
+      const t = timerByName(String(body.name ?? ''));
+      if (t) { t.periodSeconds = Number(body.periodSeconds) || t.periodSeconds; t.command = String(body.command ?? t.command); }
+      return json(200, { ok: true });
+    }
+    if (p === '/api/timers/delete') {
+      const i = mockTimers.findIndex((t) => t.name === String(body.name ?? '').toLowerCase().trim());
+      if (i >= 0) mockTimers.splice(i, 1);
+      return json(200, { ok: true });
+    }
+    if (p === '/api/timers/loop') {
+      const t = timerByName(String(body.name ?? ''));
+      if (t) { t.looping = Boolean(body.on); t.running = t.looping; t.mode = t.looping ? 'loop' : null; t.secondsLeft = t.looping ? t.periodSeconds : 0; }
+      return json(200, { ok: true });
+    }
     if (p === '/api/lists/create') {
       const name = String(body.name ?? '').toLowerCase().replace(/^!/, '').trim();
       if (name && !listByName(name)) {

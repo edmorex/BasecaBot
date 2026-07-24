@@ -36,6 +36,7 @@ export function commandsPlugin(): Plugin {
         quotes: ctx.quotes,
         lists: ctx.lists,
         customCommands: ctx.customCommands,
+        timers: ctx.timers,
         api: ctx.api,
         broadcasterUsername: ctx.config.twitch.broadcasterUsername,
         pointsName: ctx.config.points.name,

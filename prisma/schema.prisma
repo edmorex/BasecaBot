@@ -79,6 +79,28 @@ model FirstCheckin {
   @@index([streamKey])
 }
 
+/// A named timer that fires a bound command/alias — either once after a delay
+/// (`!timer start`) or repeatedly every `periodSeconds` (`!timer loop`). Only the
+/// definition + whether loop mode is armed persist; the countdown to the next
+/// fire is in-memory runtime state (TimerService), so a one-shot pending fire is
+/// lost on restart while `looping` timers resume automatically.
+model Timer {
+  id            Int      @id @default(autoincrement())
+  /// Case-insensitive reference key (lowercased name); what commands look up.
+  key           String   @unique
+  /// Name as entered, for display.
+  name          String
+  /// Fire period / one-shot delay, in seconds (>= 1).
+  periodSeconds Int
+  /// The bound command to run, as a chat line incl. the leading '!' and any
+  /// options, e.g. "!shoutout @baseca". Run as the broadcaster when it fires.
+  command       String
+  /// True while loop mode is armed; persisted so loops resume after a restart.
+  looping       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 /// The GLOBAL name index: every name any user can be referenced by, in ONE
 /// namespace. `normalized` (lowercased, '@' stripped) is unique across all users
 /// and all kinds, so a typed name resolves to at most one person — that single

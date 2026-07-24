@@ -28,6 +28,7 @@ function makeDeps(over: Partial<VarDeps> = {}): VarDeps {
       entriesOf: async (r: string) => (r === 'games' ? ['Half-Life', 'Metal Gear', 'Portal 2, Co-op'] : null),
     },
     customCommands: { getUsageCount: async (t: { name: string }) => (t.name === 'death' ? 41 : null) },
+    timers: { start: async () => undefined, status: (name: string) => (name === 'socials' ? 42 : 0) },
     api: {} as never,
     broadcasterUsername: 'baseca',
     pointsName: 'BascaPoints',
@@ -203,5 +204,27 @@ describe('CommandVarEngine — channel/live data (mocked Helix)', () => {
     const engine = new CommandVarEngine(deps);
     expect(await engine.render('$(channel.viewers)', ctx())).toBe('1337');
     expect(await engine.render('$(channel.uptime)', ctx())).toBe('2 hours 15 minutes');
+  });
+});
+
+describe('$(timer)', () => {
+  it('starts a timer (via start and its aliases), yielding nothing', async () => {
+    const start = vi.fn(async (_name?: string) => undefined);
+    const deps = makeDeps({ timers: { start, status: () => 0 } as unknown as VarDeps['timers'] });
+    expect(await render('$(timer.start socials)', ctx(), deps)).toBe('');
+    expect(await render('$(timer.go socials)', ctx(), deps)).toBe('');
+    expect(await render('$(timer.enable socials)', ctx(), deps)).toBe('');
+    expect(start.mock.calls.map((c) => c[0])).toEqual(['socials', 'socials', 'socials']);
+  });
+
+  it('reports seconds left via status/remaining/timeleft, else 0', async () => {
+    expect(await render('$(timer.status socials)')).toBe('42');
+    expect(await render('$(timer.remaining socials)')).toBe('42');
+    expect(await render('$(timer.timeleft other)')).toBe('0');
+  });
+
+  it('yields nothing without a name or for an unknown sub', async () => {
+    expect(await render('$(timer.status)')).toBe('');
+    expect(await render('$(timer.bogus socials)')).toBe('');
   });
 });

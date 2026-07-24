@@ -304,11 +304,18 @@ export class CommandRouter {
   }
 
   private async handleChat(event: ChatEvent): Promise<void> {
-    const parsed = CommandRouter.parse(event.message, {
-      channel: event.channel,
-      ts: event.ts,
-      user: event.user,
-    });
+    await this.execute(event.message, { channel: event.channel, ts: event.ts, user: event.user });
+  }
+
+  /**
+   * Run a command line through the full pipeline (built-in OR custom via the
+   * fallback), applying permission + cooldown checks and publishing the command
+   * event for observers. Unlike `handleChat` this does NOT originate from a chat
+   * event, so it never triggers chat-side effects like point/watch-time accrual
+   * — used by timers to fire a bound command as the broadcaster.
+   */
+  async execute(message: string, base: Pick<CommandEvent, 'channel' | 'ts' | 'user'>): Promise<void> {
+    const parsed = CommandRouter.parse(message, base);
     if (!parsed) return;
 
     const cmd = this.resolve(parsed.name);
@@ -330,7 +337,7 @@ export class CommandRouter {
       await cmd.handler(parsed);
     } catch (err) {
       log.error({ err, command: cmd.name }, 'command handler threw');
-      await this.chat.say(event.channel, `Something went wrong running !${cmd.name}.`).catch(() => {});
+      await this.chat.say(base.channel, `Something went wrong running !${cmd.name}.`).catch(() => {});
     }
   }
 

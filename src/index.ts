@@ -11,6 +11,7 @@ import { CustomCommandService } from './services/customCommands.js';
 import { ListsService } from './services/lists.js';
 import { QuotesService } from './services/quotes.js';
 import { FirstService } from './services/first.js';
+import { TimerService } from './services/timers.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
 import { WebServer } from './web/webServer.js';
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   // were typed and display follows the person's current display name.
   const quotes = new QuotesService(storage, users);
   const first = new FirstService(storage);
+  const timers = new TimerService(storage);
 
   const chatAdapter = new TwitchChatAdapter(authProvider, bus, users, config);
   const chat = new TwurpleChatService(chatAdapter.client);
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ async function main(): Promise<void> {
     lists,
     quotes,
     first,
+    timers,
     storage,
     ws,
     api,

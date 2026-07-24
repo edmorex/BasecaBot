@@ -6,6 +6,7 @@ import type { UsersService } from './users.js';
 import type { QuotesService } from './quotes.js';
 import type { ListsService } from './lists.js';
 import type { CustomCommandService } from './customCommands.js';
+import type { TimerService } from './timers.js';
 import { formatQuote } from './quotes.js';
 import { toCsv } from './csv.js';
 
@@ -40,6 +41,7 @@ export interface VarDeps {
   quotes: QuotesService;
   lists: ListsService;
   customCommands: CustomCommandService;
+  timers: TimerService;
   api: ApiClient;
   broadcasterUsername: string;
   pointsName: string;
@@ -409,6 +411,23 @@ const RESOLVERS: Record<string, Resolver> = {
     if (['all', 'dump', 'show'].includes(subs[0])) {
       const entries = await deps.lists.entriesOf(ref);
       return entries?.length ? toCsv([entries]) : '';
+    }
+    return '';
+  },
+
+  // $(timer.start <name>) (aliases: go/activate/begin/enable) starts a one-shot
+  // and yields nothing; $(timer.status <name>) (aliases: remaining/timeleft)
+  // yields the seconds left on an active timer, else 0.
+  timer: async ({ subs, tokens, deps }) => {
+    const name = tokens[0];
+    if (!name) return '';
+    const sub = subs[0];
+    if (sub === 'start' || sub === 'go' || sub === 'activate' || sub === 'begin' || sub === 'enable') {
+      await deps.timers.start(name);
+      return '';
+    }
+    if (sub === 'status' || sub === 'remaining' || sub === 'timeleft') {
+      return String(deps.timers.status(name));
     }
     return '';
   },

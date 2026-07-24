@@ -12,6 +12,8 @@ import { ListError } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
 import { QuoteError } from '../services/quotes.js';
 import type { PointsService } from '../services/points.js';
+import type { TimerService } from '../services/timers.js';
+import { TimerError } from '../services/timers.js';
 import type { EventBus } from '../core/eventBus.js';
 import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
 import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -90,6 +92,7 @@ export class WebServer {
     private readonly quotes: QuotesService,
     private readonly points: PointsService,
     private readonly bus: EventBus,
+    private readonly timers: TimerService,
   ) {}
 
   start(): void {
@@ -159,6 +162,8 @@ export class WebServer {
           return this.getQuotes(res);
         case '/api/quotes/export':
           return this.exportQuotes(req, res);
+        case '/api/timers':
+          return this.getTimers(res);
         case '/api/admin/users':
           return this.getAdminUsers(req, res);
         case '/healthz':
@@ -210,6 +215,14 @@ export class WebServer {
           return this.deleteQuote(req, res);
         case '/api/quotes/import':
           return this.importQuotes(req, res);
+        case '/api/timers/create':
+          return this.createTimer(req, res);
+        case '/api/timers/update':
+          return this.updateTimer(req, res);
+        case '/api/timers/delete':
+          return this.deleteTimer(req, res);
+        case '/api/timers/loop':
+          return this.setTimerLoop(req, res);
         case '/api/admin/users/init':
           return this.initAdminUser(req, res);
         case '/api/admin/users/update':
@@ -485,6 +498,67 @@ export class WebServer {
     });
     const result = await this.customCommands.importCommands(items, mode);
     this.json(res, 200, { ok: true, mode, ...result });
+  }
+
+  // ── Timers API ────────────────────────────────────────────────────────────────
+
+  /** Every timer with its runtime state (public read — mgmt is gated per-write). */
+  private async getTimers(res: ServerResponse): Promise<void> {
+    const timers = await this.timers.list();
+    this.json(res, 200, { timers });
+  }
+
+  /** Create a timer: { name, periodSeconds, command }. */
+  private async createTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.timers.add(String(body.name ?? ''), Number(body.periodSeconds), String(body.command ?? ''));
+    } catch (e) {
+      if (e instanceof TimerError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  /** Update a timer's period + command: { name, periodSeconds, command }. */
+  private async updateTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.timers.edit(String(body.name ?? ''), Number(body.periodSeconds), String(body.command ?? ''));
+    } catch (e) {
+      if (e instanceof TimerError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  /** Delete a timer: { name }. */
+  private async deleteTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      await this.timers.delete(String(body.name ?? ''));
+    } catch (e) {
+      if (e instanceof TimerError) throw new HttpError(404, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
+  }
+
+  /** Arm/disarm loop mode: { name, on }. */
+  private async setTimerLoop(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireManager(req);
+    const body = await this.readJson(req);
+    try {
+      if (body.on) await this.timers.loop(String(body.name ?? ''));
+      else await this.timers.stop(String(body.name ?? ''));
+    } catch (e) {
+      if (e instanceof TimerError) throw new HttpError(400, e.message);
+      throw e;
+    }
+    this.json(res, 200, { ok: true });
   }
 
   // ── Lists API ─────────────────────────────────────────────────────────────────

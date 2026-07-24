@@ -19,6 +19,7 @@ export function commandsPage(): string {
       <div class="rowline" style="flex:none; gap:.5rem; justify-content:flex-end">
         <button type="button" class="pink" id="new-cmd-btn" style="display:none">+ New Command</button>
         <button type="button" class="pink" id="new-alias-btn" style="display:none">+ Add Alias</button>
+        <button type="button" class="pink" id="new-timer-btn" style="display:none">+ New Timer</button>
         <button type="button" class="pink" id="cmd-import-btn" style="display:none">Import CSV</button>
         <button type="button" class="pink" id="cmd-export-btn" style="display:none">Export CSV</button>
       </div>
@@ -27,10 +28,36 @@ export function commandsPage(): string {
       <nav class="md-side card" id="cmd-side"></nav>
       <div class="md-col">
         <div class="md-main card" id="cmd-main"></div>
+        <div class="card" id="cmd-timers" style="display:none"></div>
         <div class="card" id="cmd-aliases" style="display:none"></div>
       </div>
     </div>
     <div class="pager-wrap" id="cmd-pager"></div>
+
+    <dialog id="timer-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(34rem,94vw)">
+      <h2 id="timer-dlg-title" style="margin-top:0">Edit Timer</h2>
+      <label class="muted">Name <span class="muted">(a single word, used as the <code>!timer</code> target)</span></label>
+      <input type="text" id="timer-name" maxlength="40" placeholder="e.g. socials" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Period <span class="muted">(seconds)</span></label>
+      <input type="number" id="timer-period" min="1" step="1" style="width:100%; margin:.35rem 0 .8rem" />
+      <label class="muted">Command <span class="muted">(a <code>!trigger</code> or <code>!alias</code>, with options)</span></label>
+      <input type="text" id="timer-command" maxlength="500" placeholder="e.g. !shoutout @baseca" style="width:100%; margin:.35rem 0 .8rem" />
+      <div class="toast err" id="timer-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="timer-cancel">Cancel</button>
+        <button type="button" class="pink" id="timer-save">Save</button>
+      </div>
+    </dialog>
+
+    <dialog id="tdel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+      <h2 style="margin-top:0">Delete timer?</h2>
+      <p class="muted" id="tdel-msg"></p>
+      <div class="toast err" id="tdel-toast"></div>
+      <div class="rowline" style="justify-content:flex-end; margin-top:.4rem">
+        <button type="button" class="secondary" id="tdel-cancel">Cancel</button>
+        <button type="button" class="danger" id="tdel-confirm">Delete</button>
+      </div>
+    </dialog>
 
     ${commandModalsHtml()}
 
@@ -66,7 +93,7 @@ export function commandsPage(): string {
   const script = `
     var PAGE_SIZE=50;
     // view: 'all' (all customs) | 'group:<name>' (a custom group) | 'plugin:<name>'
-    var state={ groups:[], customs:[], customGroups:[], page:0, showAll:false, canManage:false, view:'all' };
+    var state={ groups:[], customs:[], customGroups:[], timers:[], refCmds:[], page:0, showAll:false, canManage:false, view:'all' };
     // Shared custom-command row/table formatting + edit/delete modals (see
     // commandRow.ts) — the same code renders the "Commands Referencing …" table
     // and drives its edit/delete actions on the Lists page.
@@ -82,6 +109,9 @@ export function commandsPage(): string {
     async function load(){
       try{
         var d=await api('GET','/api/commands'); var all=d.commands||[];
+        // Timers power the Timers plugin view; a failure here must not stop
+        // commands from rendering.
+        try{ state.timers=((await api('GET','/api/timers')).timers)||[]; }catch(_e){ state.timers=[]; }
         state.customs=all.filter(function(c){return c.kind!=='builtin';}).sort(byName);
         for(var i=0;i<state.customs.length;i++) state.customs[i].__i=i;
         // Distinct custom groups (non-empty), sorted, with counts.
@@ -94,6 +124,7 @@ export function commandsPage(): string {
         document.getElementById('cmd-sub').textContent=all.length+' command'+(all.length===1?'':'s')+' across '+state.groups.length+' plugin'+(state.groups.length===1?'':'s')+' + '+state.customs.length+' custom.'+(state.canManage?' You can manage custom commands.':'');
         document.getElementById('new-cmd-btn').style.display = state.canManage ? '' : 'none';
         document.getElementById('new-alias-btn').style.display = state.canManage ? '' : 'none';
+        document.getElementById('new-timer-btn').style.display = state.canManage ? '' : 'none';
         document.getElementById('cmd-import-btn').style.display = state.canManage ? '' : 'none';
         document.getElementById('cmd-export-btn').style.display = state.canManage ? '' : 'none';
         renderSide(); renderMain();
@@ -132,17 +163,156 @@ export function commandsPage(): string {
       var main=document.getElementById('cmd-main');
       if(state.view.indexOf('plugin:')===0){
         document.getElementById('cmd-pager').innerHTML='';
-        var sec=state.groups.filter(function(s){return s.group===state.view.slice(7);})[0];
+        var grp=state.view.slice(7);
+        var sec=state.groups.filter(function(s){return s.group===grp;})[0];
         main.innerHTML = sec ? builtinView(sec) : '<p class="muted">Nothing here.</p>';
         wireCopy(main);
-        renderBuiltinAliases(sec); // second panel: aliases pointing at these built-ins
+        // The Timers plugin adds two extra panels: the defined-timers table, then
+        // the commands that use $(timer) variables. Other plugins show aliases
+        // pointing at their built-ins.
+        if(grp==='timers'){ renderTimersTable(); renderTimerRefs(); }
+        else { hideTimersTable(); renderBuiltinAliases(sec); }
         return;
       }
-      hideAliasPanel(); // custom views already list aliases inline
+      hideTimersTable(); hideAliasPanel(); // custom views already list aliases inline
       main.innerHTML=customView(); wireCustom(); wireCopy(main); renderPager();
     }
 
     function hideAliasPanel(){ var p=document.getElementById('cmd-aliases'); p.style.display='none'; p.innerHTML=''; }
+    function hideTimersTable(){ var p=document.getElementById('cmd-timers'); p.style.display='none'; p.innerHTML=''; }
+
+    // ── Timers plugin: defined-timers table (Loop toggle / Name / Period / Command / Actions) ──
+    function renderTimersTable(){
+      var panel=document.getElementById('cmd-timers');
+      panel.style.display='';
+      var manage=state.canManage;
+      var rows=(state.timers||[]).map(function(t,i){
+        var dis=manage?'':' disabled';
+        var loop='<label class="switch" title="'+(t.looping?'Looping — click to stop':'Not looping — click to loop')+'">'
+          +'<input type="checkbox" data-tloop="'+i+'"'+(t.looping?' checked':'')+dis+'><span class="slider"></span></label>';
+        var actions = manage
+          ? '<div class="actions-cell"><button class="secondary icon-btn" data-tedit="'+i+'" title="Edit">'+icon('pencil')+'</button>'
+            +'<button class="danger icon-btn" data-tdel="'+i+'" title="Delete">'+icon('trash-2')+'</button></div>'
+          : '<span class="muted">—</span>';
+        return '<tr><td class="col-toggle">'+loop+'</td><td><strong>'+esc(t.name)+'</strong></td>'
+          +'<td>'+String(t.periodSeconds)+'</td>'
+          +'<td class="wrap"><span class="namecopy">'+copyBtn(t.command)+'<code>'+esc(t.command)+'</code></span></td>'
+          +'<td class="col-actions">'+actions+'</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="muted">No timers yet. Create one in chat with <code>!timer add &lt;name&gt; &lt;periodSeconds&gt; &lt;!command&gt;</code>.</td></tr>';
+      panel.innerHTML='<h2 style="margin-top:0">Timers <span class="count">('+(state.timers||[]).length+')</span></h2>'
+        +'<div style="overflow-x:auto"><table><thead><tr><th class="col-toggle">Loop</th><th>Name</th><th>Period (s)</th><th class="wrap">Command</th><th class="col-actions">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      wireTimersTable(panel); wireCopy(panel);
+    }
+    function wireTimersTable(panel){
+      var q=function(sel,fn){ Array.prototype.forEach.call(panel.querySelectorAll(sel), fn); };
+      q('input[data-tloop]', function(b){ b.onchange=function(){ toggleTimerLoop(state.timers[+b.getAttribute('data-tloop')], b.checked); }; });
+      q('button[data-tedit]', function(b){ b.onclick=function(){ openTimerEdit(state.timers[+b.getAttribute('data-tedit')]); }; });
+      q('button[data-tdel]', function(b){ b.onclick=function(){ askDeleteTimer(state.timers[+b.getAttribute('data-tdel')]); }; });
+    }
+    async function toggleTimerLoop(t, on){
+      if(!t) return;
+      try{ await api('POST','/api/timers/loop',{ name:t.name, on:on }); }
+      catch(e){ alert('Could not update loop: '+e.message); }
+      await load();
+    }
+
+    // ── Timers plugin: commands that use $(timer) variables ─────────────────────
+    // Char classes (not backslash escapes) because this whole script is a template
+    // literal. Matches the timer variable in either paren or brace form.
+    function usesTimerVar(str){ return !!str && /[$][({]timer[. )}]/i.test(str); }
+    function commandsUsingTimer(){
+      var targets={};
+      state.customs.forEach(function(c){ if(c.kind==='trigger'||c.kind==='phrase') targets[String(c.name).toLowerCase()]=c; });
+      return state.customs.filter(function(c){
+        if(c.kind==='alias'){
+          if(usesTimerVar(c.args)) return true;
+          var t=c.target?targets[String(c.target).toLowerCase()]:null;
+          return !!(t && usesTimerVar(t.response));
+        }
+        return usesTimerVar(c.response);
+      }).sort(byName);
+    }
+    function renderTimerRefs(){
+      var panel=document.getElementById('cmd-aliases');
+      state.refCmds=commandsUsingTimer();
+      if(!state.refCmds.length){ hideAliasPanel(); return; }
+      for(var i=0;i<state.refCmds.length;i++) state.refCmds[i].__i=i;
+      panel.style.display='';
+      panel.innerHTML='<h2 style="margin-top:0">Commands Using $(timer) <span class="count">('+state.refCmds.length+')</span></h2>'
+        +customTableHtml(state.refCmds, 'No commands use $(timer) variables.');
+      wireTimerRefs(panel); wireCopy(panel);
+    }
+    function wireTimerRefs(panel){
+      var q=function(sel,fn){ Array.prototype.forEach.call(panel.querySelectorAll(sel), fn); };
+      var at=function(b,name){ return state.refCmds[+b.getAttribute(name)]; };
+      q('input[data-toggle]', function(b){ b.onchange=function(){ setEnabled(at(b,'data-toggle'), load, renderMain); }; });
+      q('button[data-edit]', function(b){ b.onclick=function(){ openEdit(at(b,'data-edit'), load); }; });
+      q('button[data-aedit]', function(b){ b.onclick=function(){ openAliasEdit(at(b,'data-aedit'), load); }; });
+      q('button[data-del]', function(b){ b.onclick=function(){ delCommand(at(b,'data-del'), load); }; });
+    }
+
+    // ── Timer create / edit + delete dialogs ────────────────────────────────────
+    var timerDlg=document.getElementById('timer-dlg');
+    var timerMode='edit'; // 'create' | 'edit'
+    var editingTimer=null;
+    function openTimerNew(){
+      timerMode='create'; editingTimer=null;
+      document.getElementById('timer-dlg-title').textContent='New Timer';
+      var nm=document.getElementById('timer-name'); nm.value=''; nm.disabled=false;
+      document.getElementById('timer-period').value='';
+      document.getElementById('timer-command').value='';
+      document.getElementById('timer-toast').textContent='';
+      document.getElementById('timer-save').textContent='Create';
+      if(timerDlg.showModal) timerDlg.showModal(); else timerDlg.setAttribute('open','');
+      nm.focus();
+    }
+    function openTimerEdit(t){
+      if(!t) return; timerMode='edit'; editingTimer=t;
+      document.getElementById('timer-dlg-title').textContent='Edit Timer';
+      var nm=document.getElementById('timer-name'); nm.value=t.name; nm.disabled=true;
+      document.getElementById('timer-period').value=t.periodSeconds;
+      document.getElementById('timer-command').value=t.command;
+      document.getElementById('timer-toast').textContent='';
+      document.getElementById('timer-save').textContent='Save';
+      if(timerDlg.showModal) timerDlg.showModal(); else timerDlg.setAttribute('open','');
+    }
+    document.getElementById('new-timer-btn').onclick=openTimerNew;
+    document.getElementById('timer-cancel').onclick=function(){ timerDlg.close?timerDlg.close():timerDlg.removeAttribute('open'); };
+    document.getElementById('timer-save').onclick=async function(){
+      var toast=document.getElementById('timer-toast');
+      var name=document.getElementById('timer-name').value.trim();
+      var period=parseInt(document.getElementById('timer-period').value,10);
+      var command=document.getElementById('timer-command').value.trim();
+      if(timerMode==='create'){
+        if(!name){ toast.textContent='Enter a timer name.'; return; }
+        if(name.indexOf(' ')!==-1){ toast.textContent='The name must be a single word.'; return; }
+      }
+      if(!(period>=1)){ toast.textContent='Enter a period of at least 1 second.'; return; }
+      if(command.charAt(0)!=='!'){ toast.textContent='The command must start with "!".'; return; }
+      try{
+        if(timerMode==='create'){
+          await api('POST','/api/timers/create',{ name:name, periodSeconds:period, command:command });
+          state.view='plugin:timers'; // land on the Timers view so the new timer is visible
+        } else {
+          await api('POST','/api/timers/update',{ name:editingTimer.name, periodSeconds:period, command:command });
+        }
+        timerDlg.close?timerDlg.close():timerDlg.removeAttribute('open');
+        await load();
+      }catch(e){ toast.textContent=e.message; }
+    };
+    var tdelDlg=document.getElementById('tdel-dlg');
+    var deletingTimer=null;
+    function askDeleteTimer(t){
+      if(!t) return; deletingTimer=t;
+      document.getElementById('tdel-msg').textContent='This permanently deletes the timer "'+t.name+'". This cannot be undone.';
+      document.getElementById('tdel-toast').textContent='';
+      if(tdelDlg.showModal) tdelDlg.showModal(); else tdelDlg.setAttribute('open','');
+    }
+    document.getElementById('tdel-cancel').onclick=function(){ tdelDlg.close?tdelDlg.close():tdelDlg.removeAttribute('open'); };
+    document.getElementById('tdel-confirm').onclick=async function(){
+      try{ await api('POST','/api/timers/delete',{ name:deletingTimer.name }); tdelDlg.close?tdelDlg.close():tdelDlg.removeAttribute('open'); await load(); }
+      catch(e){ document.getElementById('tdel-toast').textContent='Delete failed: '+e.message; }
+    };
 
     // A second card listing the custom aliases that target the built-in commands
     // in this plugin group (e.g. !addme -> !wheel add $(sender)). Uses the SHARED

@@ -484,6 +484,27 @@ Displays a countdown to a target UTC timestamp in ISO 8601 format.
 
 `Upcoming event in $(time.until 2024-09-20T19:00:00-03:00)`
 
+## $(timer) Variables
+Interact with named timers (created with `!timer add`) from inside a command response. See the Timers plugin.
+
+### $(timer.start <timerName>)
+Starts the named timer as a one-shot: it fires its bound command once after its period. This variable produces no visible text — it is used for its side effect. Aliases for `start`: `go`, `activate`, `begin`, `enable`.
+
+**Syntax:** `$(timer.start <timerName>)`
+
+**Example:** a command whose response arms a countdown when run
+
+`$(timer.start raidprep)Get ready — the raid train leaves soon!`
+
+### $(timer.status <timerName>)
+Returns the whole number of seconds left before the named timer next fires, or `0` if it is not running. Aliases for `status`: `remaining`, `timeleft`.
+
+**Syntax:** `$(timer.status <timerName>)`
+
+**Example:**
+
+`Next socials reminder in $(timer.status socials) seconds.`
+
 ## $(title)
 Displays a channel's current stream title.
 
