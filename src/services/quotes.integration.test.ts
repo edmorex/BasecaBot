@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { Storage } from './storage/index.js';
-import { QuotesService, QuoteError, parseQuoteDate, formatQuote, todayIso } from './quotes.js';
+import { QuotesService, QuoteError, parseQuoteDate, parseQuoteAddArgs, formatQuote, todayIso } from './quotes.js';
 import { UsersService } from './users.js';
 
 // Runs against an isolated, migrated prisma/test.db (prepared by the vitest
@@ -26,6 +26,49 @@ describe('quote helpers (unit)', () => {
     const base = { id: 5, text: 'hi', user: 'Baseca', userId: null, quotedByName: 'mod', quotedById: null, createdAt: '' };
     expect(formatQuote({ ...base, game: 'Elden Ring', date: '2024-01-02' })).toBe('Quote 5: "hi" - Baseca [Elden Ring] [2024/01/02]');
     expect(formatQuote({ ...base, game: null, date: '2024-01-02' })).toBe('Quote 5: "hi" - Baseca [2024/01/02]');
+  });
+
+  describe('parseQuoteAddArgs', () => {
+    it('parses the standard "<username> <text>" form', () => {
+      expect(parseQuoteAddArgs('Sharon I love pizza')).toEqual({ user: 'Sharon', text: 'I love pizza' });
+      expect(parseQuoteAddArgs('  @edmo   my lemon drop soured ')).toEqual({ user: '@edmo', text: 'my lemon drop soured' });
+      // Standard form doesn't start with a quote, so inner quotes are kept as text.
+      expect(parseQuoteAddArgs('Sharon "quoted text"')).toEqual({ user: 'Sharon', text: '"quoted text"' });
+    });
+
+    it('parses the alternate "<text>" - <Name> form, with any/no dash whitespace', () => {
+      const expected = { user: 'Sharon', text: 'I love pizza' };
+      expect(parseQuoteAddArgs('"I love pizza" - Sharon')).toEqual(expected);
+      expect(parseQuoteAddArgs('"I love pizza"-Sharon')).toEqual(expected);
+      expect(parseQuoteAddArgs('"I love pizza" -Sharon')).toEqual(expected);
+      expect(parseQuoteAddArgs('"I love pizza"- Sharon')).toEqual(expected);
+    });
+
+    it('supports a multi-word quoter name', () => {
+      expect(parseQuoteAddArgs('"get fucked, dude!" - all of us')).toEqual({ user: 'all of us', text: 'get fucked, dude!' });
+    });
+
+    it('keeps a dash that appears inside the quoted text', () => {
+      expect(parseQuoteAddArgs('"a quote - with a dash" - Bob')).toEqual({ user: 'Bob', text: 'a quote - with a dash' });
+    });
+
+    it('handles curly quotes and en/em dashes', () => {
+      expect(parseQuoteAddArgs('“curly quote” — Ed')).toEqual({ user: 'Ed', text: 'curly quote' });
+      expect(parseQuoteAddArgs('‘single curly’ – Ed')).toEqual({ user: 'Ed', text: 'single curly' });
+    });
+
+    // A leading quote signals the attributed form; anything malformed aborts
+    // rather than being mis-read as "username = <opening quote word>".
+    it('throws when a leading-quote input is not a valid attribution', () => {
+      for (const bad of ['"just a quote, no name"', '"text" - ', '"" - Bob', '"unterminated - Bob']) {
+        expect(() => parseQuoteAddArgs(bad), bad).toThrow(QuoteError);
+      }
+    });
+
+    it('throws when the standard form is missing text', () => {
+      expect(() => parseQuoteAddArgs('Sharon')).toThrow(QuoteError);
+      expect(() => parseQuoteAddArgs('   ')).toThrow(QuoteError);
+    });
   });
 });
 
@@ -233,6 +276,20 @@ run('QuotesService attribution (integration)', () => {
     expect(await quotes.searchUser('Speedy')).toMatchObject({ text: 'linked' });
     expect(await quotes.searchUser('a caller')).toMatchObject({ text: 'unlinked' });
     expect(await quotes.searchUser('nobody at all')).toBeNull();
+  });
+
+  it('counts quotes: total, by text search, and by user', async () => {
+    await users.addAlias(SPEAKER, 'Speedy');
+    await quotes.add({ user: '@speaker', text: 'I love pizza' }, ADDER);
+    await quotes.add({ user: '@speaker', text: 'pizza again' }, ADDER);
+    await quotes.add({ user: 'a caller', text: 'no food here' }, ADDER);
+
+    expect(await quotes.count()).toBe(3);
+    expect(await quotes.countText('pizza')).toBe(2);
+    expect(await quotes.countText('nothing')).toBe(0);
+    expect(await quotes.countUser('Speedy')).toBe(2); // linked, resolved via alias
+    expect(await quotes.countUser('a caller')).toBe(1); // unlinked snapshot
+    await expect(quotes.countText('   ')).rejects.toBeInstanceOf(QuoteError); // blank term
   });
 
   // Regression: searching a user whose display name is a SUBSTRING of another

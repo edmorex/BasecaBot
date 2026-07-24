@@ -2,7 +2,7 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
-import { QuoteError, formatQuote, type QuoteView } from '../../services/quotes.js';
+import { QuoteError, formatQuote, parseQuoteAddArgs, type QuoteView } from '../../services/quotes.js';
 
 /** Split the leading token (usually a quote ID) from the remaining text. */
 function firstAndRest(input: string): { first: string; rest: string } {
@@ -95,22 +95,23 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               await say(
                 e.channel,
-                'Quotes: "!quote" shows a random quote · "!quote <id>" shows a specific one · ' +
-                  '"!quote add <username> <text>" adds one (subs+). See them all at https://bot.edmorex.com/quotes',
+                'Quotes: !quote shows a random quote · !quote <id> shows a specific one · ' +
+                  'add one (subs+) with: !quote add <username> <text>  OR  !quote add "text" - Name. See them all at https://bot.edmorex.com/quotes',
               );
             }),
           },
           add: {
             description:
-              'Add a new quote: !quote add <username> <quote text>. The name can be an @handle, display name, or alias.',
+              'Add a new quote: !quote add <username> <quote text>, or !quote add "quote text" - Name. The name can be an @handle, display name, or alias.',
             usage: '<username> <quoteText>',
             permission: PermissionLevel.Subscriber,
             handler: guard(async (e) => {
-              const { first, rest } = firstAndRest(e.argString);
-              if (!first || !rest.trim()) throw new QuoteError('Usage: !quote add <username> <quote text>');
+              // Accepts the standard `<username> <text>` and the alternate
+              // `"text" - Name` form; throws a QuoteError on an unparseable input.
+              const { user, text } = parseQuoteAddArgs(e.argString);
               await ctx.users.touch(e.user);
               const game = await currentGame();
-              const quote = await svc.add({ user: first, text: rest, game }, { id: e.user.id, displayName: e.user.displayName });
+              const quote = await svc.add({ user, text, game }, { id: e.user.id, displayName: e.user.displayName });
               await say(e.channel, `Added ${formatQuote(quote)}`);
             }),
           },
@@ -181,6 +182,33 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const q = await svc.searchGame(e.argString);
               await say(e.channel, q ? formatQuote(q) : 'No quotes from that game.');
+            }),
+          },
+          count: {
+            description: 'Say how many quotes are saved.',
+            handler: guard(async (e) => {
+              const n = await svc.count();
+              await say(e.channel, `There ${n === 1 ? 'is' : 'are'} ${n} quote${n === 1 ? '' : 's'} saved.`);
+            }),
+          },
+          searchcount: {
+            description: 'Say how many quotes match the search term(s).',
+            usage: '<searchTerm>',
+            aliases: ['aboutcount'],
+            handler: guard(async (e) => {
+              const term = e.argString.trim();
+              const n = await svc.countText(term);
+              await say(e.channel, `${n} quote${n === 1 ? '' : 's'} match “${term}”.`);
+            }),
+          },
+          searchusercount: {
+            description: 'Say how many quotes are attributed to the given user.',
+            usage: '<username>',
+            aliases: ['bycount'],
+            handler: guard(async (e) => {
+              const who = e.argString.trim();
+              const n = await svc.countUser(who);
+              await say(e.channel, `${n} quote${n === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} attributed to ${who}.`);
             }),
           },
         },

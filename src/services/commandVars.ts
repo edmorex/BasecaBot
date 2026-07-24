@@ -278,6 +278,12 @@ const RESOLVERS: Record<string, Resolver> = {
   sender: senderResolver,
   source: senderResolver,
 
+  // First non-empty argument, e.g. $(default $(1) $(sender)). Nested variables
+  // resolve first, so an absent $(1) collapses to nothing and the next value
+  // wins — the coalesce/"use X, else Y" primitive. `first` is a synonym.
+  default: firstOf,
+  first: firstOf,
+
   user: async (a) => {
     const t = await resolveUser(a.tokens[0], a);
     if (a.subs[0] === 'name') return t.login;
@@ -341,10 +347,29 @@ const RESOLVERS: Record<string, Resolver> = {
 
   pointsname: ({ deps }) => deps.pointsName,
 
-  quote: async ({ tokens, deps }) => {
-    const idTok = tokens[0];
-    const q = idTok && /^\d+$/.test(idTok) ? await deps.quotes.getById(Number(idTok)) : await deps.quotes.random();
-    return q ? formatQuote(q) : '';
+  quote: async ({ subs, rest, tokens, deps }) => {
+    const fmt = (q: Awaited<ReturnType<typeof deps.quotes.random>>) => (q ? formatQuote(q) : '');
+    switch (subs[0]) {
+      case 'search':
+      case 'about':
+        return rest ? fmt(await deps.quotes.searchText(rest)) : '';
+      case 'searchuser':
+      case 'by':
+        return rest ? fmt(await deps.quotes.searchUser(rest)) : '';
+      case 'count':
+        return String(await deps.quotes.count());
+      case 'searchcount':
+      case 'aboutcount':
+        return rest ? String(await deps.quotes.countText(rest)) : '';
+      case 'searchusercount':
+      case 'bycount':
+        return rest ? String(await deps.quotes.countUser(rest)) : '';
+      default: {
+        // $(quote) random, or $(quote <id>).
+        const idTok = tokens[0];
+        return fmt(idTok && /^\d+$/.test(idTok) ? await deps.quotes.getById(Number(idTok)) : await deps.quotes.random());
+      }
+    }
   },
 
   random: async ({ subs, rest, tokens, live }) => {
@@ -406,6 +431,11 @@ function senderResolver({ subs, ctx, deps }: ResolverArgs): string | Promise<str
   if (subs[0] === 'name') return ctx.sender.login;
   if (subs[0] === 'points') return deps.points.getBalance(ctx.sender.id).then(String);
   return ctx.sender.displayName;
+}
+
+/** $(default a b …) / $(first a b …) — the first non-empty argument, else ''. */
+function firstOf({ tokens }: ResolverArgs): string {
+  return tokens.find((t) => t !== '') ?? '';
 }
 
 /** $(1), $(2.emote), $(3.word) — a numeric argument index with an optional filter. */

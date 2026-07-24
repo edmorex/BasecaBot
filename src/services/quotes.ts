@@ -105,6 +105,45 @@ export function formatQuote(q: QuoteView): string {
   return `Quote ${q.id}: "${q.text}" - ${q.user}${game}${date}`;
 }
 
+// Straight and curly quote characters, and hyphen/en-dash/em-dash separators.
+const QUOTE_CHARS = '"\'“”‘’';
+const ATTRIBUTED_RE = new RegExp(
+  `^[${QUOTE_CHARS}]([\\s\\S]+)[${QUOTE_CHARS}]\\s*[-\\u2013\\u2014]\\s*(\\S[\\s\\S]*)$`,
+);
+
+/**
+ * Parse the argument string of `!quote add` into a `{ user, text }` pair. Two
+ * accepted forms:
+ *
+ *   - Standard:    `<username> <quote text>`
+ *   - Attributed:  `"<quote text>" - <QuoterName>`
+ *
+ * The attributed form is recognized by a leading quote character; the quote text
+ * must be wrapped in quotes, the dash may carry any/no surrounding whitespace,
+ * and the name may be several words (e.g. "all of us"). Because a leading quote
+ * signals clear intent, an input that starts with a quote but doesn't match the
+ * attributed shape throws rather than being mis-read as the standard form.
+ */
+export function parseQuoteAddArgs(argString: string): { user: string; text: string } {
+  const s = argString.trim();
+
+  if (QUOTE_CHARS.includes(s[0] ?? '')) {
+    const m = ATTRIBUTED_RE.exec(s);
+    if (!m) {
+      throw new QuoteError(
+        'To attribute a quote, use: !quote add "quote text" - Name  (or the standard !quote add <username> <quote text>).',
+      );
+    }
+    return { user: m[2]!.trim(), text: m[1]!.trim() };
+  }
+
+  const i = s.indexOf(' ');
+  const user = i === -1 ? s : s.slice(0, i);
+  const text = i === -1 ? '' : s.slice(i + 1).trim();
+  if (!user || !text) throw new QuoteError('Usage: !quote add <username> <quote text>');
+  return { user, text };
+}
+
 /**
  * Owns quotes: CRUD used by the chat `!quote` manager and the dashboard, plus
  * the random/search lookups. `id` is the public quote number. Callers that pass
@@ -243,26 +282,46 @@ export class QuotesService {
     return this.randomWhere({});
   }
 
-  async searchText(term: string): Promise<QuoteView | null> {
+  /** Where-filter for quotes whose text contains `term`. */
+  private textWhere(term: string): Record<string, unknown> {
     if (!term.trim()) throw new QuoteError('Provide a search term.');
-    return this.randomWhere({ text: { contains: term.trim() } });
+    return { text: { contains: term.trim() } };
   }
 
   /**
-   * A random quote by the given person, found under any of their names. Linked
-   * quotes match on id — so they're found even if the person has since renamed —
-   * while the name is still matched against the stored snapshot to catch quotes
-   * that were never linked (guests, imports).
+   * Where-filter for quotes attributed to a person. Resolved to a real account →
+   * their quotes are exactly the ones LINKED to it. A substring match on the
+   * display name would be wrong ("Ed" is a substring of "Teledahn", so `contains`
+   * would pull in unrelated people); only an unlinked name (a guest, with no id)
+   * falls back to the stored snapshot.
    */
-  async searchUser(user: string): Promise<QuoteView | null> {
+  private async userWhere(user: string): Promise<Record<string, unknown>> {
     const quoted = await this.resolveQuoted(user);
-    // Resolved to a real account → their quotes are exactly the ones LINKED to
-    // it. A substring match on the display name is wrong here: "Ed" is a
-    // substring of "Teledahn", so `contains` would pull in unrelated people.
-    // Only an unlinked name (a guest, with no id) falls back to the snapshot.
-    return this.randomWhere(
-      quoted.id ? { quotedUserId: quoted.id } : { quotedUser: { contains: quoted.name } },
-    );
+    return quoted.id ? { quotedUserId: quoted.id } : { quotedUser: { contains: quoted.name } };
+  }
+
+  async searchText(term: string): Promise<QuoteView | null> {
+    return this.randomWhere(this.textWhere(term));
+  }
+
+  /** A random quote by the given person, found under any of their names. */
+  async searchUser(user: string): Promise<QuoteView | null> {
+    return this.randomWhere(await this.userWhere(user));
+  }
+
+  /** Total number of quotes. */
+  async count(): Promise<number> {
+    return this.db.quote.count();
+  }
+
+  /** How many quotes contain `term` in their text. */
+  async countText(term: string): Promise<number> {
+    return this.db.quote.count({ where: this.textWhere(term) });
+  }
+
+  /** How many quotes are attributed to the given person. */
+  async countUser(user: string): Promise<number> {
+    return this.db.quote.count({ where: await this.userWhere(user) });
   }
 
   async searchGame(term: string): Promise<QuoteView | null> {

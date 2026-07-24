@@ -180,6 +180,38 @@ Returns the new use count of a !command.
 
 `!current_deaths the death count is currently at $(count !death)`
 
+## $(default) / $(first)
+Returns the first of its arguments that isn't empty — a "use this, otherwise
+that" fallback. `$(first)` is a synonym for `$(default)`.
+
+**Syntax:** `$(default <value1> <value2> [value3 …])`
+
+**Parameters:**
+- One or more values, checked left to right. The first non-empty one is returned;
+  if all are empty, the result is empty. Values are usually other variables (an
+  argument, `$(sender)`, `$(game)`, …) or literal text.
+
+**Example (address the given user, or the sender if none was given):**
+
+`!compliment Hey $(default $(1) $(sender)), you're doing great!`
+
+**Output:**
+
+`!compliment` → `Hey Styler, you're doing great!`
+`!compliment Alice` → `Hey Alice, you're doing great!`
+
+**Example (a literal fallback):**
+
+`Now playing $(default $(game) "something fun")`
+
+> **Multi-word values must be quoted.** Each value is treated as a single token,
+> so a fallback phrase with spaces needs quotes (`"something fun"`), and to keep
+> spaces from a multi-word variable, quote it too: `$(default "$(args)" "nothing")`.
+
+> **Tip:** for the common "address a user or the sender" case you can also just
+> use `$(user $(1))` — the `$(user …)` variable already falls back to the sender
+> when no name is given (see [$(user) Variables](#user-variables)).
+
 ## $(game)
 Displays the game/category currently set on a channel.
 
@@ -260,7 +292,10 @@ URL-encodes a string for use in a *query string*. Spaces become plus signs and s
 
 `https://www.youtube.com/results?search_query=funny+cat+videos`
 
-## $(quote)
+## $(quote) Variables
+Access saved quotes: display one, search for a random match, or count them.
+
+### $(quote)
 Returns a saved quote — random by default, or a specific one by ID.
 
 **Syntax:** `$(quote [quoteID])`
@@ -271,6 +306,51 @@ Returns a saved quote — random by default, or a specific one by ID.
 **Example:**
 
 `$(quote 3)`
+
+### $(quote.search <searchTerm>)
+Returns a random quote whose text contains `searchTerm`, or blank if none match.
+
+**Alias:** `$(quote.about <searchTerm>)`
+
+**Example:**
+
+`$(quote.search pizza)`
+
+### $(quote.searchuser <username>)
+Returns a random quote attributed to `username`, or blank if none. The name may
+be an @handle, display name, or alias; a multi-word name (e.g. a guest) is
+matched as entered.
+
+**Alias:** `$(quote.by <username>)`
+
+**Example:**
+
+`$(quote.by Sharon)`
+
+### $(quote.count)
+Returns the total number of saved quotes.
+
+**Example:**
+
+`We have $(quote.count) quotes on record!`
+
+### $(quote.searchcount <searchTerm>)
+Returns the number of quotes whose text contains `searchTerm`.
+
+**Alias:** `$(quote.aboutcount <searchTerm>)`
+
+**Example:**
+
+`$(quote.searchcount pizza) quotes mention pizza.`
+
+### $(quote.searchusercount <username>)
+Returns the number of quotes attributed to `username`.
+
+**Alias:** `$(quote.bycount <username>)`
+
+**Example:**
+
+`$(quote.searchusercount Sharon) quotes are attributed to Sharon.`
 
 ## $(random) Variables
 The random variables generate randomized content: numbers, emotes, chatters, and picks from a list.
@@ -441,6 +521,14 @@ The $(user) variables access user-related information: display names, loyalty po
 
 - Without argument: `$(user)` refers to the command sender
 - With argument: `$(user username)` refers to the named user
+
+**Address an argument, or the sender if none was given:** pass `$(1)` as the
+argument — `$(user $(1))`. When the command is used with no argument, `$(1)` is
+empty and `$(user)` falls back to the sender:
+
+`!hug $(sender) gives $(user $(1)) a big hug!`
+
+`!hug` → `Styler gives Styler a big hug!` · `!hug Alice` → `Styler gives Alice a big hug!`
 
 ### $(user)
 Displays the user's display name.

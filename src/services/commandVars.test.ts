@@ -15,6 +15,11 @@ function makeDeps(over: Partial<VarDeps> = {}): VarDeps {
     quotes: {
       getById: async (n: number) => ({ id: n, text: 'hi', user: 'baseca', game: 'Elden Ring', date: '2024-01-02', quotedByName: 'm', createdAt: '' }),
       random: async () => ({ id: 7, text: 'rand', user: 'baseca', game: null, date: '2024-05-06', quotedByName: 'm', createdAt: '' }),
+      searchText: async (t: string) => (t === 'pizza' ? { id: 3, text: 'about pizza', user: 'baseca', game: null, date: '2024-01-02', quotedByName: 'm', createdAt: '' } : null),
+      searchUser: async (u: string) => (u === 'Ed' ? { id: 4, text: 'by Ed', user: 'Ed', game: null, date: '2024-01-02', quotedByName: 'm', createdAt: '' } : null),
+      count: async () => 42,
+      countText: async (t: string) => (t === 'pizza' ? 5 : 0),
+      countUser: async (u: string) => (u === 'Ed' ? 9 : 0),
     },
     lists: {
       displayNameOf: async (r: string) => (r === 'games' ? 'Completed Games' : null),
@@ -59,6 +64,17 @@ describe('CommandVarEngine — args', () => {
   it('$(n.word) and $(n.emote) filters', async () => {
     expect(await render('$(1.word)')).toBe('Alice');
     expect(await render('$(1.word)', ctx({ args: ['a!b'] }))).toBe(''); // has a symbol
+  });
+  it('$(default) / $(first) — first non-empty argument', async () => {
+    // The reported use case: address the arg if given, else the sender.
+    expect(await render('$(default $(1) $(sender))')).toBe('Alice'); // arg present
+    expect(await render('$(default $(1) $(sender))', ctx({ args: [], argString: '' }))).toBe('Styler'); // arg absent → sender
+    expect(await render('$(first $(1) $(sender))', ctx({ args: [], argString: '' }))).toBe('Styler'); // synonym
+    // Literal fallbacks; explicit empty quotes are skipped; quotes preserve spaces.
+    expect(await render('$(default $(9) fallback)')).toBe('fallback');
+    expect(await render('$(default "" $(sender))')).toBe('Styler');
+    expect(await render('$(default $(9) "a whole phrase")')).toBe('a whole phrase');
+    expect(await render('$(default)')).toBe(''); // no args → empty
   });
 });
 
@@ -111,6 +127,21 @@ describe('CommandVarEngine — math/escape/repeat/random', () => {
 describe('CommandVarEngine — quote/list', () => {
   it('quote by id (formatted)', async () => {
     expect(await render('$(quote 3)')).toBe('Quote 3: "hi" - baseca [Elden Ring] [2024/01/02]');
+  });
+  it('quote search/searchuser variants (with about/by aliases) + counts', async () => {
+    expect(await render('$(quote.search pizza)')).toBe('Quote 3: "about pizza" - baseca [2024/01/02]');
+    expect(await render('$(quote.about pizza)')).toBe('Quote 3: "about pizza" - baseca [2024/01/02]'); // alias
+    expect(await render('$(quote.search nope)')).toBe(''); // no match → blank
+    expect(await render('$(quote.searchuser Ed)')).toBe('Quote 4: "by Ed" - Ed [2024/01/02]');
+    expect(await render('$(quote.by Ed)')).toBe('Quote 4: "by Ed" - Ed [2024/01/02]'); // alias
+    expect(await render('$(quote.by nobody)')).toBe(''); // no match → blank
+    expect(await render('$(quote.count)')).toBe('42');
+    expect(await render('$(quote.searchcount pizza)')).toBe('5');
+    expect(await render('$(quote.aboutcount pizza)')).toBe('5'); // alias
+    expect(await render('$(quote.searchcount nope)')).toBe('0');
+    expect(await render('$(quote.searchusercount Ed)')).toBe('9');
+    expect(await render('$(quote.bycount Ed)')).toBe('9'); // alias
+    expect(await render('$(quote.searchcount)')).toBe(''); // no term → blank
   });
   it('list name, nth entry, and random entry', async () => {
     expect(await render('$(list games)')).toBe('Completed Games');
