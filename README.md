@@ -70,6 +70,21 @@ push results back to chat. The live example is **BasecaWheel** — chat runs
 `!wheel add`/`!wheel spin` and the wheel page (`webapps/baseca-wheel/`) reacts.
 See **[docs/basecawheel-integration.md](docs/basecawheel-integration.md)**.
 
+### OBS overlays
+
+Browser-source overlays (StreamElements/StreamLabs style) receive events the same
+way, but authenticate with a dedicated **read-only** token (`OVERLAY_TOKEN`) since
+a browser source can't log in. That token only grants *receive* access to the hub
+and read-only overlay APIs — it can never send or mutate. The URL carries the
+token, so keep it private (don't show it on stream).
+
+The first overlay is the **First results** board (live top-10 + a top-3 podium
+with avatars): add a Browser Source pointed at
+`<PUBLIC_URL>/overlays/first?token=<OVERLAY_TOKEN>`. The admin dashboard's
+**Overlays** section shows the ready-to-copy URL. Data comes from
+`GET /api/overlay/first` (initial snapshot) + live pushes to the hub's `first`
+room; the [first plugin](src/plugins/first/index.ts) broadcasts each check-in.
+
 ## Testing
 
 ```bash

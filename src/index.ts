@@ -71,6 +71,7 @@ async function main(): Promise<void> {
   const ws = new WsHub(bus, {
     port: config.ws.port,
     secret: config.ws.secret,
+    overlayToken: config.overlayToken,
     channel: config.twitch.channel,
   });
   ws.start();
@@ -81,7 +82,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────

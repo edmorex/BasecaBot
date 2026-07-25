@@ -1,6 +1,6 @@
 import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
-import type { CommandEvent } from '../../core/events.js';
+import type { CommandEvent, EventUser } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
 import type { CheckInResult, LeaderRow } from '../../services/first.js';
 
@@ -79,6 +79,21 @@ export function firstPlugin(): Plugin {
         time: { title: 'Fastest average check-in', fetch: () => ctx.first.topTime(), fmt: (v) => `${v.toFixed(1)}s` },
       };
 
+      // Fetch the checker-in's Twitch avatar (so the overlay podium can show it),
+      // persist it for later snapshots, then broadcast the standing to the "first"
+      // overlay room. Best-effort: a missing avatar just broadcasts null.
+      const broadcastCheckin = async (streamKey: string, place: number, timeSeconds: number, u: EventUser) => {
+        let avatarUrl: string | null = null;
+        try {
+          const hu = await ctx.api.users.getUserById(u.id);
+          avatarUrl = hu?.profilePictureUrl ?? null;
+          if (avatarUrl) await ctx.users.touch({ id: u.id, login: u.login, displayName: u.displayName, avatarUrl });
+        } catch (err) {
+          ctx.logger.debug({ err, user: u.login }, 'first: overlay avatar fetch failed');
+        }
+        ctx.ws.broadcast('first', 'checkin', { streamKey, place, name: u.displayName, avatarUrl, timeSeconds });
+      };
+
       ctx.commands.registerGroup('first', {
         description:
           'Race to be FIRST when the stream goes live! "!first" checks you in. "!first top [firsts|points|time]" shows a leaderboard; "!first stats [user]" shows a player\'s stats.',
@@ -100,6 +115,12 @@ export function firstPlugin(): Plugin {
           const seconds = Math.max(0, Math.floor((Date.now() - stream.startDate.getTime()) / 1000));
           const result = await ctx.first.checkIn(e.user.id, streamKey, seconds);
           await say(e.channel, checkinMessage(e.user.displayName, result));
+
+          // Push the top-10 standings to the OBS overlay. Done after the chat
+          // reply and off the hot path (an avatar fetch shouldn't slow the race).
+          if (!result.repeat && result.place <= 10) {
+            void broadcastCheckin(streamKey, result.place, result.timeSeconds, e.user);
+          }
         },
 
         subcommands: {

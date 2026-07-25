@@ -97,6 +97,7 @@ export function adminPage(): string {
     var SECTIONS = [
       { id: 'users', label: 'Users' },
       { id: 'eventsim', label: 'EventSimulator' },
+      { id: 'overlays', label: 'Overlays' },
     ];
     var section = 'users';
     var users = [];
@@ -385,7 +386,45 @@ export function adminPage(): string {
     function render() {
       renderSide();
       if (section === 'users') renderUsers();
+      else if (section === 'overlays') renderOverlays();
       else renderSim();
+    }
+
+    // ── Overlays: reveal the OBS browser-source URLs (read-only token) ───────────
+    async function renderOverlays() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Add these as Browser Sources in OBS.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Overlays</h2><p class="muted">Loading…</p>';
+      try {
+        var d = await api('GET', '/api/admin/overlays');
+        if (!d.configured) {
+          main.innerHTML = '<h2>Overlays</h2><p class="muted">No overlay token is set. Add <code>OVERLAY_TOKEN</code> to the bot .env file and restart to enable read-only OBS overlays.</p>';
+          return;
+        }
+        var rows = (d.overlays || []).map(function (o) {
+          return '<div class="card" style="margin:0 0 1rem">' +
+            '<h3 style="margin:0 0 .4rem">' + esc(o.name) + '</h3>' +
+            '<div class="rowline" style="gap:.5rem; align-items:center; flex-wrap:nowrap">' +
+              '<input type="text" readonly value="' + esc(o.url) + '" id="ov-' + esc(o.id) + '" style="flex:1" />' +
+              '<button type="button" class="pink" data-copy="ov-' + esc(o.id) + '">Copy</button>' +
+            '</div></div>';
+        }).join('');
+        main.innerHTML = '<h2>Overlays</h2>' +
+          '<p class="muted">Each URL carries your read-only overlay token — treat it as a secret and <strong>do not show it on stream</strong>. Add each as a Browser Source in OBS (transparent background).</p>' +
+          rows;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-copy]'), function (b) {
+          b.onclick = function () {
+            var inp = document.getElementById(b.getAttribute('data-copy'));
+            inp.select();
+            if (navigator.clipboard) navigator.clipboard.writeText(inp.value);
+            b.textContent = 'Copied!';
+            setTimeout(function () { b.textContent = 'Copy'; }, 1200);
+          };
+        });
+      } catch (e) {
+        main.innerHTML = '<h2>Overlays</h2><p class="muted">Could not load overlays: ' + esc(e.message) + '</p>';
+      }
     }
 
     window.onMe = async function (me) {

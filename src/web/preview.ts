@@ -7,6 +7,7 @@ import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
+import { firstOverlayPage } from './pages/overlayFirst.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import type { ServiceContext } from '../core/serviceContext.js';
@@ -203,6 +204,18 @@ const mockTimers: MockTimer[] = [
 ];
 const timerByName = (n: string) => mockTimers.find((t) => t.name === String(n).toLowerCase().trim());
 
+// Mock !first race snapshot (exercises the OBS overlay page).
+const mockFirstRace = {
+  streamKey: '2026-07-25T18:00:00.000Z',
+  entries: [
+    { place: 1, name: 'Baseca', avatarUrl: AVATAR('998f01ae-def8-11e9-b95c-784f43822e80'), timeSeconds: 4 },
+    { place: 2, name: 'ModMandy', avatarUrl: AVATAR('ead5c8b2-a4c9-4724-b1dd-9f00b46cbd3d'), timeSeconds: 9 },
+    { place: 3, name: 'ViewerVince', avatarUrl: null, timeSeconds: 15 },
+    { place: 4, name: 'SubSam', avatarUrl: null, timeSeconds: 22 },
+    { place: 5, name: 'LurkerLyle', avatarUrl: null, timeSeconds: 41 },
+  ],
+};
+
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
 const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
@@ -252,6 +265,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/lists') return html(listsPage());
     if (p === '/quotes') return html(quotesPage());
     if (p === '/admin') return html(adminPage());
+    if (p === '/overlays/first') return html(firstOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
@@ -264,6 +278,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     }
     if (p === '/api/lists') return json(200, { lists: mockLists });
     if (p === '/api/timers') return json(200, { timers: mockTimers });
+    if (p === '/api/overlay/first') return json(200, mockFirstRace);
+    if (p === '/api/admin/overlays') {
+      const base = 'http://localhost:' + PORT;
+      return json(200, { configured: true, token: 'preview-token', overlays: [{ id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' }] });
+    }
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];

@@ -24,6 +24,7 @@ describe('first plugin', () => {
     statsFor: ReturnType<typeof vi.fn>;
   };
   let getStreamByUserId: ReturnType<typeof vi.fn>;
+  let broadcast: ReturnType<typeof vi.fn>;
 
   const LIVE = { startDate: new Date(Date.now() - 42_000) }; // 42s ago
 
@@ -38,6 +39,7 @@ describe('first plugin', () => {
       statsFor: vi.fn(async () => null),
     };
     getStreamByUserId = vi.fn(async () => LIVE);
+    broadcast = vi.fn();
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
@@ -47,8 +49,12 @@ describe('first plugin', () => {
       chat: chatSvc,
       first,
       users: { touch: vi.fn(), resolveUserRef: vi.fn(async () => ({ kind: 'none' })) },
+      ws: { broadcast },
       api: {
-        users: { getUserByName: vi.fn(async () => ({ id: 'b1' })) },
+        users: {
+          getUserByName: vi.fn(async () => ({ id: 'b1' })),
+          getUserById: vi.fn(async () => ({ profilePictureUrl: 'https://cdn/pic.png' })),
+        },
         streams: { getStreamByUserId },
       },
       config: { twitch: { broadcasterUsername: 'test' } },
@@ -88,6 +94,22 @@ describe('first plugin', () => {
     first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
     await run('!first');
     expect(last()).toBe('Congratulations Alice! You are FIRST! You clocked in at 42 seconds.');
+  });
+
+  it('broadcasts the check-in to the "first" overlay room with an avatar', async () => {
+    first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
+    await run('!first');
+    await new Promise((r) => setTimeout(r, 0)); // let the async avatar fetch + broadcast settle
+    expect(broadcast).toHaveBeenCalledWith('first', 'checkin', expect.objectContaining({
+      place: 1, name: 'Alice', timeSeconds: 42, avatarUrl: 'https://cdn/pic.png',
+    }));
+  });
+
+  it('does not broadcast a repeat claim', async () => {
+    first.checkIn.mockResolvedValue({ repeat: true });
+    await run('!first');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(broadcast).not.toHaveBeenCalled();
   });
 
   it('needles a 2nd-placer, pluralizing correctly (1 person / was)', async () => {

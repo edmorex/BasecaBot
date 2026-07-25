@@ -25,6 +25,21 @@ export interface LeaderRow {
   value: number;
 }
 
+/** One check-in in the current race, for the live overlay. */
+export interface RaceEntry {
+  place: number;
+  name: string;
+  avatarUrl: string | null;
+  timeSeconds: number;
+}
+
+/** A snapshot of the current (most recent) race's standings. */
+export interface RaceSnapshot {
+  /** The stream/race key, or null if no one has ever checked in. */
+  streamKey: string | null;
+  entries: RaceEntry[];
+}
+
 /** A user's stats with their 1-based rank among all players for each metric. */
 export interface FirstStatWithRanks extends FirstStatView {
   ranks: {
@@ -93,6 +108,30 @@ export class FirstService {
     }
 
     return { repeat: false, place, timeSeconds: row!.timeSeconds, points };
+  }
+
+  /**
+   * The current race's standings for the live overlay: the top `limit` check-ins
+   * (by place) of the MOST RECENT race, with each user's display name + avatar.
+   * "Most recent" = the streamKey of the latest check-in, so it follows the
+   * active stream and resets to the new race on its first `!first`.
+   */
+  async currentRace(limit = 10): Promise<RaceSnapshot> {
+    const latest = await this.db.firstCheckin.findFirst({
+      orderBy: { id: 'desc' }, // autoincrement — the most recently inserted check-in
+      select: { streamKey: true },
+    });
+    if (!latest) return { streamKey: null, entries: [] };
+    const rows = await this.db.firstCheckin.findMany({
+      where: { streamKey: latest.streamKey },
+      orderBy: { place: 'asc' },
+      take: limit,
+      include: { user: { select: { displayName: true, avatarUrl: true } } },
+    });
+    return {
+      streamKey: latest.streamKey,
+      entries: rows.map((r) => ({ place: r.place, name: r.user.displayName, avatarUrl: r.user.avatarUrl, timeSeconds: r.timeSeconds })),
+    };
   }
 
   /** Every player's stats (small table — fetched whole for ranking/leaderboards). */

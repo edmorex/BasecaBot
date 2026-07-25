@@ -15,6 +15,13 @@ export interface WsEnvelope {
 interface HubOptions {
   port: number;
   secret: string;
+  /**
+   * Optional read-only token (OBS overlays). A client that connects with this
+   * instead of `secret` may JOIN a room and RECEIVE broadcasts, but its inbound
+   * messages are dropped — it can never publish to the bus. Undefined = no
+   * read-only access.
+   */
+  overlayToken?: string;
   /** Channel to attach inbound app messages to when publishing BotEvents. */
   channel: string;
 }
@@ -67,7 +74,10 @@ export class WsHub {
 
   private onConnection(socket: WebSocket, url: string): void {
     const params = new URLSearchParams(url.split('?')[1] ?? '');
-    if (params.get('secret') !== this.opts.secret) {
+    const provided = params.get('secret');
+    const full = provided === this.opts.secret;
+    const readOnly = !full && !!this.opts.overlayToken && provided === this.opts.overlayToken;
+    if (!full && !readOnly) {
       log.warn('rejected ws connection: bad secret');
       socket.close(4001, 'unauthorized');
       return;
@@ -79,9 +89,11 @@ export class WsHub {
     }
 
     this.join(room, socket);
-    log.info({ room }, 'app connected to room');
+    log.info({ room, readOnly }, 'app connected to room');
 
-    socket.on('message', (raw) => this.onMessage(room, raw.toString()));
+    // A read-only (overlay) client can only receive; ignore anything it sends so
+    // it can never publish to the bus.
+    if (!readOnly) socket.on('message', (raw) => this.onMessage(room, raw.toString()));
     socket.on('close', () => this.leave(room, socket));
     socket.on('error', (err) => log.error({ err, room }, 'ws socket error'));
   }

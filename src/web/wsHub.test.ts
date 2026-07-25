@@ -72,4 +72,44 @@ describe('WsHub (integration)', () => {
 
     client.close();
   });
+
+  it('accepts the read-only overlay token but drops its inbound messages', async () => {
+    const bus = new EventBus();
+    const onWs = vi.fn();
+    bus.on('wsMessage', onWs);
+
+    hub = new WsHub(bus, { port: PORT, secret: SECRET, overlayToken: 'ovl', channel: 'mychannel' });
+    hub.start();
+
+    // Connects with the overlay token (not the full secret).
+    const overlay = await connect(`?room=${ROOM}&secret=ovl`);
+
+    // Still receives broadcasts…
+    const received = new Promise<WsEnvelope>((resolve) => {
+      overlay.on('message', (raw) => resolve(JSON.parse(raw.toString())));
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    hub.broadcast(ROOM, 'checkin', { place: 1 });
+    expect(await received).toMatchObject({ type: 'checkin', payload: { place: 1 } });
+
+    // …but anything it sends is ignored (never published to the bus).
+    overlay.send(JSON.stringify({ type: 'evil', room: ROOM, payload: {} }));
+    await new Promise((r) => setTimeout(r, 40));
+    expect(onWs).not.toHaveBeenCalled();
+
+    overlay.close();
+  });
+
+  it('rejects the overlay token when none is configured', async () => {
+    const bus = new EventBus();
+    hub = new WsHub(bus, { port: PORT, secret: SECRET, channel: 'test' });
+    hub.start();
+
+    const closeCode = await new Promise<number>((resolve) => {
+      const socket = new WebSocket(`ws://localhost:${PORT}?room=${ROOM}&secret=ovl`);
+      socket.on('close', (code) => resolve(code));
+      socket.on('error', () => {});
+    });
+    expect(closeCode).toBe(4001);
+  });
 });

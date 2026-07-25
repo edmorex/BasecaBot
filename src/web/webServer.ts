@@ -14,6 +14,7 @@ import { QuoteError } from '../services/quotes.js';
 import type { PointsService } from '../services/points.js';
 import type { TimerService } from '../services/timers.js';
 import { TimerError } from '../services/timers.js';
+import type { FirstService } from '../services/first.js';
 import type { EventBus } from '../core/eventBus.js';
 import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
 import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -37,6 +38,7 @@ import { commandsPage } from './pages/commands.js';
 import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
+import { firstOverlayPage } from './pages/overlayFirst.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -93,6 +95,7 @@ export class WebServer {
     private readonly points: PointsService,
     private readonly bus: EventBus,
     private readonly timers: TimerService,
+    private readonly first: FirstService,
   ) {}
 
   start(): void {
@@ -142,6 +145,10 @@ export class WebServer {
           // Broadcaster / bot admins only — the page itself is the gate, and
           // every /api/admin route re-checks rather than trusting the redirect.
           return this.requireAdminPage(req, res) ? this.html(res, adminPage()) : undefined;
+        case '/overlays/first':
+          // OBS overlay page. Public HTML — it shows nothing without the
+          // read-only ?token=... it uses to fetch data + subscribe.
+          return this.html(res, firstOverlayPage());
         case '/auth/login':
           return this.handleLogin(res);
         case '/auth/callback':
@@ -164,6 +171,10 @@ export class WebServer {
           return this.exportQuotes(req, res);
         case '/api/timers':
           return this.getTimers(res);
+        case '/api/overlay/first':
+          return this.getFirstOverlayData(req, res, url);
+        case '/api/admin/overlays':
+          return this.getAdminOverlays(req, res);
         case '/api/admin/users':
           return this.getAdminUsers(req, res);
         case '/healthz':
@@ -559,6 +570,41 @@ export class WebServer {
       throw e;
     }
     this.json(res, 200, { ok: true });
+  }
+
+  // ── Overlays API ──────────────────────────────────────────────────────────────
+
+  /**
+   * Current !first standings for the OBS overlay. Gated by the read-only overlay
+   * token (no session — a browser source can't log in). Returns the same shape
+   * the live `first` hub broadcasts push incrementally.
+   */
+  private async getFirstOverlayData(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    this.requireOverlayToken(req, url);
+    const race = await this.first.currentRace();
+    this.json(res, 200, race);
+  }
+
+  /** Reveal the overlay URLs + token to an admin so they can add them in OBS. */
+  private async getAdminOverlays(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const token = this.config.overlayToken;
+    const base = this.config.web.publicUrl;
+    this.json(res, 200, {
+      configured: !!token,
+      token: token ?? null,
+      overlays: token
+        ? [{ id: 'first', name: 'First — race results', url: `${base}/overlays/first?token=${encodeURIComponent(token)}` }]
+        : [],
+    });
+  }
+
+  /** Require the read-only overlay token (query `?token=` or `X-Overlay-Token`). */
+  private requireOverlayToken(req: IncomingMessage, url: URL): void {
+    const configured = this.config.overlayToken;
+    if (!configured) throw new HttpError(503, 'Overlays are not configured (set OVERLAY_TOKEN).');
+    const provided = url.searchParams.get('token') ?? req.headers['x-overlay-token'];
+    if (provided !== configured) throw new HttpError(401, 'Invalid overlay token.');
   }
 
   // ── Lists API ─────────────────────────────────────────────────────────────────

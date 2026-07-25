@@ -134,4 +134,33 @@ run('FirstService (integration)', () => {
     const ghost = await mkUser(1);
     expect(await first.statsFor(ghost)).toBeNull();
   });
+
+  describe('currentRace (overlay snapshot)', () => {
+    it('returns the latest race, ordered by place, with names + avatars', async () => {
+      const a = await mkUser(1);
+      const b = await mkUser(2);
+      await prisma.user.update({ where: { id: a }, data: { avatarUrl: 'https://cdn/a.png' } });
+
+      // Old race (s1) should be superseded by the newer race (s2).
+      await first.checkIn(await mkUser(9), 's1', 3);
+      await first.checkIn(a, 's2', 5); // place 1 in s2
+      await first.checkIn(b, 's2', 11); // place 2 in s2
+
+      const snap = await first.currentRace();
+      expect(snap.streamKey).toBe('s2');
+      expect(snap.entries).toEqual([
+        { place: 1, name: 'First1', avatarUrl: 'https://cdn/a.png', timeSeconds: 5 },
+        { place: 2, name: 'First2', avatarUrl: null, timeSeconds: 11 },
+      ]);
+    });
+
+    it('caps at the top 10 and is empty before anyone checks in', async () => {
+      expect(await first.currentRace()).toEqual({ streamKey: null, entries: [] });
+      for (let i = 1; i <= 12; i++) await first.checkIn(await mkUser(i), 'sBig', i);
+      const snap = await first.currentRace();
+      expect(snap.entries).toHaveLength(10);
+      expect(snap.entries[0]!.place).toBe(1);
+      expect(snap.entries[9]!.place).toBe(10);
+    });
+  });
 });

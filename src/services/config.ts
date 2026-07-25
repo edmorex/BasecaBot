@@ -26,6 +26,11 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   WS_HUB_PORT: z.coerce.number().int().positive().default(8080),
   WS_HUB_SECRET: z.string().min(1),
+  // A dedicated, read-only token for OBS overlays (browser sources can't log in).
+  // It only grants RECEIVE access to the WebSocket hub + read-only overlay APIs;
+  // it can never send hub messages or mutate anything. Keep it private (it lives
+  // in the overlay URL). Overlays are disabled if unset.
+  OVERLAY_TOKEN: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
   // Display name of the loyalty currency (shown by the points plugin and the
   // $(pointsname) command variable). e.g. "points", "BascaPoints".
@@ -62,6 +67,8 @@ export interface AppConfig {
   };
   databaseUrl: string;
   ws: { port: number; secret: string };
+  /** Read-only token for OBS overlays (WS receive + read-only overlay APIs). Undefined disables overlays. */
+  overlayToken?: string;
   disabledPlugins: string[];
   points: { name: string };
   web: {
@@ -113,6 +120,7 @@ export function loadConfig(): AppConfig {
     },
     databaseUrl: env.DATABASE_URL,
     ws: { port: env.WS_HUB_PORT, secret: env.WS_HUB_SECRET },
+    overlayToken: env.OVERLAY_TOKEN,
     disabledPlugins: csv(env.DISABLED_PLUGINS),
     points: { name: env.POINTS_NAME },
     web: {
