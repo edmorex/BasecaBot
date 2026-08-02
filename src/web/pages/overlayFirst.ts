@@ -6,11 +6,12 @@
  * (`GET /api/overlay/first`), then subscribes to the `first` WebSocket-hub room
  * for live check-ins (and a `clear` when the stream goes offline).
  *
- * Single-column portrait layout, sized for a ~384×1080 OBS source (≈20% of a
- * 1920 canvas, full height). Top 50% = title + the first-10 list (rank / name /
- * time), filling in live. Bottom 50% = big "WAS FIRST!" text over a top-3 podium
- * with each winner's circular Twitch avatar + name. Stays reactive if resized;
- * fonts use `min(vh, vw)` so nothing overflows the narrow width.
+ * Single-column portrait layout, sized for a ~400×1000 OBS source. Top 50% =
+ * title + the first-10 list (rank / name / time), filling in live. Bottom 50% =
+ * big "WAS FIRST!" text over a top-3 podium with each winner's circular Twitch
+ * avatar + name. Stays reactive if resized; sizes use `min(vh, vw, px)` so
+ * nothing overflows the narrow width AND nothing balloons in a large preview
+ * window (the px cap keeps the podium from overrunning the names).
  *
  * The whole page is self-contained (inline CSS/JS, no bundler). Because this
  * string is a template literal, the embedded script uses plain concatenation and
@@ -37,13 +38,13 @@ export function firstOverlayPage(): string {
   /* Single tall column. Top half = title + list, bottom half = winner + podium. */
   #stage{ position:absolute; inset:0; display:flex; flex-direction:column; padding:1.6vh 4%; }
   #top{ height:50%; display:flex; flex-direction:column; min-height:0; }
-  #bottom{ height:50%; display:flex; flex-direction:column; align-items:center;
-    justify-content:flex-end; min-height:0; }
+  #bottom{ height:50%; display:flex; flex-direction:column; min-height:0; }
 
   /* ── Title + first-10 list ──────────────────────────────────────────── */
-  .col-title{ font-weight:900; letter-spacing:.1em; font-size:min(4.2vh,9vw); text-transform:uppercase;
-    color:#fff; margin:0 0 1.2vh; text-align:center;
-    text-shadow:0 .3vh 1.6vh rgba(255,79,163,.6); }
+  .col-title{ font-weight:900; letter-spacing:.03em; font-size:min(3.2vh,7vw,32px); line-height:1.06;
+    text-transform:uppercase; color:#fff; margin:0 0 1vh; text-align:center;
+    /* Dark halo for legibility on light backgrounds, plus the pink theme glow. */
+    text-shadow:0 0 3px #250518, 0 0 6px #250518, 0 2px 4px rgba(0,0,0,.6), 0 0 18px rgba(255,79,163,.9); }
   #list{ list-style:none; margin:0; padding:0; flex:1; display:flex; flex-direction:column; gap:.7vh; min-height:0; }
   #list li{ flex:1; display:flex; align-items:center; gap:3%; background:var(--panel);
     border:1px solid var(--border); border-left:.9vh solid rgba(255,255,255,.14);
@@ -52,56 +53,67 @@ export function firstOverlayPage(): string {
   #list li:nth-child(1){ border-left-color:var(--gold); }
   #list li:nth-child(2){ border-left-color:var(--silver); }
   #list li:nth-child(3){ border-left-color:var(--bronze); }
-  .rank{ font-weight:900; font-size:min(2.6vh,6vw); width:2.2em; text-align:center; color:#fff;
+  .rank{ font-weight:900; font-size:min(2.6vh,6vw,26px); width:2.2em; text-align:center; color:#fff;
     font-variant-numeric:tabular-nums; flex:none; }
-  .who{ flex:1; font-weight:700; font-size:min(2.4vh,5.6vw); white-space:nowrap; overflow:hidden;
+  .who{ flex:1; font-weight:700; font-size:min(2.4vh,5.6vw,24px); white-space:nowrap; overflow:hidden;
     text-overflow:ellipsis; }
-  .time{ font-weight:800; font-size:min(2.1vh,5vw); color:var(--pink); flex:none;
+  .time{ font-weight:800; font-size:min(2.1vh,5vw,22px); color:var(--pink); flex:none;
     font-variant-numeric:tabular-nums; }
 
   /* ── Winner text + podium ───────────────────────────────────────────── */
-  #winner{ text-align:center; margin-bottom:1.4vh; transition:opacity .3s; line-height:1.02; }
+  /* The winner takes all the room between the list and the podium and centers
+     itself in it (grows from its own centre when it breathes). */
+  #winner{ flex:1; min-height:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; text-align:center; line-height:1.02; transition:opacity .3s;
+    transform-origin:center; }
   #winner.hidden{ opacity:0; }
-  #winner-name{ font-weight:900; font-size:min(6vh,15vw); text-transform:uppercase; letter-spacing:.01em;
+  #winner-name{ font-weight:900; font-size:min(5.5vh,14vw,58px); text-transform:uppercase; letter-spacing:.01em;
     background:linear-gradient(180deg,#ffffff 0%,var(--gold) 72%,#ffb020 100%);
     -webkit-background-clip:text; background-clip:text; color:transparent;
-    filter:drop-shadow(0 .4vh 2vh rgba(255,213,74,.65));
+    /* Dark drop for edge definition on light backgrounds + a gold glow. */
+    filter:drop-shadow(0 2px 4px rgba(0,0,0,.6)) drop-shadow(0 0 10px rgba(255,213,74,.55));
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  #winner-sub{ font-weight:900; font-size:min(3.4vh,9vw); letter-spacing:.12em; text-transform:uppercase;
-    color:#fff; text-shadow:0 0 2.2vh rgba(255,79,163,.9),0 .3vh .6vh rgba(0,0,0,.4); }
-  #winner.show{ animation:pop .6s ease; }
+  #winner-sub{ font-weight:900; font-size:min(3.2vh,8.5vw,34px); letter-spacing:.12em; text-transform:uppercase;
+    color:#fff; text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 14px rgba(255,79,163,.9); }
+  /* Entrance pop, then a slow "breathing" scale that grows the winner text down
+     into the free space above the podium and shrinks back to ~half of it. */
+  #winner.show{ animation:pop .6s ease, winnerBreathe 3.6s ease-in-out .6s infinite alternate; }
   #winner.show #winner-sub{ animation:flash 1.1s ease-in-out infinite alternate; }
 
-  #podium{ display:flex; align-items:flex-end; justify-content:center; gap:3%; width:100%; flex:1;
-    min-height:0; }
+  #podium{ display:flex; align-items:flex-end; justify-content:center; gap:3%; width:100%; flex:none; }
   .pod{ display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
-    width:31%; height:100%; opacity:.4; transition:opacity .35s; }
+    width:31%; opacity:.4; transition:opacity .35s; }
   .pod.has{ opacity:1; }
-  .ava{ width:min(11vh,26vw); height:min(11vh,26vw); border-radius:50%; background-size:cover;
+  .ava{ width:min(9.5vh,22vw,92px); height:min(9.5vh,22vw,92px); border-radius:50%; background-size:cover;
     background-position:center; background-color:#241c36; border:.5vh solid #fff; display:flex;
-    align-items:center; justify-content:center; font-weight:900; font-size:min(4vh,10vw); color:#fff;
+    align-items:center; justify-content:center; font-weight:900; font-size:min(3.6vh,9vw,40px); color:#fff;
     box-shadow:0 .6vh 2.4vh rgba(0,0,0,.45); margin-bottom:.7vh; flex:none; }
-  .pod-1 .ava{ width:min(13vh,30vw); height:min(13vh,30vw); border-color:var(--gold);
+  .pod-1 .ava{ width:min(11.5vh,26vw,112px); height:min(11.5vh,26vw,112px); border-color:var(--gold);
     box-shadow:0 0 3vh rgba(255,213,74,.7); }
   .pod-2 .ava{ border-color:var(--silver); }
   .pod-3 .ava{ border-color:var(--bronze); }
   .pod.has .ava{ animation:float 3s ease-in-out infinite; }
-  .pod-name{ font-weight:800; font-size:min(2vh,4.6vw); max-width:100%; white-space:nowrap;
-    overflow:hidden; text-overflow:ellipsis; text-align:center; margin-bottom:.6vh; color:#fff;
-    text-shadow:0 .2vh .5vh rgba(0,0,0,.5); }
+  .pod-name{ font-weight:800; font-size:min(2vh,4.6vw,20px); max-width:100%; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; text-align:center; margin-bottom:1vh; color:#fff;
+    text-shadow:0 0 3px #250518, 0 0 5px #250518, 0 2px 4px rgba(0,0,0,.6), 0 0 10px rgba(255,79,163,.6); }
   .block{ width:100%; border-radius:1vh 1vh 0 0; display:flex; align-items:flex-start;
-    justify-content:center; padding-top:.8vh; font-weight:900; font-size:min(3vh,7vw);
+    justify-content:center; padding-top:.8vh; font-weight:900; font-size:min(2.8vh,7vw,30px);
     color:rgba(0,0,0,.55); flex:none; }
-  .block-1{ height:22vh; background:linear-gradient(180deg,var(--gold),#c99a18); }
-  .block-2{ height:15vh; background:linear-gradient(180deg,var(--silver),#98a0b0); }
-  .block-3{ height:10vh; background:linear-gradient(180deg,var(--bronze),#a86a2f); }
+  .block-1{ height:min(15vh,150px); background:linear-gradient(180deg,var(--gold),#c99a18); }
+  .block-2{ height:min(10vh,100px); background:linear-gradient(180deg,var(--silver),#98a0b0); }
+  .block-3{ height:min(7vh,70px); background:linear-gradient(180deg,var(--bronze),#a86a2f); }
 
   .pop{ animation:pop .55s ease; }
   @keyframes pop{ 0%{ transform:scale(.6); opacity:0; } 60%{ transform:scale(1.08); opacity:1; }
     100%{ transform:scale(1); } }
-  @keyframes flash{ from{ text-shadow:0 0 1.2vh rgba(255,79,163,.5); }
-    to{ text-shadow:0 0 3.2vh rgba(255,79,163,1),0 0 5vh rgba(139,92,246,.8); } }
+  /* Keep the dark outline constant in both states so "WAS FIRST!" stays legible
+     on light backgrounds while only the pink/purple glow pulses. */
+  @keyframes flash{
+    from{ text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 10px rgba(255,79,163,.5); }
+    to{ text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 24px rgba(255,79,163,1), 0 0 40px rgba(139,92,246,.85); } }
   @keyframes float{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-.9vh); } }
+  /* Half-fill (scale 1.18) → fill the free space (scale 1.5), from the centre. */
+  @keyframes winnerBreathe{ from{ transform:scale(1.18); } to{ transform:scale(1.5); } }
 
   #status{ position:absolute; left:2%; bottom:.5vh; font-size:1.4vh; color:rgba(255,255,255,.35); }
 </style>
@@ -109,7 +121,7 @@ export function firstOverlayPage(): string {
 <body>
   <div id="stage">
     <div id="top">
-      <div class="col-title">First 10</div>
+      <div class="col-title">Cool Cats Who Said&nbsp;!first</div>
       <ol id="list"></ol>
     </div>
     <div id="bottom">
