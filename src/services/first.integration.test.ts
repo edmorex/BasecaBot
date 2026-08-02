@@ -45,6 +45,7 @@ run('FirstService (integration)', () => {
     await prisma.firstCheckin.deleteMany({});
     await prisma.firstStat.deleteMany({});
     await prisma.user.deleteMany({ where: { id: { startsWith: P } } });
+    first.setActiveStream(null); // reset overlay pointer between tests
   });
 
   afterAll(async () => {
@@ -136,16 +137,17 @@ run('FirstService (integration)', () => {
   });
 
   describe('currentRace (overlay snapshot)', () => {
-    it('returns the latest race, ordered by place, with names + avatars', async () => {
+    it('returns the ACTIVE race, ordered by place, with names + avatars', async () => {
       const a = await mkUser(1);
       const b = await mkUser(2);
       await prisma.user.update({ where: { id: a }, data: { avatarUrl: 'https://cdn/a.png' } });
 
-      // Old race (s1) should be superseded by the newer race (s2).
+      // A prior race (s1) is present but not active; only the active race shows.
       await first.checkIn(await mkUser(9), 's1', 3);
       await first.checkIn(a, 's2', 5); // place 1 in s2
       await first.checkIn(b, 's2', 11); // place 2 in s2
 
+      first.setActiveStream('s2');
       const snap = await first.currentRace();
       expect(snap.streamKey).toBe('s2');
       expect(snap.entries).toEqual([
@@ -154,13 +156,20 @@ run('FirstService (integration)', () => {
       ]);
     });
 
-    it('caps at the top 10 and is empty before anyone checks in', async () => {
-      expect(await first.currentRace()).toEqual({ streamKey: null, entries: [] });
+    it('is empty when no race is active (stream offline) and caps at the top 10', async () => {
+      // No active stream set → empty, even though check-ins exist.
       for (let i = 1; i <= 12; i++) await first.checkIn(await mkUser(i), 'sBig', i);
+      expect(await first.currentRace()).toEqual({ streamKey: null, entries: [] });
+
+      first.setActiveStream('sBig');
       const snap = await first.currentRace();
       expect(snap.entries).toHaveLength(10);
       expect(snap.entries[0]!.place).toBe(1);
       expect(snap.entries[9]!.place).toBe(10);
+
+      // Going "offline" clears the snapshot again.
+      first.setActiveStream(null);
+      expect((await first.currentRace()).entries).toEqual([]);
     });
   });
 });

@@ -22,9 +22,11 @@ describe('first plugin', () => {
     topPoints: ReturnType<typeof vi.fn>;
     topTime: ReturnType<typeof vi.fn>;
     statsFor: ReturnType<typeof vi.fn>;
+    setActiveStream: ReturnType<typeof vi.fn>;
   };
   let getStreamByUserId: ReturnType<typeof vi.fn>;
   let broadcast: ReturnType<typeof vi.fn>;
+  let plugin: ReturnType<typeof firstPlugin>;
 
   const LIVE = { startDate: new Date(Date.now() - 42_000) }; // 42s ago
 
@@ -37,6 +39,7 @@ describe('first plugin', () => {
       topPoints: vi.fn(async () => []),
       topTime: vi.fn(async () => []),
       statsFor: vi.fn(async () => null),
+      setActiveStream: vi.fn(),
     };
     getStreamByUserId = vi.fn(async () => LIVE);
     broadcast = vi.fn();
@@ -60,7 +63,8 @@ describe('first plugin', () => {
       config: { twitch: { broadcasterUsername: 'test' } },
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     } as unknown as ServiceContext;
-    await firstPlugin().init(ctx);
+    plugin = firstPlugin();
+    await plugin.init(ctx);
   });
 
   // The router fires a group's onUnknown handler without awaiting it, so give its
@@ -110,6 +114,23 @@ describe('first plugin', () => {
     await run('!first');
     await new Promise((r) => setTimeout(r, 0));
     expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it('tracks the active race and clears the overlay when the stream goes offline', async () => {
+    vi.useFakeTimers();
+    try {
+      await plugin.start!(); // first poll — stream is live
+      expect(first.setActiveStream).toHaveBeenLastCalledWith(LIVE.startDate.toISOString());
+      expect(broadcast).not.toHaveBeenCalled();
+
+      getStreamByUserId.mockResolvedValue(null); // stream ends
+      await vi.advanceTimersByTimeAsync(60 * 60_000); // next hourly poll detects offline
+      expect(first.setActiveStream).toHaveBeenLastCalledWith(null);
+      expect(broadcast).toHaveBeenCalledWith('first', 'clear', {});
+      plugin.stop!();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('needles a 2nd-placer, pluralizing correctly (1 person / was)', async () => {

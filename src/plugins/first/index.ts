@@ -16,6 +16,9 @@ const plural = (n: number, one: string, many: string): string => (n === 1 ? one 
  * each broadcast. All the scoring lives in FirstService.
  */
 export function firstPlugin(): Plugin {
+  let startMonitor: () => Promise<void> = async () => {};
+  let stopMonitor: () => void = () => {};
+
   return {
     name: 'first',
     version: '0.1.0',
@@ -54,6 +57,38 @@ export function firstPlugin(): Plugin {
         }
         streamCache = { at: Date.now(), value };
         return value;
+      };
+
+      // ── Live monitor: keep the overlay's active race in sync with the stream,
+      // and CLEAR the overlay when the stream goes offline (instead of leaving
+      // stale results up until the next race). Runs while the plugin is started.
+      let lastKey: string | null | undefined; // undefined = not polled yet
+      let monitorHandle: ReturnType<typeof setInterval> | undefined;
+      // Hourly is plenty: the board only needs to clear sometime before the next
+      // stream, which is always hours away. A check-in sets the active race
+      // immediately, so the slow poll only handles the eventual offline clear.
+      const POLL_MS = 60 * 60_000;
+      const syncRace = async () => {
+        const stream = await currentStream();
+        const key = stream ? stream.startDate.toISOString() : null;
+        if (key === lastKey) return;
+        const prev = lastKey;
+        lastKey = key;
+        ctx.first.setActiveStream(key);
+        // A KNOWN race ended (went offline, or a new stream replaced it): clear
+        // connected overlays. (Going from offline→live needs no clear — it's
+        // already empty — and a new stream's first check-in resets the client.)
+        if (prev !== undefined && prev !== null && prev !== key) {
+          ctx.ws.broadcast('first', 'clear', {});
+        }
+      };
+      startMonitor = async () => {
+        await syncRace();
+        monitorHandle = setInterval(() => void syncRace(), POLL_MS);
+      };
+      stopMonitor = () => {
+        if (monitorHandle) clearInterval(monitorHandle);
+        monitorHandle = undefined;
       };
 
       // ── Check-in message per the spec ─────────────────────────────────────────
@@ -112,6 +147,8 @@ export function firstPlugin(): Plugin {
           }
           await ctx.users.touch(e.user);
           const streamKey = stream.startDate.toISOString();
+          ctx.first.setActiveStream(streamKey); // ensure the overlay tracks this race
+          lastKey = streamKey; // keep the monitor from re-clearing on its next poll
           const seconds = Math.max(0, Math.floor((Date.now() - stream.startDate.getTime()) / 1000));
           const result = await ctx.first.checkIn(e.user.id, streamKey, seconds);
           await say(e.channel, checkinMessage(e.user.displayName, result));
@@ -188,6 +225,16 @@ export function firstPlugin(): Plugin {
           },
         },
       });
+    },
+
+    // Begin polling live state once all plugins are initialized.
+    async start() {
+      await startMonitor();
+    },
+
+    // Stop the live poll on shutdown.
+    stop() {
+      stopMonitor();
     },
   };
 }

@@ -73,6 +73,19 @@ export class FirstService {
   }
 
   /**
+   * The streamKey of the race the overlay should currently show, or null when no
+   * stream is live. Set by the first plugin's live monitor so the overlay clears
+   * when the stream goes offline (rather than lingering until the next race). The
+   * plugin and the web snapshot share one FirstService instance, so both agree.
+   */
+  private activeStreamKey: string | null = null;
+
+  /** Point the overlay snapshot at a race (a live stream's key), or null (offline). */
+  setActiveStream(streamKey: string | null): void {
+    this.activeStreamKey = streamKey;
+  }
+
+  /**
    * Record a check-in for the current stream. The caller must have persisted the
    * user first (UsersService.touch) — check-ins reference User by foreign key.
    */
@@ -112,24 +125,21 @@ export class FirstService {
 
   /**
    * The current race's standings for the live overlay: the top `limit` check-ins
-   * (by place) of the MOST RECENT race, with each user's display name + avatar.
-   * "Most recent" = the streamKey of the latest check-in, so it follows the
-   * active stream and resets to the new race on its first `!first`.
+   * (by place) of the ACTIVE race, with each user's display name + avatar. The
+   * active race is whatever `setActiveStream` last pointed at — so it's empty
+   * while the stream is offline and fills in as the live race is run.
    */
   async currentRace(limit = 10): Promise<RaceSnapshot> {
-    const latest = await this.db.firstCheckin.findFirst({
-      orderBy: { id: 'desc' }, // autoincrement — the most recently inserted check-in
-      select: { streamKey: true },
-    });
-    if (!latest) return { streamKey: null, entries: [] };
+    const streamKey = this.activeStreamKey;
+    if (!streamKey) return { streamKey: null, entries: [] };
     const rows = await this.db.firstCheckin.findMany({
-      where: { streamKey: latest.streamKey },
+      where: { streamKey },
       orderBy: { place: 'asc' },
       take: limit,
       include: { user: { select: { displayName: true, avatarUrl: true } } },
     });
     return {
-      streamKey: latest.streamKey,
+      streamKey,
       entries: rows.map((r) => ({ place: r.place, name: r.user.displayName, avatarUrl: r.user.avatarUrl, timeSeconds: r.timeSeconds })),
     };
   }
