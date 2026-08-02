@@ -15,6 +15,7 @@ import type { PointsService } from '../services/points.js';
 import type { TimerService } from '../services/timers.js';
 import { TimerError } from '../services/timers.js';
 import type { FirstService } from '../services/first.js';
+import type { TextStringsService } from '../services/textStrings.js';
 import type { EventBus } from '../core/eventBus.js';
 import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
 import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -96,6 +97,7 @@ export class WebServer {
     private readonly bus: EventBus,
     private readonly timers: TimerService,
     private readonly first: FirstService,
+    private readonly text: TextStringsService,
   ) {}
 
   start(): void {
@@ -177,6 +179,8 @@ export class WebServer {
           return this.getAdminOverlays(req, res);
         case '/api/admin/users':
           return this.getAdminUsers(req, res);
+        case '/api/admin/strings':
+          return this.getAdminStrings(req, res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -242,6 +246,8 @@ export class WebServer {
           return this.deleteAdminUser(req, res);
         case '/api/admin/simulate':
           return this.simulateEvent(req, res);
+        case '/api/admin/strings':
+          return this.postAdminString(req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -752,6 +758,24 @@ export class WebServer {
     });
 
     this.json(res, 200, { users });
+  }
+
+  /** Registered, admin-editable chat strings grouped by feature. */
+  private getAdminStrings(req: IncomingMessage, res: ServerResponse): void {
+    this.requireAdmin(req);
+    this.json(res, 200, { groups: this.text.list() });
+  }
+
+  /** Set or reset a text string: { feature, key, value } or { feature, key, reset:true }. */
+  private async postAdminString(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    this.requireAdmin(req);
+    const body = await this.readJson(req);
+    const feature = String(body.feature ?? '').trim();
+    const key = String(body.key ?? '').trim();
+    if (!feature || !key) throw new HttpError(400, 'Missing feature or key.');
+    if (body.reset) await this.text.reset(feature, key);
+    else await this.text.set(feature, key, String(body.value ?? ''));
+    this.json(res, 200, { ok: true });
   }
 
   /** Create a user from a Twitch handle, before they have ever chatted. */

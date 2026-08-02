@@ -98,6 +98,7 @@ export function adminPage(): string {
       { id: 'users', label: 'Users' },
       { id: 'eventsim', label: 'EventSimulator' },
       { id: 'overlays', label: 'Overlays' },
+      { id: 'strings', label: 'Text Strings' },
     ];
     var section = 'users';
     var users = [];
@@ -245,6 +246,7 @@ export function adminPage(): string {
 
     // Per-event field specs: name, input type, default, and a randomizer.
     var EVENTS = [
+      { type: 'live', emoji: '😻', label: 'Stream Live', fields: [] },
       { type: 'sub', emoji: '🎉', label: 'Subscription', fields: [
         { name:'user', type:'text', def:'TestUser', rand: randName },
         { name:'tier', type:'select', options:TIERS, def:'1000', rand: function(){ return pick(TIERS); } },
@@ -387,7 +389,67 @@ export function adminPage(): string {
       renderSide();
       if (section === 'users') renderUsers();
       else if (section === 'overlays') renderOverlays();
+      else if (section === 'strings') renderStrings();
       else renderSim();
+    }
+
+    // ── Text Strings: edit the chat text plugins post (grouped by feature) ───────
+    function prettyFeature(f) { return String(f || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, function (m) { return m.toUpperCase(); }); }
+    async function renderStrings() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Edit the text the bot posts to chat.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Text Strings</h2><p class="muted">Loading…</p>';
+      try {
+        var d = await api('GET', '/api/admin/strings');
+        var groups = d.groups || [];
+        if (!groups.length) { main.innerHTML = '<h2>Text Strings</h2><p class="muted">No editable strings are registered yet.</p>'; return; }
+        var cards = groups.map(function (g) {
+          var rows = g.strings.map(function (s) {
+            var ph = (s.placeholders && s.placeholders.length)
+              ? '<div class="muted" style="font-size:.78rem; margin-top:.2rem">Placeholders: ' + s.placeholders.map(function (p) { return '<code>{' + esc(p) + '}</code>'; }).join(' ') + '</div>' : '';
+            var desc = s.description ? '<div class="muted" style="font-size:.8rem">' + esc(s.description) + '</div>' : '';
+            var reset = s.custom ? ' · <a href="#" class="linkish" data-reset data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">reset to default</a>' : '';
+            var tag = s.custom ? ' <span class="tag">custom</span>' : '';
+            return '<tr>' +
+              '<td style="vertical-align:top; white-space:nowrap"><strong>' + esc(s.label) + '</strong>' + tag +
+                '<div class="muted" style="font-size:.78rem"><code>' + esc(s.feature) + '.' + esc(s.key) + '</code>' + reset + '</div>' + desc + ph + '</td>' +
+              '<td style="width:62%; vertical-align:middle"><input type="text" value="' + esc(s.value) + '" style="width:100%" /></td>' +
+              '<td style="vertical-align:middle"><button type="button" class="pink" data-save data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">Save</button></td>' +
+              '</tr>';
+          }).join('');
+          return '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .6rem">' + esc(prettyFeature(g.feature)) + '</h3>' +
+            '<div style="overflow-x:auto"><table><thead><tr><th>Label</th><th>Text</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+        }).join('');
+        main.innerHTML = '<h2>Text Strings</h2>' +
+          '<p class="muted">Edit the text the bot posts to chat, grouped by feature. Placeholders like <code>{user}</code> are filled in when the message is sent. Changes take effect immediately.</p>' +
+          cards;
+        // Dim the Save button until the text is edited; brighten on unsaved changes.
+        Array.prototype.forEach.call(document.querySelectorAll('[data-save]'), function (b) {
+          var inp = b.closest('tr').querySelector('input');
+          inp.setAttribute('data-orig', inp.value);
+          b.style.opacity = '.5';
+          inp.oninput = function () { b.style.opacity = (inp.value !== inp.getAttribute('data-orig')) ? '1' : '.5'; };
+          b.onclick = function () { saveString(b); };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'), function (a) { a.onclick = function (ev) { ev.preventDefault(); resetString(a); }; });
+      } catch (e) { main.innerHTML = '<h2>Text Strings</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>'; }
+    }
+    async function saveString(b) {
+      var inp = b.closest('tr').querySelector('input');
+      try {
+        await api('POST', '/api/admin/strings', { feature: b.getAttribute('data-feature'), key: b.getAttribute('data-key'), value: inp.value });
+        inp.setAttribute('data-orig', inp.value);
+        b.style.opacity = '.5'; // no unsaved changes anymore
+        b.textContent = 'Saved!';
+        setTimeout(renderStrings, 700);
+      } catch (e) { alert('Save failed: ' + e.message); }
+    }
+    async function resetString(a) {
+      try {
+        await api('POST', '/api/admin/strings', { feature: a.getAttribute('data-feature'), key: a.getAttribute('data-key'), reset: true });
+        renderStrings();
+      } catch (e) { alert('Reset failed: ' + e.message); }
     }
 
     // ── Overlays: reveal the OBS browser-source URLs (read-only token) ───────────

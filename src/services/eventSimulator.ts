@@ -2,7 +2,7 @@ import { PermissionLevel, type BotEvent, type EventUser } from '../core/events.j
 import type { UsersService } from './users.js';
 
 /** The event types the simulator can inject. */
-export const SIM_EVENT_TYPES = ['sub', 'resub', 'subgift', 'bits', 'raid', 'follow', 'donation'] as const;
+export const SIM_EVENT_TYPES = ['live', 'sub', 'resub', 'subgift', 'bits', 'raid', 'follow', 'donation'] as const;
 export type SimEventType = (typeof SIM_EVENT_TYPES)[number];
 
 export function isSimEventType(t: string): t is SimEventType {
@@ -44,6 +44,8 @@ export async function buildSimEvent(
   const ts = Date.now();
 
   switch (type) {
+    case 'live':
+      return { type: 'live', channel, ts };
     case 'sub': {
       const user = makeUser(str(payload.user, 'TestUser'), PermissionLevel.Subscriber);
       await deps.users.touch(user);

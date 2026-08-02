@@ -267,6 +267,20 @@ model Quote {
   quotedUserRef User? @relation("QuotedUser", fields: [quotedUserId], references: [id], onDelete: SetNull)
 }
 
+/// An admin-overridable chat text string. Plugins REGISTER their strings (with a
+/// hard-coded default) at startup; this table stores only the OVERRIDES the
+/// broadcaster has customized on the dashboard. `get` returns the override if a
+/// row exists here, else the code default — so editing a default in code still
+/// applies to every string that hasn't been customized. Keyed by (feature, key).
+model TextString {
+  id      Int    @id @default(autoincrement())
+  feature String // grouping / plugin name, e.g. "events"
+  key     String // reference within the feature, e.g. "sub"
+  value   String // the customized override text
+
+  @@unique([feature, key])
+}
+
 /// Runtime settings, editable without redeploying.
 model Setting {
   id    Int    @id @default(autoincrement())

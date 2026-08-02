@@ -12,6 +12,7 @@ import { ListsService } from './services/lists.js';
 import { QuotesService } from './services/quotes.js';
 import { FirstService } from './services/first.js';
 import { TimerService } from './services/timers.js';
+import { TextStringsService } from './services/textStrings.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
 import { WebServer } from './web/webServer.js';
@@ -59,6 +60,8 @@ async function main(): Promise<void> {
   const quotes = new QuotesService(storage, users);
   const first = new FirstService(storage);
   const timers = new TimerService(storage);
+  const text = new TextStringsService(storage);
+  await text.init(); // load persisted string overrides
 
   const chatAdapter = new TwitchChatAdapter(authProvider, bus, users, config);
   const chat = new TwurpleChatService(chatAdapter.client);
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ async function main(): Promise<void> {
     quotes,
     first,
     timers,
+    text,
     storage,
     ws,
     api,

@@ -92,6 +92,7 @@ async function collectBuiltins() {
     lists: {},
     quotes: {},
     timers: { configure: noop, resumeLoops: asyncNoop, stopAllRuntime: noop, list: async () => [], status: () => 0 },
+    text: { register: noop, get: () => '', format: () => '', list: () => [], set: asyncNoop, reset: asyncNoop, init: asyncNoop },
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -204,6 +205,30 @@ const mockTimers: MockTimer[] = [
 ];
 const timerByName = (n: string) => mockTimers.find((t) => t.name === String(n).toLowerCase().trim());
 
+// Mock editable text strings (exercises the Admin → Text Strings section).
+const mockStringDefs = [
+  { feature: 'events', key: 'live', label: 'Stream live', default: '😻 The stream has gone live! Who will be !first?', placeholders: [] as string[] },
+  { feature: 'events', key: 'sub', label: 'Subscription', default: '🎉 Thanks for subscribing, @{user}!', placeholders: ['user', 'tier'] },
+  { feature: 'events', key: 'resub', label: 'Resub', default: '🎉 @{user} resubbed for {months} months!', placeholders: ['user', 'months', 'tier'] },
+  { feature: 'events', key: 'subgift', label: 'Gifted sub(s)', default: '🎁 {gifter} gifted {count} sub(s)!', placeholders: ['gifter', 'count'] },
+  { feature: 'events', key: 'bits', label: 'Bits / cheer', default: '✨ {user} cheered {amount} bits!', placeholders: ['user', 'amount'] },
+  { feature: 'events', key: 'raid', label: 'Raid', default: '🚀 {from} raided with {viewers} viewers! Welcome!', placeholders: ['from', 'viewers'] },
+  { feature: 'events', key: 'follow', label: 'Follow', default: '👋 Thanks for the follow, @{user}!', placeholders: ['user'] },
+  { feature: 'events', key: 'donation', label: 'Donation', default: '💜 {name} donated {amount} {currency}! Thank you!', placeholders: ['name', 'amount', 'currency'] },
+];
+const mockStringOverrides = new Map<string, string>();
+function mockStringGroups() {
+  const byFeature = new Map<string, unknown[]>();
+  for (const d of mockStringDefs) {
+    const o = mockStringOverrides.get(d.feature + '.' + d.key);
+    const view = { feature: d.feature, key: d.key, label: d.label, description: '', placeholders: d.placeholders, value: o ?? d.default, default: d.default, custom: o !== undefined };
+    const arr = byFeature.get(d.feature) ?? [];
+    arr.push(view);
+    byFeature.set(d.feature, arr);
+  }
+  return [...byFeature.entries()].map(([feature, strings]) => ({ feature, strings }));
+}
+
 // Mock !first race snapshot (exercises the OBS overlay page).
 const mockFirstRace = {
   streamKey: '2026-07-25T18:00:00.000Z',
@@ -283,6 +308,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       const base = 'http://localhost:' + PORT;
       return json(200, { configured: true, token: 'preview-token', overlays: [{ id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' }] });
     }
+    if (p === '/api/admin/strings') return json(200, { groups: mockStringGroups() });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
@@ -426,6 +452,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/commands' || p === '/api/commands/delete') return json(200, { ok: true });
 
     // ── Lists (mock CRUD) ──────────────────────────────────────────────────
+    if (p === '/api/admin/strings') {
+      const id = String(body.feature ?? '') + '.' + String(body.key ?? '');
+      if (body.reset) mockStringOverrides.delete(id);
+      else mockStringOverrides.set(id, String(body.value ?? ''));
+      return json(200, { ok: true });
+    }
     if (p === '/api/timers/create') {
       const name = String(body.name ?? '').trim();
       if (name && !timerByName(name)) {

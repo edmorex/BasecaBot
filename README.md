@@ -16,6 +16,7 @@ Web apps (games) ◀────── WebSocket hub ◀──────┘
 - **Services** (`src/services/`): `users`, `points`, `chat`, `storage` (Prisma), `config`, `logger`.
 - **Adapters** (`src/adapters/`): Twitch chat + EventSub (donation adapter is a future stub).
 - **Plugins** (`src/plugins/`): `points`, `commands`, `lists`, `quotes`, `events`, `basecaWheel`, `first`, `timers`.
+- **Editable text** (`src/services/textStrings.ts`): plugins register the chat strings they post (with a hard-coded default + `{token}` placeholders); the broadcaster can override them on the dashboard (**Admin → Text Strings**) with no redeploy. The `events` announcements (sub/resub/raid/follow/…) are the first consumers; more features convert over time.
 - **Web** (`src/web/wsHub.ts`): WebSocket hub for web apps. Companion app in `webapps/baseca-wheel/`.
 
 **Adding a feature** = add a folder under `src/plugins/`, export a `Plugin`, and register it in `src/plugins/index.ts`. No kernel changes.

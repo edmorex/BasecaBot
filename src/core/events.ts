@@ -102,6 +102,11 @@ export interface FollowEvent extends BaseEvent {
   user: EventUser;
 }
 
+/** The stream went live (EventSub `stream.online`). */
+export interface LiveEvent extends BaseEvent {
+  type: 'live';
+}
+
 /** Cash donation (from StreamElements/StreamLabs — wired later). */
 export interface DonationEvent extends BaseEvent {
   type: 'donation';
@@ -137,6 +142,7 @@ export type BotEvent =
   | BitsEvent
   | RaidEvent
   | FollowEvent
+  | LiveEvent
   | DonationEvent
   | RedemptionEvent
   | WsMessageEvent;

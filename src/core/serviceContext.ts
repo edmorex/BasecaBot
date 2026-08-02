@@ -8,6 +8,7 @@ import type { ListsService } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
 import type { FirstService } from '../services/first.js';
 import type { TimerService } from '../services/timers.js';
+import type { TextStringsService } from '../services/textStrings.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
 import type { AppConfig } from '../services/config.js';
@@ -40,6 +41,8 @@ export interface ServiceContext {
   readonly first: FirstService;
   /** Named timers that fire bound commands once or on a loop. */
   readonly timers: TimerService;
+  /** Admin-overridable chat strings that plugins register defaults into. */
+  readonly text: TextStringsService;
   /** Raw persistence (Prisma) for plugin-specific tables/queries. */
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */

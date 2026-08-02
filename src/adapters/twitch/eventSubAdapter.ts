@@ -106,6 +106,8 @@ export class TwitchEventSubAdapter {
       }),
     );
 
+    listener.onStreamOnline(id, () => void this.bus.publish({ type: 'live', channel, ts: Date.now() }));
+
     listener.start();
     log.info({ channel }, 'EventSub listening');
   }
