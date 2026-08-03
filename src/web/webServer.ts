@@ -18,7 +18,7 @@ import type { FirstService } from '../services/first.js';
 import type { TextStringsService } from '../services/textStrings.js';
 import type { EventBus } from '../core/eventBus.js';
 import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
-import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
+import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
@@ -468,7 +468,7 @@ export class WebServer {
   /** Export custom commands + aliases as CSV (built-ins are code-defined, excluded). */
   private async exportCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
-    const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At']];
+    const rows: (string | number)[][] = [];
     for (const c of await this.customCommands.listForDashboard()) {
       rows.push([
         c.kind,
@@ -486,14 +486,14 @@ export class WebServer {
         c.updatedAt ?? '',
       ]);
     }
-    this.csvDownload(res, 'commands.csv', toCsv(rows));
+    this.csvExport(res, 'commands.csv', ['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At'], rows);
   }
 
   private async importCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
-    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const { body, rows } = await this.parseCsvImport(req, COMMAND_CSV_SPEC);
     const mode = body.mode === 'replace' ? 'replace' : 'add';
-    const items = mapCsvRows(parseCsv(String(body.csv ?? '')), COMMAND_CSV_SPEC).map((m) => {
+    const items = rows.map((m) => {
       const type = (m.type ?? '').trim().toLowerCase();
       const kind = type === 'phrase' ? 'phrase' : type === 'alias' ? 'alias' : 'trigger';
       const en = (m.enabled ?? '').trim().toLowerCase();
@@ -912,16 +912,16 @@ export class WebServer {
   private async exportQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
     const quotes = await this.quotes.listAllForDashboard();
-    const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At']];
+    const rows: (string | number)[][] = [];
     for (const q of quotes) rows.push([q.id, q.text, q.user, q.userId ?? '', q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '', q.createdAt]);
-    this.csvDownload(res, 'quotes.csv', toCsv(rows));
+    this.csvExport(res, 'quotes.csv', ['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], rows);
   }
 
   private async importQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.requireManager(req);
-    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const { body, rows } = await this.parseCsvImport(req, QUOTE_CSV_SPEC);
     const mode = body.mode === 'replace' ? 'replace' : 'add';
-    const items = mapCsvRows(parseCsv(String(body.csv ?? '')), QUOTE_CSV_SPEC).map((m) => ({
+    const items = rows.map((m) => ({
       id: m.id,
       text: m.text!,
       user: m.user!,
@@ -942,13 +942,13 @@ export class WebServer {
     const only = (url.searchParams.get('list') ?? '').toLowerCase();
     let lists = await this.lists.listAllForDashboard();
     if (scope === 'active') lists = lists.filter((l) => l.name === only);
-    const rows: (string | number)[][] = [['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'List Created At', 'List Updated At', 'Entry', 'Added By', 'Added By ID', 'Date Added']];
+    const rows: (string | number)[][] = [];
     for (const l of lists) {
       const meta = [l.name, l.displayName ?? '', l.description ?? '', LEVEL_LABELS[l.permission] ?? String(l.permission), l.createdByName ?? '', l.createdById ?? '', l.createdAt, l.updatedAt];
       if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
       else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', e.addedById ?? '', e.addedAt]);
     }
-    this.csvDownload(res, scope === 'active' && only ? `${only}.csv` : 'lists.csv', toCsv(rows));
+    this.csvExport(res, scope === 'active' && only ? `${only}.csv` : 'lists.csv', ['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'List Created At', 'List Updated At', 'Entry', 'Added By', 'Added By ID', 'Date Added'], rows);
   }
 
   /** Group per-entry list rows back into structured lists (metadata from the first row of each). */
@@ -989,10 +989,9 @@ export class WebServer {
   }
 
   private async importLists(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    const { body, rows: mapped } = await this.parseCsvImport(req, LIST_CSV_SPEC);
     const mode = String(body.mode ?? '');
     const activeName = String(body.list ?? '').trim();
-    const mapped = mapCsvRows(parseCsv(String(body.csv ?? '')), LIST_CSV_SPEC);
     try {
       if (mode === 'replace-all') {
         const session = await this.requireBulkListManager(req);
@@ -1114,6 +1113,20 @@ export class WebServer {
       'Content-Disposition': `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}"`,
     });
     res.end(csv);
+  }
+
+  /** Serialize a header + data rows to CSV and send it as a download. */
+  private csvExport(res: ServerResponse, filename: string, header: string[], rows: (string | number)[][]): void {
+    this.csvDownload(res, filename, toCsv([header, ...rows]));
+  }
+
+  /** Read an import request body (larger cap) and map its CSV into keyed rows. */
+  private async parseCsvImport(
+    req: IncomingMessage,
+    spec: CsvColumn[],
+  ): Promise<{ body: Record<string, unknown>; rows: Record<string, string>[] }> {
+    const body = await this.readJson(req, IMPORT_MAX_BYTES);
+    return { body, rows: mapCsvRows(parseCsv(String(body.csv ?? '')), spec) };
   }
 
   private send(res: ServerResponse, status: number, contentType: string, body: string): void {
