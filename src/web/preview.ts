@@ -10,6 +10,7 @@ import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
+import { TextStringsService } from '../services/textStrings.js';
 import type { ServiceContext } from '../core/serviceContext.js';
 import type { CommandHandler, CommandOptions, GroupOptions } from '../core/commandRouter.js';
 
@@ -65,6 +66,11 @@ const mk = (o: Partial<Record<string, unknown>>) => ({
  * preview's built-ins (e.g. !wheel) exactly in sync with the plugins, with no
  * bot/Twitch/DB — the same way the live bot builds them from CommandRouter.list().
  */
+// Real Text Strings registered by the plugins (populated by collectBuiltins,
+// which runs every plugin's init against the stub below). Backing "storage" is
+// in-memory so set/reset work for the preview without a DB.
+const previewText = new TextStringsService({ prisma: { textString: { findMany: async () => [], upsert: async () => {}, deleteMany: async () => {} } } } as never);
+
 async function collectBuiltins() {
   const captured: { name: string; description: string; usage: string; permission: number; group: string; gc: number; uc: number }[] = [];
   let currentGroup = 'other';
@@ -92,7 +98,7 @@ async function collectBuiltins() {
     lists: {},
     quotes: {},
     timers: { configure: noop, resumeLoops: asyncNoop, stopAllRuntime: noop, list: async () => [], status: () => 0 },
-    text: { register: noop, get: () => '', format: () => '', list: () => [], set: asyncNoop, reset: asyncNoop, init: asyncNoop },
+    text: previewText, // real service — plugins register their editable strings here
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -205,35 +211,11 @@ const mockTimers: MockTimer[] = [
 ];
 const timerByName = (n: string) => mockTimers.find((t) => t.name === String(n).toLowerCase().trim());
 
-// Mock editable text strings (exercises the Admin → Text Strings section).
-const mockStringDefs = [
-  { feature: 'events', key: 'live', label: 'Stream live', default: '😻 The stream has gone live! Who will be !first?', placeholders: [] as string[] },
-  { feature: 'events', key: 'sub', label: 'Subscription', default: '🎉 Thanks for subscribing, @{user}!', placeholders: ['user', 'tier'] },
-  { feature: 'events', key: 'resub', label: 'Resub', default: '🎉 @{user} resubbed for {months} months!', placeholders: ['user', 'months', 'tier'] },
-  { feature: 'events', key: 'subgift', label: 'Gifted sub(s)', default: '🎁 {gifter} gifted {count} sub(s)!', placeholders: ['gifter', 'count'] },
-  { feature: 'events', key: 'bits', label: 'Bits / cheer', default: '✨ {user} cheered {amount} bits!', placeholders: ['user', 'amount'] },
-  { feature: 'events', key: 'raid', label: 'Raid', default: '🚀 {from} raided with {viewers} viewers! Welcome!', placeholders: ['from', 'viewers'] },
-  { feature: 'events', key: 'follow', label: 'Follow', default: '👋 Thanks for the follow, @{user}!', placeholders: ['user'] },
-  { feature: 'events', key: 'donation', label: 'Donation', default: '💜 {name} donated {amount} {currency}! Thank you!', placeholders: ['name', 'amount', 'currency'] },
-];
-const mockStringOverrides = new Map<string, string>();
-function mockStringGroups() {
-  const byFeature = new Map<string, unknown[]>();
-  for (const d of mockStringDefs) {
-    const o = mockStringOverrides.get(d.feature + '.' + d.key);
-    const view = { feature: d.feature, key: d.key, label: d.label, description: '', placeholders: d.placeholders, value: o ?? d.default, default: d.default, custom: o !== undefined };
-    const arr = byFeature.get(d.feature) ?? [];
-    arr.push(view);
-    byFeature.set(d.feature, arr);
-  }
-  return [...byFeature.entries()].map(([feature, strings]) => ({ feature, strings }));
-}
-
 // Mock !first race snapshot (exercises the OBS overlay page).
 const mockFirstRace = {
   streamKey: '2026-07-25T18:00:00.000Z',
   entries: [
-    { place: 1, name: 'Baseca', avatarUrl: AVATAR('998f01ae-def8-11e9-b95c-784f43822e80'), timeSeconds: 4 },
+    { place: 1, name: 'BasecampFoster', avatarUrl: AVATAR('998f01ae-def8-11e9-b95c-784f43822e80'), timeSeconds: 4 },
     { place: 2, name: 'ModMandy', avatarUrl: AVATAR('ead5c8b2-a4c9-4724-b1dd-9f00b46cbd3d'), timeSeconds: 9 },
     { place: 3, name: 'ViewerVince', avatarUrl: null, timeSeconds: 15 },
     { place: 4, name: 'SubSam', avatarUrl: null, timeSeconds: 22 },
@@ -308,7 +290,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       const base = 'http://localhost:' + PORT;
       return json(200, { configured: true, token: 'preview-token', overlays: [{ id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' }] });
     }
-    if (p === '/api/admin/strings') return json(200, { groups: mockStringGroups() });
+    if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
@@ -453,9 +435,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
 
     // ── Lists (mock CRUD) ──────────────────────────────────────────────────
     if (p === '/api/admin/strings') {
-      const id = String(body.feature ?? '') + '.' + String(body.key ?? '');
-      if (body.reset) mockStringOverrides.delete(id);
-      else mockStringOverrides.set(id, String(body.value ?? ''));
+      const feature = String(body.feature ?? '');
+      const key = String(body.key ?? '');
+      if (body.reset) await previewText.reset(feature, key);
+      else await previewText.set(feature, key, String(body.value ?? ''));
       return json(200, { ok: true });
     }
     if (p === '/api/timers/create') {

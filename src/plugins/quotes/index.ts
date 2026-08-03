@@ -33,6 +33,27 @@ export function quotesPlugin(): Plugin {
       const svc = ctx.quotes;
       const say = (ch: string, msg: string) => ctx.chat.say(ch, msg);
 
+      // Editable chat strings (Admin → Text Strings, feature "quotes"); blank = silent.
+      // (Printing a found quote uses the structured formatter, not these.)
+      const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
+        { key: 'none', label: 'No quotes saved', default: 'No quotes yet.', placeholders: [] },
+        { key: 'added', label: 'Quote added', default: 'Added {quote}', placeholders: ['quote'] },
+        { key: 'removed', label: 'Quote removed', default: 'Removed quote {id}.', placeholders: ['id'] },
+        { key: 'noSearchMatch', label: 'Search — no match', default: 'No quotes matched that search.', placeholders: [] },
+        { key: 'noUserMatch', label: 'Search by user — no match', default: 'No quotes from that user.', placeholders: [] },
+        { key: 'noDateMatch', label: 'Search by date — no match', default: 'No quotes from that date.', placeholders: [] },
+        { key: 'noGameMatch', label: 'Search by game — no match', default: 'No quotes from that game.', placeholders: [] },
+        { key: 'help', label: 'Help', default: 'Quotes: !quote shows a random quote · !quote <id> shows a specific one · add one (subs+) with: !quote add <username> <text>  OR  !quote add "text" - Name. See them all at https://bot.edmorex.com/quotes', placeholders: [] },
+        { key: 'count', label: 'Count — total', default: 'There {be} {count} {noun} saved.', placeholders: ['be', 'count', 'noun'] },
+        { key: 'searchCount', label: 'Count — search matches', default: '{count} {noun} match “{term}”.', placeholders: ['count', 'noun', 'term'] },
+        { key: 'searchUserCount', label: 'Count — by user', default: '{count} {noun} {be} attributed to {who}.', placeholders: ['count', 'noun', 'be', 'who'] },
+      ];
+      for (const s of strings) ctx.text.register({ feature: 'quotes', ...s });
+      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
+        const msg = ctx.text.format('quotes', key, vars);
+        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
+      };
+
       const getBroadcasterId = async (): Promise<string | undefined> => {
         if (broadcasterId) return broadcasterId;
         const u = await ctx.api.users.getUserByName(ctx.config.twitch.broadcasterUsername);
@@ -87,17 +108,14 @@ export function quotesPlugin(): Plugin {
             return;
           }
           const q = await svc.random();
-          await say(e.channel, q ? formatQuote(q) : 'No quotes yet.');
+          if (q) await say(e.channel, formatQuote(q));
+          else await sayText(e.channel, 'none');
         }),
         subcommands: {
           help: {
             description: 'Show how to use the quote commands.',
             handler: guard(async (e) => {
-              await say(
-                e.channel,
-                'Quotes: !quote shows a random quote · !quote <id> shows a specific one · ' +
-                  'add one (subs+) with: !quote add <username> <text>  OR  !quote add "text" - Name. See them all at https://bot.edmorex.com/quotes',
-              );
+              await sayText(e.channel, 'help');
             }),
           },
           add: {
@@ -112,7 +130,7 @@ export function quotesPlugin(): Plugin {
               await ctx.users.touch(e.user);
               const game = await currentGame();
               const quote = await svc.add({ user, text, game }, { id: e.user.id, displayName: e.user.displayName });
-              await say(e.channel, `Added ${formatQuote(quote)}`);
+              await sayText(e.channel, 'added', { quote: formatQuote(quote) });
             }),
           },
           remove: {
@@ -123,7 +141,7 @@ export function quotesPlugin(): Plugin {
               const id = parseId(firstAndRest(e.argString).first);
               if (id === null) throw new QuoteError('Usage: !quote remove <quoteId>');
               await svc.remove(id);
-              await say(e.channel, `Removed quote ${id}.`);
+              await sayText(e.channel, 'removed', { id });
             }),
           },
           edittext: {
@@ -156,7 +174,8 @@ export function quotesPlugin(): Plugin {
             aliases: ['about'],
             handler: guard(async (e) => {
               const q = await svc.searchText(e.argString);
-              await say(e.channel, q ? formatQuote(q) : 'No quotes matched that search.');
+              if (q) await say(e.channel, formatQuote(q));
+              else await sayText(e.channel, 'noSearchMatch');
             }),
           },
           searchuser: {
@@ -165,7 +184,8 @@ export function quotesPlugin(): Plugin {
             aliases: ['by'],
             handler: guard(async (e) => {
               const q = await svc.searchUser(e.argString);
-              await say(e.channel, q ? formatQuote(q) : 'No quotes from that user.');
+              if (q) await say(e.channel, formatQuote(q));
+              else await sayText(e.channel, 'noUserMatch');
             }),
           },
           searchdate: {
@@ -173,7 +193,8 @@ export function quotesPlugin(): Plugin {
             usage: '<YYYY MM DD>',
             handler: guard(async (e) => {
               const q = await svc.searchDate(e.argString);
-              await say(e.channel, q ? formatQuote(q) : 'No quotes from that date.');
+              if (q) await say(e.channel, formatQuote(q));
+              else await sayText(e.channel, 'noDateMatch');
             }),
           },
           searchgame: {
@@ -181,14 +202,15 @@ export function quotesPlugin(): Plugin {
             usage: '<searchTerm>',
             handler: guard(async (e) => {
               const q = await svc.searchGame(e.argString);
-              await say(e.channel, q ? formatQuote(q) : 'No quotes from that game.');
+              if (q) await say(e.channel, formatQuote(q));
+              else await sayText(e.channel, 'noGameMatch');
             }),
           },
           count: {
             description: 'Say how many quotes are saved.',
             handler: guard(async (e) => {
               const n = await svc.count();
-              await say(e.channel, `There ${n === 1 ? 'is' : 'are'} ${n} quote${n === 1 ? '' : 's'} saved.`);
+              await sayText(e.channel, 'count', { be: n === 1 ? 'is' : 'are', count: n, noun: n === 1 ? 'quote' : 'quotes' });
             }),
           },
           searchcount: {
@@ -198,7 +220,7 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const term = e.argString.trim();
               const n = await svc.countText(term);
-              await say(e.channel, `${n} quote${n === 1 ? '' : 's'} match “${term}”.`);
+              await sayText(e.channel, 'searchCount', { count: n, noun: n === 1 ? 'quote' : 'quotes', term });
             }),
           },
           searchusercount: {
@@ -208,7 +230,7 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const who = e.argString.trim();
               const n = await svc.countUser(who);
-              await say(e.channel, `${n} quote${n === 1 ? '' : 's'} ${n === 1 ? 'is' : 'are'} attributed to ${who}.`);
+              await sayText(e.channel, 'searchUserCount', { count: n, noun: n === 1 ? 'quote' : 'quotes', be: n === 1 ? 'is' : 'are', who });
             }),
           },
         },

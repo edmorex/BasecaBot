@@ -6,9 +6,11 @@
  * (`GET /api/overlay/first`), then subscribes to the `first` WebSocket-hub room
  * for live check-ins (and a `clear` when the stream goes offline).
  *
- * Single-column portrait layout, sized for a ~400×1000 OBS source. Top 50% =
- * title + the first-10 list (rank / name / time), filling in live. Bottom 50% =
- * big "WAS FIRST!" text over a top-3 podium with each winner's circular Twitch
+ * Single-column portrait layout for a 500×1000 OBS source: the ~400px content
+ * column is centred, leaving ~50px gutters each side so the big text glows can
+ * bleed out without hitting the hard edge of the source. Top 50% = title + the
+ * first-10 list (rank / name / time), filling in live. Bottom 50% = big
+ * "WAS FIRST!" text over a top-3 podium with each winner's circular Twitch
  * avatar + name. Stays reactive if resized; sizes use `min(vh, vw, px)` so
  * nothing overflows the narrow width AND nothing balloons in a large preview
  * window (the px cap keeps the podium from overrunning the names).
@@ -35,16 +37,20 @@ export function firstOverlayPage(): string {
   body{ font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif; color:var(--text);
     -webkit-font-smoothing:antialiased; }
 
-  /* Single tall column. Top half = title + list, bottom half = winner + podium. */
-  #stage{ position:absolute; inset:0; display:flex; flex-direction:column; padding:1.6vh 4%; }
+  /* Single tall column, centred at ~80% width (≈400px in a 500px source) so the
+     ~50px gutters each side catch the glow bleed. Top half = title + list,
+     bottom half = winner + podium. */
+  #stage{ position:absolute; top:0; bottom:0; left:50%; transform:translateX(-50%);
+    width:80%; display:flex; flex-direction:column; padding:1.6vh 4%; }
   #top{ height:50%; display:flex; flex-direction:column; min-height:0; }
   #bottom{ height:50%; display:flex; flex-direction:column; min-height:0; }
 
   /* ── Title + first-10 list ──────────────────────────────────────────── */
   .col-title{ font-weight:900; letter-spacing:.03em; font-size:min(3.2vh,7vw,32px); line-height:1.06;
     text-transform:uppercase; color:#fff; margin:0 0 1vh; text-align:center;
-    /* Dark halo for legibility on light backgrounds, plus the pink theme glow. */
-    text-shadow:0 0 3px #250518, 0 0 6px #250518, 0 2px 4px rgba(0,0,0,.6), 0 0 18px rgba(255,79,163,.9); }
+    /* Dark halo for separation on any background + a big, bold pink theme glow. */
+    text-shadow:0 0 3px #10030a, 0 0 8px #10030a, 0 3px 7px rgba(0,0,0,.7),
+      0 0 16px rgba(255,79,163,1), 0 0 34px rgba(255,79,163,.95), 0 0 56px rgba(255,79,163,.6); }
   #list{ list-style:none; margin:0; padding:0; flex:1; display:flex; flex-direction:column; gap:.7vh; min-height:0; }
   #list li{ flex:1; display:flex; align-items:center; gap:3%; background:var(--panel);
     border:1px solid var(--border); border-left:.9vh solid rgba(255,255,255,.14);
@@ -70,11 +76,13 @@ export function firstOverlayPage(): string {
   #winner-name{ font-weight:900; font-size:min(5.5vh,14vw,58px); text-transform:uppercase; letter-spacing:.01em;
     background:linear-gradient(180deg,#ffffff 0%,var(--gold) 72%,#ffb020 100%);
     -webkit-background-clip:text; background-clip:text; color:transparent;
-    /* Dark drop for edge definition on light backgrounds + a gold glow. */
-    filter:drop-shadow(0 2px 4px rgba(0,0,0,.6)) drop-shadow(0 0 10px rgba(255,213,74,.55));
+    /* Dark drop for separation + a big, bold gold glow (drop-shadows compound). */
+    filter:drop-shadow(0 3px 5px rgba(0,0,0,.8)) drop-shadow(0 0 16px rgba(255,213,74,1))
+      drop-shadow(0 0 34px rgba(255,180,20,.9)) drop-shadow(0 0 56px rgba(255,150,0,.6));
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #winner-sub{ font-weight:900; font-size:min(3.2vh,8.5vw,34px); letter-spacing:.12em; text-transform:uppercase;
-    color:#fff; text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 14px rgba(255,79,163,.9); }
+    color:#fff; text-shadow:0 0 3px #10030a, 0 0 9px #10030a, 0 3px 8px rgba(0,0,0,.7),
+      0 0 18px rgba(255,79,163,1), 0 0 38px rgba(255,79,163,.95), 0 0 62px rgba(139,92,246,.7); }
   /* Entrance pop, then a slow "breathing" scale that grows the winner text down
      into the free space above the podium and shrinks back to ~half of it. */
   #winner.show{ animation:pop .6s ease, winnerBreathe 3.6s ease-in-out .6s infinite alternate; }
@@ -94,8 +102,10 @@ export function firstOverlayPage(): string {
   .pod-3 .ava{ border-color:var(--bronze); }
   .pod.has .ava{ animation:float 3s ease-in-out infinite; }
   .pod-name{ font-weight:800; font-size:min(2vh,4.6vw,20px); max-width:100%; white-space:nowrap;
-    overflow:hidden; text-overflow:ellipsis; text-align:center; margin-bottom:1vh; color:#fff;
-    text-shadow:0 0 3px #250518, 0 0 5px #250518, 0 2px 4px rgba(0,0,0,.6), 0 0 10px rgba(255,79,163,.6); }
+    overflow:hidden; text-overflow:ellipsis; text-align:center; margin-bottom:1vh; color:#0a0a0a;
+    /* Black text with a crisp white outline + halo so it reads on any background. */
+    text-shadow:-1.5px -1.5px 0 #fff, 1.5px -1.5px 0 #fff, -1.5px 1.5px 0 #fff, 1.5px 1.5px 0 #fff,
+      0 0 3px #fff, 0 0 7px #fff; }
   .block{ width:100%; border-radius:1vh 1vh 0 0; display:flex; align-items:flex-start;
     justify-content:center; padding-top:.8vh; font-weight:900; font-size:min(2.8vh,7vw,30px);
     color:rgba(0,0,0,.55); flex:none; }
@@ -109,8 +119,10 @@ export function firstOverlayPage(): string {
   /* Keep the dark outline constant in both states so "WAS FIRST!" stays legible
      on light backgrounds while only the pink/purple glow pulses. */
   @keyframes flash{
-    from{ text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 10px rgba(255,79,163,.5); }
-    to{ text-shadow:0 0 3px #250518, 0 0 7px #250518, 0 3px 6px rgba(0,0,0,.55), 0 0 24px rgba(255,79,163,1), 0 0 40px rgba(139,92,246,.85); } }
+    from{ text-shadow:0 0 3px #10030a, 0 0 9px #10030a, 0 3px 8px rgba(0,0,0,.7),
+      0 0 14px rgba(255,79,163,.85), 0 0 30px rgba(255,79,163,.7); }
+    to{ text-shadow:0 0 3px #10030a, 0 0 9px #10030a, 0 3px 8px rgba(0,0,0,.7),
+      0 0 26px rgba(255,79,163,1), 0 0 54px rgba(255,79,163,1), 0 0 82px rgba(139,92,246,.9); } }
   @keyframes float{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-.9vh); } }
   /* Half-fill (scale 1.18) → fill the free space (scale 1.5), from the centre. */
   @keyframes winnerBreathe{ from{ transform:scale(1.18); } to{ transform:scale(1.5); } }
@@ -153,6 +165,32 @@ export function firstOverlayPage(): string {
     return m+':'+(r<10?'0':'')+r; }
   function flash(el){ if(!el) return; el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
 
+  // Shrink a single-line element's font so its (optionally scaled) text fits
+  // maxWidth, never growing past the CSS-defined size. Used so long names don't
+  // overflow: the winner fits the overlay width at its breathing peak, and each
+  // podium name fits its own podium column.
+  var BREATHE_MAX = 1.5; // matches the winnerBreathe keyframe's peak scale
+  function fitText(el, maxWidth, scale){
+    if(!el || !(maxWidth > 0)) return;
+    scale = scale || 1;
+    el.style.fontSize = '';                                 // revert to the CSS max
+    var maxFs = parseFloat(getComputedStyle(el).fontSize) || 16;
+    var w = el.scrollWidth;                                 // natural (unclipped) text width
+    if(w > 0 && w * scale > maxWidth){
+      el.style.fontSize = Math.max(6, (maxFs * maxWidth) / (w * scale)) + 'px';
+    }
+  }
+  function fitNames(){
+    // Fit the winner to the content column (not the full viewport) so it fills
+    // the ~400px content at its breathing peak and the glow bleeds into the gutter.
+    var wrap = document.getElementById('winner');
+    if(wrap) fitText(document.getElementById('winner-name'), wrap.clientWidth * 0.98, BREATHE_MAX);
+    for(var p=1;p<=3;p++){
+      var nm = document.getElementById('name-'+p);
+      if(nm && nm.parentElement) fitText(nm, nm.parentElement.clientWidth * 0.98, 1);
+    }
+  }
+
   function renderList(){
     var html='';
     for(var p=1;p<=LIMIT;p++){
@@ -183,6 +221,7 @@ export function firstOverlayPage(): string {
     var w=document.getElementById('winner'), first=entries[1];
     if(first){ document.getElementById('winner-name').textContent=first.name; w.classList.remove('hidden'); w.classList.add('show'); }
     else { w.classList.add('hidden'); w.classList.remove('show'); }
+    fitNames(); // re-fit after names change so nothing overflows its width
   }
 
   function renderAll(){ renderList(); renderPodium(); }
@@ -230,6 +269,7 @@ export function firstOverlayPage(): string {
   }
 
   renderAll();
+  window.addEventListener('resize', fitNames); // re-fit if the OBS source is resized
   if(!token){ status('missing ?token='); return; }
   loadSnapshot();
   connect();

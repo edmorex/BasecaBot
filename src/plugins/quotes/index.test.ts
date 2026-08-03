@@ -5,6 +5,7 @@ import { CommandRouter } from '../../core/commandRouter.js';
 import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/events.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
+import { TextStringsService } from '../../services/textStrings.js';
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: 'u1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -26,10 +27,13 @@ describe('quotes plugin — help', () => {
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
+    const text = new TextStringsService({ prisma: { textString: { findMany: async () => [] } } } as never);
+    await text.init();
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
+      text,
       quotes: { random },
       users: { touch: vi.fn() },
       api: { users: { getUserByName: vi.fn() }, channels: { getChannelInfoById: vi.fn() } },

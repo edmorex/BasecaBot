@@ -5,6 +5,7 @@ import { CommandRouter } from '../../core/commandRouter.js';
 import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/events.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
+import { TextStringsService } from '../../services/textStrings.js';
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: '1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -29,10 +30,13 @@ describe('basecaWheel plugin', () => {
     part = vi.fn();
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join, part } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
+    const text = new TextStringsService({ prisma: { textString: { findMany: async () => [] } } } as never);
+    await text.init();
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
+      text,
       ws: { broadcast },
       config: { twitch: { channel: 'test' } },
       logger: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },

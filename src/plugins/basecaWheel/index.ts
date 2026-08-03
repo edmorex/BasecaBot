@@ -86,6 +86,12 @@ export function basecaWheelPlugin(): Plugin {
   // At most one guest channel at a time (single shared wheel surface).
   let guest: { channel: string; timer: ReturnType<typeof setTimeout> } | null = null;
 
+  // Editable chat strings (Admin → Text Strings, feature "wheel"); blank = silent.
+  const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
+    const msg = ctx.text.format('wheel', key, vars);
+    return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
+  };
+
   /** Leave the current guest channel (announcing first, unless shutting down). */
   async function partGuest(announce: boolean): Promise<void> {
     if (!guest) return;
@@ -93,9 +99,7 @@ export function basecaWheelPlugin(): Plugin {
     clearTimeout(guest.timer);
     guest = null;
     if (announce) {
-      await ctx.chat
-        .say(channel, '👋 BasecaBot is heading out — thanks for having me! The host can bring me back with !wheel connect.')
-        .catch(() => {});
+      await sayText(channel, 'departure').catch(() => {});
     }
     ctx.chat.part(channel);
     ctx.logger.info({ channel }, 'wheel: left guest channel');
@@ -109,6 +113,20 @@ export function basecaWheelPlugin(): Plugin {
       ctx = context;
       const primary = ctx.config.twitch.channel;
 
+      const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
+        { key: 'winner', label: 'Winner announced', default: 'BasecaWheel has decided! The winner is {winner}!', placeholders: ['winner'] },
+        { key: 'departure', label: 'Auto-leave farewell (guest)', default: '👋 BasecaBot is heading out — thanks for having me! The host can bring me back with !wheel connect.', placeholders: [] },
+        { key: 'guestGreeting', label: 'Greeting on joining a guest', default: "👋 BasecaBot is here for BasecaWheel! Use !wheel add <entry> to enter and !wheel spin to play. (I'll auto-leave in {duration}.)", placeholders: ['duration'] },
+        { key: 'connected', label: 'Connect confirmation (primary)', default: 'Connected to {channel} for {duration}. Use !wheel disconnect to end early.', placeholders: ['channel', 'duration'] },
+        { key: 'disconnected', label: 'Disconnect confirmation', default: 'Disconnected from {channel}.', placeholders: ['channel'] },
+        { key: 'alreadyHere', label: 'Connect — already in channel', default: "I'm already in this channel.", placeholders: [] },
+        { key: 'joinFailed', label: 'Connect — join failed', default: "Couldn't join {channel}. Is that a valid channel name?", placeholders: ['channel'] },
+        { key: 'notConnected', label: 'Disconnect — not connected', default: "I'm not connected to any guest channel.", placeholders: [] },
+        { key: 'usageText', label: 'Usage — add/title', default: 'Usage: !wheel {command} [text]', placeholders: ['command'] },
+        { key: 'usageConnect', label: 'Usage — connect', default: 'Usage: !wheel connect <guestChannel> [seconds]', placeholders: [] },
+      ];
+      for (const s of strings) ctx.text.register({ feature: 'wheel', ...s });
+
       // Forward a subcommand to the web app, tagged with the originating channel.
       const forward = (e: WheelEvent, command: string, text: string) => {
         const payload: WheelCommandPayload = { command, text, user: e.user.displayName, permission: e.user.permission, channel: e.channel };
@@ -117,7 +135,7 @@ export function basecaWheelPlugin(): Plugin {
       };
       const withText = (command: string) => async (e: WheelEvent) => {
         const text = e.argString.trim();
-        if (!text) return void ctx.chat.say(e.channel, `Usage: !wheel ${command} [text]`);
+        if (!text) return void sayText(e.channel, 'usageText', { command });
         forward(e, command, text);
       };
       const action = (command: string) => async (e: WheelEvent) => forward(e, command, '');
@@ -139,8 +157,8 @@ export function basecaWheelPlugin(): Plugin {
               if (e.channel !== primary) return; // only invitable from the primary channel
               const { first, rest } = firstAndRest(e.argString);
               const target = normalizeChannel(first);
-              if (!target) return void ctx.chat.say(e.channel, 'Usage: !wheel connect <guestChannel> [seconds]');
-              if (target === primary) return void ctx.chat.say(e.channel, "I'm already in this channel.");
+              if (!target) return void sayText(e.channel, 'usageConnect');
+              if (target === primary) return void sayText(e.channel, 'alreadyHere');
 
               const parsed = Number.parseInt(rest, 10);
               const seconds = Number.isFinite(parsed) && parsed > 0 ? Math.min(MAX_TIMEOUT, Math.max(MIN_TIMEOUT, parsed)) : DEFAULT_TIMEOUT;
@@ -150,14 +168,11 @@ export function basecaWheelPlugin(): Plugin {
                 await ctx.chat.join(target);
               } catch (err) {
                 ctx.logger.error({ err, target }, 'wheel: failed to join guest channel');
-                return void ctx.chat.say(e.channel, `Couldn't join ${target}. Is that a valid channel name?`);
+                return void sayText(e.channel, 'joinFailed', { channel: target });
               }
               guest = { channel: target, timer: setTimeout(() => void partGuest(true), seconds * 1000) };
-              await ctx.chat.say(
-                target,
-                `👋 BasecaBot is here for BasecaWheel! Use !wheel add <entry> to enter and !wheel spin to play. (I'll auto-leave in ${formatDuration(seconds)}.)`,
-              );
-              await ctx.chat.say(e.channel, `Connected to ${target} for ${formatDuration(seconds)}. Use !wheel disconnect to end early.`);
+              await sayText(target, 'guestGreeting', { duration: formatDuration(seconds) });
+              await sayText(e.channel, 'connected', { channel: target, duration: formatDuration(seconds) });
               ctx.logger.info({ target, seconds }, 'wheel: joined guest channel');
             },
           },
@@ -169,12 +184,12 @@ export function basecaWheelPlugin(): Plugin {
             description: 'Leave the current guest channel — usable from the primary OR the guest channel (Broadcaster+).',
             permission: PermissionLevel.Broadcaster,
             handler: async (e: CommandEvent) => {
-              if (!guest) return void ctx.chat.say(e.channel, "I'm not connected to any guest channel.");
+              if (!guest) return void sayText(e.channel, 'notConnected');
               const left = guest.channel;
               await partGuest(true); // announces farewell in the guest, then parts it
               // Confirm in the primary channel — if the command came from the guest,
               // we've just left e.channel and can no longer speak there.
-              await ctx.chat.say(primary, `Disconnected from ${left}.`);
+              await sayText(primary, 'disconnected', { channel: left });
             },
           },
         },
@@ -192,7 +207,7 @@ export function basecaWheelPlugin(): Plugin {
             if (payload.text) await ctx.chat.say(channel, payload.text);
             break;
           case 'result':
-            await ctx.chat.say(channel, `BasecaWheel has decided! The winner is ${payload.winner ?? 'nobody'}!`);
+            await sayText(channel, 'winner', { winner: payload.winner ?? 'nobody' });
             break;
           default:
             ctx.logger.debug({ messageType: e.messageType }, 'unhandled wheel ws message');

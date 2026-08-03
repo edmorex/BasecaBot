@@ -6,6 +6,7 @@ import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/even
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
 import { InsufficientPointsError } from '../../services/points.js';
+import { TextStringsService } from '../../services/textStrings.js';
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: 'u1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -40,10 +41,13 @@ describe('points plugin commands', () => {
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
+    const text = new TextStringsService({ prisma: { textString: { findMany: async () => [] } } } as never);
+    await text.init();
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
+      text,
       points: { getBalance, transfer, award },
       users: { resolveUserRef },
       api: { users: { getUserByName: vi.fn() } },

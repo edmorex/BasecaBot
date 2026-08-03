@@ -5,6 +5,7 @@ import { CommandRouter } from '../../core/commandRouter.js';
 import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/events.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
+import { TextStringsService } from '../../services/textStrings.js';
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: 'u1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -27,6 +28,7 @@ describe('first plugin', () => {
   let getStreamByUserId: ReturnType<typeof vi.fn>;
   let broadcast: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof firstPlugin>;
+  let text: TextStringsService;
 
   const LIVE = { startDate: new Date(Date.now() - 42_000) }; // 42s ago
 
@@ -46,10 +48,13 @@ describe('first plugin', () => {
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
+    text = new TextStringsService({ prisma: { textString: { findMany: async () => [], upsert: async () => {}, deleteMany: async () => {} } } } as never);
+    await text.init();
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
+      text,
       first,
       users: { touch: vi.fn(), resolveUserRef: vi.fn(async () => ({ kind: 'none' })) },
       ws: { broadcast },
@@ -98,6 +103,20 @@ describe('first plugin', () => {
     first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
     await run('!first');
     expect(last()).toBe('Congratulations Alice! You are FIRST! You clocked in at 42 seconds.');
+  });
+
+  it('uses a Text Strings override when one is set', async () => {
+    await text.set('first', 'firstPlace', '🥇 {name} SMASHED it at {time}!');
+    first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
+    await run('!first');
+    expect(last()).toBe('🥇 Alice SMASHED it at 42 seconds!');
+  });
+
+  it('stays silent when a string is blanked (empty = disabled)', async () => {
+    await text.set('first', 'notLive', '   ');
+    getStreamByUserId.mockResolvedValue(null);
+    await run('!first');
+    expect(say).not.toHaveBeenCalled();
   });
 
   it('broadcasts the check-in to the "first" overlay room with an avatar', async () => {

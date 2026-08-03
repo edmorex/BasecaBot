@@ -107,6 +107,22 @@ export function pointsPlugin(): Plugin {
       ctx = context;
       const CURRENCY = ctx.config.points.name;
 
+      // Editable chat strings (Admin → Text Strings, feature "points"); blank = silent.
+      // {currency} is the configured points name (POINTS_NAME).
+      const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
+        { key: 'balance', label: 'Balance', default: '@{user} you have {amount} {currency}.', placeholders: ['user', 'amount', 'currency'] },
+        { key: 'gave', label: 'Give — success', default: '@{user} gave {amount} {currency} to {target}.', placeholders: ['user', 'amount', 'currency', 'target'] },
+        { key: 'insufficient', label: 'Give — not enough', default: '@{user} you only have {balance} {currency}.', placeholders: ['user', 'balance', 'currency'] },
+        { key: 'granted', label: 'Grant — success', default: '{target} now has {amount} {currency}.', placeholders: ['target', 'amount', 'currency'] },
+        { key: 'unknownUser', label: 'Unknown user', default: "I don't know a user called {user}.", placeholders: ['user'] },
+        { key: 'usage', label: 'Usage (give/grant)', default: 'Usage: !points {label} <user> <amount>', placeholders: ['label'] },
+      ];
+      for (const s of strings) ctx.text.register({ feature: 'points', ...s });
+      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
+        const msg = ctx.text.format('points', key, vars);
+        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
+      };
+
       // ── Commands ──────────────────────────────────────────────────────────
 
       /** Resolve a `<user> <amount>` argument pair, or explain what's wrong. */
@@ -119,13 +135,13 @@ export function pointsPlugin(): Plugin {
         const amount = Number(amountRaw);
         const validAmount = Number.isInteger(amount) && (allowNegative ? amount !== 0 : amount > 0);
         if (!target || !validAmount) {
-          await ctx.chat.say(e.channel, `Usage: !points ${label} <user> <amount>`);
+          await sayText(e.channel, 'usage', { label });
           return null;
         }
         // Any of the user's names works here — @handle, display name, or alias.
         const recipient = await ctx.users.resolveUserRef(target);
         if (recipient.kind !== 'user') {
-          await ctx.chat.say(e.channel, `I don't know a user called ${target}.`);
+          await sayText(e.channel, 'unknownUser', { user: target });
           return null;
         }
         return { id: recipient.id, displayName: recipient.displayName, amount };
@@ -138,7 +154,7 @@ export function pointsPlugin(): Plugin {
         // Bare `!points` — and anything unrecognized — just reports the balance.
         onUnknown: async (e) => {
           const balance = await ctx.points.getBalance(e.user.id);
-          await ctx.chat.say(e.channel, `@${e.user.displayName} you have ${balance} ${CURRENCY}.`);
+          await sayText(e.channel, 'balance', { user: e.user.displayName, amount: balance, currency: CURRENCY });
         },
         subcommands: {
           give: {
@@ -151,10 +167,10 @@ export function pointsPlugin(): Plugin {
               if (!t) return;
               try {
                 await ctx.points.transfer(e.user.id, t.id, t.amount);
-                await ctx.chat.say(e.channel, `@${e.user.displayName} gave ${t.amount} ${CURRENCY} to ${t.displayName}.`);
+                await sayText(e.channel, 'gave', { user: e.user.displayName, amount: t.amount, currency: CURRENCY, target: t.displayName });
               } catch (err) {
                 if (err instanceof InsufficientPointsError) {
-                  await ctx.chat.say(e.channel, `@${e.user.displayName} you only have ${err.balance} ${CURRENCY}.`);
+                  await sayText(e.channel, 'insufficient', { user: e.user.displayName, balance: err.balance, currency: CURRENCY });
                 } else {
                   throw err;
                 }
@@ -169,7 +185,7 @@ export function pointsPlugin(): Plugin {
               const t = await parseTarget(e, 'grant', true);
               if (!t) return;
               const balance = await ctx.points.award(t.id, t.amount);
-              await ctx.chat.say(e.channel, `${t.displayName} now has ${balance} ${CURRENCY}.`);
+              await sayText(e.channel, 'granted', { target: t.displayName, amount: balance, currency: CURRENCY });
             },
           },
         },

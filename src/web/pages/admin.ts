@@ -414,12 +414,12 @@ export function adminPage(): string {
             return '<tr>' +
               '<td style="vertical-align:top; white-space:nowrap"><strong>' + esc(s.label) + '</strong>' + tag +
                 '<div class="muted" style="font-size:.78rem"><code>' + esc(s.feature) + '.' + esc(s.key) + '</code>' + reset + '</div>' + desc + ph + '</td>' +
-              '<td style="width:62%; vertical-align:middle"><input type="text" value="' + esc(s.value) + '" style="width:100%" /></td>' +
-              '<td style="vertical-align:middle"><button type="button" class="pink" data-save data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">Save</button></td>' +
+              '<td style="width:100%; vertical-align:middle"><input type="text" value="' + esc(s.value) + '" style="width:100%" /></td>' +
+              '<td style="vertical-align:middle; text-align:right; white-space:nowrap"><button type="button" class="pink" data-save data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">Save</button></td>' +
               '</tr>';
           }).join('');
           return '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .6rem">' + esc(prettyFeature(g.feature)) + '</h3>' +
-            '<div style="overflow-x:auto"><table><thead><tr><th>Label</th><th>Text</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+            '<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th>Label</th><th>Text</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
         }).join('');
         main.innerHTML = '<h2>Text Strings</h2>' +
           '<p class="muted">Edit the text the bot posts to chat, grouped by feature. Placeholders like <code>{user}</code> are filled in when the message is sent. Changes take effect immediately.</p>' +

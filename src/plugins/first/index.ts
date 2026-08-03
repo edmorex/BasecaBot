@@ -2,7 +2,7 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent, EventUser } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
-import type { CheckInResult, LeaderRow } from '../../services/first.js';
+import type { LeaderRow } from '../../services/first.js';
 
 /** English pluralization: pick singular/plural by count. */
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
@@ -24,7 +24,26 @@ export function firstPlugin(): Plugin {
     version: '0.1.0',
 
     init(ctx: ServiceContext) {
-      const say = (ch: string, msg: string) => ctx.chat.say(ch, msg);
+      // Editable chat strings (Admin → Text Strings, feature "First"). A blank
+      // string is silent, so clearing one on the dashboard disables that message.
+      const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
+        { key: 'firstPlace', label: 'Check-in — 1st place', default: 'Congratulations {name}! You are FIRST! You clocked in at {time}.', placeholders: ['name', 'time'] },
+        { key: 'topTen', label: 'Check-in — 2nd–10th', default: 'Congratulations {name}! You are FIRST… {others}. You clocked in at {time}.', placeholders: ['name', 'others', 'time'] },
+        { key: 'eleventhPlus', label: 'Check-in — 11th+', default: 'Congratulations {name}! You are FIRST… {others}. Let’s just keep this between us.', placeholders: ['name', 'others'] },
+        { key: 'repeat', label: 'Check-in — already claimed', default: 'Did you forget you already have claimed to be first? Don’t worry, you are not the first to make this mistake.', placeholders: [] },
+        { key: 'notLive', label: 'Check-in — before stream is live', default: 'Very naughty! You are not the first person to try and claim first before the stream has started.', placeholders: [] },
+        { key: 'unknownBoard', label: 'Leaderboard — unknown option', default: 'Unknown leaderboard. Use: firsts, points, or time.', placeholders: [] },
+        { key: 'noResults', label: 'Leaderboard — no results', default: 'No !first results yet — be the FIRST!', placeholders: [] },
+        { key: 'leaderboard', label: 'Leaderboard — line', default: '🏆 {title}: {list}', placeholders: ['title', 'list'] },
+        { key: 'unknownUser', label: 'Stats — unknown user', default: 'I don’t know a user called {user}.', placeholders: ['user'] },
+        { key: 'noStats', label: 'Stats — no placements', default: '{name} hasn’t cracked the top 10 yet.', placeholders: ['name'] },
+        { key: 'stats', label: 'Stats — line', default: '📊 {name}’s FIRST stats — {body}', placeholders: ['name', 'body'] },
+      ];
+      for (const s of strings) ctx.text.register({ feature: 'first', ...s });
+      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
+        const msg = ctx.text.format('first', key, vars);
+        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
+      };
 
       // Per-user cooldown on check-in ATTEMPTS (the bare "!first"), so nobody can
       // spam it to jump the gun before the stream is live. The router doesn't
@@ -91,22 +110,6 @@ export function firstPlugin(): Plugin {
         monitorHandle = undefined;
       };
 
-      // ── Check-in message per the spec ─────────────────────────────────────────
-      const checkinMessage = (name: string, r: CheckInResult): string => {
-        if (r.repeat) {
-          return `Did you forget you already have claimed to be first? Don’t worry, you are not the first to make this mistake.`;
-        }
-        const secs = `${r.timeSeconds} ${plural(r.timeSeconds, 'second', 'seconds')}`;
-        if (r.place === 1) {
-          return `Congratulations ${name}! You are FIRST! You clocked in at ${secs}.`;
-        }
-        const n = r.place - 1;
-        const before = `if you ignore the ${n} ${plural(n, 'person', 'people')} who ${plural(n, 'was', 'were')} FIRST before you`;
-        return r.place <= 10
-          ? `Congratulations ${name}! You are FIRST… ${before}. You clocked in at ${secs}.`
-          : `Congratulations ${name}! You are FIRST… ${before}. Let’s just keep this between us.`;
-      };
-
       // ── Leaderboard rendering ─────────────────────────────────────────────────
       const LEADERBOARDS: Record<string, { title: string; fetch: () => Promise<LeaderRow[]>; fmt: (v: number) => string }> = {
         firsts: { title: 'Most FIRSTs', fetch: () => ctx.first.topFirsts(), fmt: (v) => String(v) },
@@ -142,7 +145,7 @@ export function firstPlugin(): Plugin {
 
           const stream = await currentStream();
           if (!stream) {
-            await say(e.channel, `Very naughty! You are not the first person to try and claim first before the stream has started.`);
+            await sayText(e.channel, 'notLive');
             return;
           }
           await ctx.users.touch(e.user);
@@ -151,7 +154,18 @@ export function firstPlugin(): Plugin {
           lastKey = streamKey; // keep the monitor from re-clearing on its next poll
           const seconds = Math.max(0, Math.floor((Date.now() - stream.startDate.getTime()) / 1000));
           const result = await ctx.first.checkIn(e.user.id, streamKey, seconds);
-          await say(e.channel, checkinMessage(e.user.displayName, result));
+          if (result.repeat) {
+            await sayText(e.channel, 'repeat');
+          } else {
+            const time = `${result.timeSeconds} ${plural(result.timeSeconds, 'second', 'seconds')}`;
+            if (result.place === 1) {
+              await sayText(e.channel, 'firstPlace', { name: e.user.displayName, time });
+            } else {
+              const n = result.place - 1;
+              const others = `if you ignore the ${n} ${plural(n, 'person', 'people')} who ${plural(n, 'was', 'were')} FIRST before you`;
+              await sayText(e.channel, result.place <= 10 ? 'topTen' : 'eleventhPlus', { name: e.user.displayName, others, time });
+            }
+          }
 
           // Push the top-10 standings to the OBS overlay. Done after the chat
           // reply and off the hot path (an avatar fetch shouldn't slow the race).
@@ -170,16 +184,16 @@ export function firstPlugin(): Plugin {
               const key = (e.args[0] ?? 'firsts').toLowerCase();
               const board = LEADERBOARDS[key];
               if (!board) {
-                await say(e.channel, 'Unknown leaderboard. Use: firsts, points, or time.');
+                await sayText(e.channel, 'unknownBoard');
                 return;
               }
               const rows = await board.fetch();
               if (!rows.length) {
-                await say(e.channel, 'No !first results yet — be the FIRST!');
+                await sayText(e.channel, 'noResults');
                 return;
               }
               const list = rows.map((r, i) => `${i + 1}. ${r.displayName} (${board.fmt(r.value)})`).join(', ');
-              await say(e.channel, `🏆 ${board.title}: ${list}`);
+              await sayText(e.channel, 'leaderboard', { title: board.title, list });
             },
           },
 
@@ -195,7 +209,7 @@ export function firstPlugin(): Plugin {
               if (arg) {
                 const ref = await ctx.users.resolveUserRef(arg);
                 if (ref.kind !== 'user') {
-                  await say(e.channel, `I don’t know a user called ${arg}.`);
+                  await sayText(e.channel, 'unknownUser', { user: arg });
                   return;
                 }
                 userId = ref.id;
@@ -206,21 +220,19 @@ export function firstPlugin(): Plugin {
 
               const s = await ctx.first.statsFor(userId);
               if (!s) {
-                await say(e.channel, `${name} hasn’t cracked the top 10 yet.`);
+                await sayText(e.channel, 'noStats', { name });
                 return;
               }
               const rank = (r: number | null) => (r === null ? '—' : `#${r}`);
               const avgT = s.avgTime === null ? '—' : `${s.avgTime.toFixed(1)}s`;
               const avgP = s.avgPlace === null ? '—' : s.avgPlace.toFixed(1);
-              await say(
-                e.channel,
-                `📊 ${s.displayName}’s FIRST stats — ` +
-                  `1sts: ${s.firsts} (${rank(s.ranks.firsts)}) · ` +
-                  `top-10s: ${s.topTens} (${rank(s.ranks.topTens)}) · ` +
-                  `avg time: ${avgT} (${rank(s.ranks.avgTime)}) · ` +
-                  `avg place: ${avgP} (${rank(s.ranks.avgPlace)}) · ` +
-                  `points: ${s.points} (${rank(s.ranks.points)})`,
-              );
+              const body =
+                `1sts: ${s.firsts} (${rank(s.ranks.firsts)}) · ` +
+                `top-10s: ${s.topTens} (${rank(s.ranks.topTens)}) · ` +
+                `avg time: ${avgT} (${rank(s.ranks.avgTime)}) · ` +
+                `avg place: ${avgP} (${rank(s.ranks.avgPlace)}) · ` +
+                `points: ${s.points} (${rank(s.ranks.points)})`;
+              await sayText(e.channel, 'stats', { name: s.displayName, body });
             },
           },
         },
