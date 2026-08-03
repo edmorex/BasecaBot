@@ -3,35 +3,21 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AppConfig } from '../services/config.js';
 import { scopedLogger } from '../services/logger.js';
+import { HttpError, LEVEL_LABELS, IMPORT_MAX_BYTES, labelToLevel } from './httpShared.js';
 import type { UsersService } from '../services/users.js';
-import { AliasError } from '../services/users.js';
 import type { CustomCommandService, TargetRef } from '../services/customCommands.js';
-import { CommandError } from '../services/customCommands.js';
 import type { ListsService, ListImportItem } from '../services/lists.js';
-import { ListError } from '../services/lists.js';
 import type { QuotesService } from '../services/quotes.js';
-import { QuoteError } from '../services/quotes.js';
 import type { PointsService } from '../services/points.js';
 import type { TimerService } from '../services/timers.js';
-import { TimerError } from '../services/timers.js';
 import type { FirstService } from '../services/first.js';
 import type { TextStringsService } from '../services/textStrings.js';
 import type { EventBus } from '../core/eventBus.js';
-import { buildSimEvent, isSimEventType } from '../services/eventSimulator.js';
-import { parseCsv, toCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC, type CsvColumn } from '../services/csv.js';
+import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
 import type { CommandRouter } from '../core/commandRouter.js';
 import type { ChannelRelationshipService } from './auth/channelRelationship.js';
-import { buildAuthorizeUrl, exchangeCodeForToken, fetchAuthedUser } from './auth/twitchOAuth.js';
-import {
-  SESSION_COOKIE,
-  OAUTH_STATE_COOKIE,
-  signSession,
-  verifySession,
-  randomState,
-  parseCookies,
-  serializeCookie,
-} from './auth/session.js';
+import { SESSION_COOKIE, verifySession, parseCookies } from './auth/session.js';
 import type { SessionData } from './auth/types.js';
 import { welcomePage } from './pages/welcome.js';
 import { userPage } from './pages/user.js';
@@ -41,21 +27,17 @@ import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 
+import { handleLogin, handleCallback, handleLogout, getMe, postDisplayName, postAlias } from './routes/authRoutes.js';
+import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
+import { getLists, createList, updateList, deleteList, addListEntry, updateListEntry, deleteListEntry, exportLists, importLists } from './routes/listsRoutes.js';
+import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
+import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
+import { getFirstOverlayData, getAdminOverlays } from './routes/overlayRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
-const IMPORT_MAX_BYTES = 5 * 1024 * 1024; // CSV imports can be large
-const LEVEL_LABELS = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
-
-/** Map a permission label ("Moderator"), restrict keyword ("mod"), or number to a level 0–5. */
-function labelToLevel(s: string): number {
-  const t = s.trim().toLowerCase();
-  if (/^\d+$/.test(t)) return Math.min(5, Math.max(0, Number(t)));
-  const byLabel = LEVEL_LABELS.findIndex((l) => l.toLowerCase() === t);
-  if (byLabel >= 0) return byLabel;
-  const kw: Record<string, number> = { all: 0, sub: 1, mod: 3 };
-  return kw[t] ?? 3;
-}
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -67,37 +49,32 @@ const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript',
 };
 
-/** Thrown by handlers to return a specific HTTP status with a JSON error. */
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
 /**
- * The bot's web surface: the multi-page dashboard (welcome / profile /
- * commands), the "Login with Twitch" OAuth flow, static assets, and a JSON API.
- * Runs behind Caddy (TLS); cookies are Secure when publicUrl is https.
+ * The bot's web surface: the multi-page dashboard (welcome / profile / commands),
+ * the "Login with Twitch" OAuth flow, static assets, and a JSON API. Runs behind
+ * Caddy (TLS); cookies are Secure when publicUrl is https.
+ *
+ * This class owns the HTTP server, the request routing (`handle`), and the shared
+ * infrastructure (auth/session, JSON/CSV responses, `readJson`). The actual API
+ * handlers live in `./routes/*` as free functions that receive this server for
+ * its helpers + services — keeping each domain's endpoints in its own file.
  */
 export class WebServer {
-  private server?: Server;
+  server?: Server;
 
   constructor(
-    private readonly config: AppConfig,
-    private readonly relationships: ChannelRelationshipService,
-    private readonly users: UsersService,
-    private readonly customCommands: CustomCommandService,
-    private readonly commands: CommandRouter,
-    private readonly lists: ListsService,
-    private readonly quotes: QuotesService,
-    private readonly points: PointsService,
-    private readonly bus: EventBus,
-    private readonly timers: TimerService,
-    private readonly first: FirstService,
-    private readonly text: TextStringsService,
+    readonly config: AppConfig,
+    readonly relationships: ChannelRelationshipService,
+    readonly users: UsersService,
+    readonly customCommands: CustomCommandService,
+    readonly commands: CommandRouter,
+    readonly lists: ListsService,
+    readonly quotes: QuotesService,
+    readonly points: PointsService,
+    readonly bus: EventBus,
+    readonly timers: TimerService,
+    readonly first: FirstService,
+    readonly text: TextStringsService,
   ) {}
 
   start(): void {
@@ -120,7 +97,7 @@ export class WebServer {
     });
   }
 
-  private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', this.config.web.publicUrl);
     const p = url.pathname;
     const method = req.method ?? 'GET';
@@ -152,35 +129,35 @@ export class WebServer {
           // read-only ?token=... it uses to fetch data + subscribe.
           return this.html(res, firstOverlayPage());
         case '/auth/login':
-          return this.handleLogin(res);
+          return handleLogin(this, res);
         case '/auth/callback':
-          return this.handleCallback(req, res, url);
+          return handleCallback(this, req, res, url);
         case '/auth/logout':
-          return this.handleLogout(res);
+          return handleLogout(this, res);
         case '/api/me':
-          return this.getMe(req, res);
+          return getMe(this, req, res);
         case '/api/commands':
-          return this.getCommands(res);
+          return getCommands(this, res);
         case '/api/commands/export':
-          return this.exportCommands(req, res);
+          return exportCommands(this, req, res);
         case '/api/lists':
-          return this.getLists(res);
+          return getLists(this, res);
         case '/api/lists/export':
-          return this.exportLists(req, res, url);
+          return exportLists(this, req, res, url);
         case '/api/quotes':
-          return this.getQuotes(res);
+          return getQuotes(this, res);
         case '/api/quotes/export':
-          return this.exportQuotes(req, res);
+          return exportQuotes(this, req, res);
         case '/api/timers':
-          return this.getTimers(res);
+          return getTimers(this, res);
         case '/api/overlay/first':
-          return this.getFirstOverlayData(req, res, url);
+          return getFirstOverlayData(this, req, res, url);
         case '/api/admin/overlays':
-          return this.getAdminOverlays(req, res);
+          return getAdminOverlays(this, req, res);
         case '/api/admin/users':
-          return this.getAdminUsers(req, res);
+          return getAdminUsers(this, req, res);
         case '/api/admin/strings':
-          return this.getAdminStrings(req, res);
+          return getAdminStrings(this, req, res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -191,63 +168,63 @@ export class WebServer {
     if (method === 'POST') {
       switch (p) {
         case '/api/me/display-name':
-          return this.postDisplayName(req, res);
+          return postDisplayName(this, req, res);
         case '/api/me/aliases':
-          return this.postAlias(req, res, 'add');
+          return postAlias(this, req, res, 'add');
         case '/api/me/aliases/delete':
-          return this.postAlias(req, res, 'remove');
+          return postAlias(this, req, res, 'remove');
         case '/api/commands':
-          return this.postCommand(req, res);
+          return postCommand(this, req, res);
         case '/api/commands/create':
-          return this.createCommand(req, res);
+          return createCommand(this, req, res);
         case '/api/commands/delete':
-          return this.deleteCommand(req, res);
+          return deleteCommand(this, req, res);
         case '/api/commands/alias':
-          return this.addCommandAlias(req, res);
+          return addCommandAlias(this, req, res);
         case '/api/commands/alias/update':
-          return this.updateCommandAlias(req, res);
+          return updateCommandAlias(this, req, res);
         case '/api/commands/alias/delete':
-          return this.removeCommandAlias(req, res);
+          return removeCommandAlias(this, req, res);
         case '/api/commands/import':
-          return this.importCommands(req, res);
+          return importCommands(this, req, res);
         case '/api/lists/create':
-          return this.createList(req, res);
+          return createList(this, req, res);
         case '/api/lists/update':
-          return this.updateList(req, res);
+          return updateList(this, req, res);
         case '/api/lists/delete':
-          return this.deleteList(req, res);
+          return deleteList(this, req, res);
         case '/api/lists/entries/add':
-          return this.addListEntry(req, res);
+          return addListEntry(this, req, res);
         case '/api/lists/entries/update':
-          return this.updateListEntry(req, res);
+          return updateListEntry(this, req, res);
         case '/api/lists/entries/delete':
-          return this.deleteListEntry(req, res);
+          return deleteListEntry(this, req, res);
         case '/api/lists/import':
-          return this.importLists(req, res);
+          return importLists(this, req, res);
         case '/api/quotes/update':
-          return this.updateQuote(req, res);
+          return updateQuote(this, req, res);
         case '/api/quotes/delete':
-          return this.deleteQuote(req, res);
+          return deleteQuote(this, req, res);
         case '/api/quotes/import':
-          return this.importQuotes(req, res);
+          return importQuotes(this, req, res);
         case '/api/timers/create':
-          return this.createTimer(req, res);
+          return createTimer(this, req, res);
         case '/api/timers/update':
-          return this.updateTimer(req, res);
+          return updateTimer(this, req, res);
         case '/api/timers/delete':
-          return this.deleteTimer(req, res);
+          return deleteTimer(this, req, res);
         case '/api/timers/loop':
-          return this.setTimerLoop(req, res);
+          return setTimerLoop(this, req, res);
         case '/api/admin/users/init':
-          return this.initAdminUser(req, res);
+          return initAdminUser(this, req, res);
         case '/api/admin/users/update':
-          return this.updateAdminUser(req, res);
+          return updateAdminUser(this, req, res);
         case '/api/admin/users/delete':
-          return this.deleteAdminUser(req, res);
+          return deleteAdminUser(this, req, res);
         case '/api/admin/simulate':
-          return this.simulateEvent(req, res);
+          return simulateEvent(this, req, res);
         case '/api/admin/strings':
-          return this.postAdminString(req, res);
+          return postAdminString(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -256,357 +233,20 @@ export class WebServer {
     return this.send(res, 405, 'text/plain', 'Method Not Allowed');
   }
 
-  // ── Auth flow ───────────────────────────────────────────────────────────────
-
-  private handleLogin(res: ServerResponse): void {
-    const state = randomState();
-    res.setHeader('Set-Cookie', serializeCookie(OAUTH_STATE_COOKIE, state, {
-      maxAgeSeconds: 600, httpOnly: true, secure: this.config.web.secureCookies, sameSite: 'Lax',
-    }));
-    this.redirect(res, buildAuthorizeUrl(this.config, state));
-  }
-
-  private async handleCallback(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    if (url.searchParams.get('error')) return this.redirect(res, '/');
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    const expectedState = parseCookies(req.headers.cookie)[OAUTH_STATE_COOKIE];
-    if (!code || !state || !expectedState || state !== expectedState) {
-      log.warn('OAuth callback with missing/mismatched state');
-      return this.send(res, 400, 'text/plain', 'Invalid OAuth state. Please try logging in again.');
-    }
-
-    const token = await exchangeCodeForToken(this.config, code);
-    const user = await fetchAuthedUser(this.config, token);
-    // Remember the user in the DB (creates the profile; keeps a custom display
-    // name intact via displayNameLocked).
-    await this.users.touch({ id: user.id, login: user.login, displayName: user.displayName, avatarUrl: user.avatar });
-    const relationship = await this.relationships.compute(user);
-
-    const session = signSession({ user, relationship }, this.config.web.sessionSecret);
-    res.setHeader('Set-Cookie', [
-      serializeCookie(SESSION_COOKIE, session, {
-        maxAgeSeconds: 8 * 60 * 60, httpOnly: true, secure: this.config.web.secureCookies, sameSite: 'Lax',
-      }),
-      serializeCookie(OAUTH_STATE_COOKIE, '', { maxAgeSeconds: 0, secure: this.config.web.secureCookies }),
-    ]);
-    log.info({ login: user.login }, 'user logged in');
-    this.redirect(res, '/user');
-  }
-
-  private handleLogout(res: ServerResponse): void {
-    res.setHeader('Set-Cookie', serializeCookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure: this.config.web.secureCookies }));
-    this.redirect(res, '/');
-  }
-
   // ── JSON API ─────────────────────────────────────────────────────────────────
 
-  private async getMe(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const session = this.getSession(req);
-    if (!session) throw new HttpError(401, 'unauthenticated');
-    const profile = await this.users.getProfile(session.user.id);
-    this.json(res, 200, {
-      user: {
-        twitchId: session.user.id,
-        login: session.user.login,
-        canonical: profile?.canonical ?? `@${session.user.login}`,
-        displayName: profile?.displayName ?? session.user.displayName,
-        avatar: session.user.avatar,
-      },
-      relationship: session.relationship,
-      aliases: profile?.aliases ?? [],
-    });
-  }
-
-  private async postDisplayName(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const session = this.requireApiSession(req);
-    const body = await this.readJson(req);
-    try {
-      await this.users.setDisplayName(session.user.id, String(body.displayName ?? ''));
-    } catch (e) {
-      if (e instanceof AliasError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    const profile = await this.users.getProfile(session.user.id);
-    this.json(res, 200, { displayName: profile?.displayName });
-  }
-
-  private async postAlias(req: IncomingMessage, res: ServerResponse, op: 'add' | 'remove'): Promise<void> {
-    const session = this.requireApiSession(req);
-    const body = await this.readJson(req);
-    const alias = String(body.alias ?? '');
-    try {
-      if (op === 'add') await this.users.addAlias(session.user.id, alias);
-      else await this.users.removeAlias(session.user.id, alias);
-    } catch (e) {
-      if (e instanceof AliasError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    const profile = await this.users.getProfile(session.user.id);
-    this.json(res, 200, { aliases: profile?.aliases ?? [] });
-  }
-
-  private async getCommands(res: ServerResponse): Promise<void> {
-    const builtins = this.commands.list().map((c) => ({
-      kind: 'builtin' as const, name: c.name, usage: c.usage ?? '', group: c.group ?? 'other', access: c.permission, description: c.description,
-      response: null as string | null, target: null as string | null, args: null as string | null,
-      globalCooldown: c.globalCooldown, userCooldown: c.userCooldown, enabled: true, usageCount: 0,
-    }));
-    const customs = (await this.customCommands.listForDashboard()).map((c) => ({
-      kind: c.kind, name: c.name, usage: '', group: c.group, access: c.permission, description: '',
-      response: c.response, target: c.target, args: c.args,
-      globalCooldown: c.globalCooldown, userCooldown: c.userCooldown, enabled: c.enabled, usageCount: c.usageCount,
-    }));
-    const commands = [...builtins, ...customs].sort((a, b) => a.name.localeCompare(b.name));
-    this.json(res, 200, { commands });
-  }
-
   /** Read a `{kind, name}` custom-command target from a request body. */
-  private targetFromBody(body: Record<string, unknown>): TargetRef {
+  targetFromBody(body: Record<string, unknown>): TargetRef {
     const kind = body.kind === 'phrase' ? 'phrase' : 'trigger';
     const name = String(body.name ?? '').trim();
     if (!name) throw new HttpError(400, 'Missing command name.');
     return { kind, name };
   }
 
-  /** Update an existing custom command's editable fields (dashboard edit). */
-  private async postCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    const target = this.targetFromBody(body);
-    try {
-      if ('response' in body) await this.customCommands.setResponse(target, body.response == null ? null : String(body.response));
-      if ('group' in body) await this.customCommands.setGroup(target, String(body.group ?? ''));
-      if ('permission' in body) await this.customCommands.setPermission(target, Number(body.permission) || 0);
-      if ('globalCooldown' in body || 'userCooldown' in body) {
-        await this.customCommands.setCooldown(target, Number(body.globalCooldown) || 0, Number(body.userCooldown) || 0);
-      }
-      if ('enabled' in body) await this.customCommands.setEnabled(target, Boolean(body.enabled));
-      if ('usageCount' in body) await this.customCommands.setUsageCount(target, Number(body.usageCount) || 0);
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Create a new custom command (dashboard "New Command"). */
-  private async createCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    const target = this.targetFromBody(body);
-    try {
-      await this.customCommands.create(target, {
-        response: body.response == null ? null : String(body.response),
-        permission: Number(body.permission) || 0,
-        globalCooldown: Number(body.globalCooldown) || 0,
-        userCooldown: Number(body.userCooldown) || 0,
-      });
-      if (body.group != null && String(body.group).trim()) await this.customCommands.setGroup(target, String(body.group));
-      if (body.enabled === false) await this.customCommands.setEnabled(target, false);
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async deleteCommand(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const target = this.targetFromBody(await this.readJson(req));
-    try {
-      await this.customCommands.remove(target);
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(404, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Create an alias: { alias, target, args? }. */
-  private async addCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.customCommands.addAlias(String(body.alias ?? ''), String(body.target ?? ''), body.args == null ? null : String(body.args));
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Edit an alias: { alias, target?, args?, enabled? }. */
-  private async updateCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.customCommands.updateAlias(String(body.alias ?? ''), {
-        targetWord: 'target' in body ? String(body.target ?? '') : undefined,
-        args: 'args' in body ? (body.args == null ? null : String(body.args)) : undefined,
-        enabled: 'enabled' in body ? Boolean(body.enabled) : undefined,
-      });
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async removeCommandAlias(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.customCommands.removeAlias(String(body.alias ?? ''));
-    } catch (e) {
-      if (e instanceof CommandError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Export custom commands + aliases as CSV (built-ins are code-defined, excluded). */
-  private async exportCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const rows: (string | number)[][] = [];
-    for (const c of await this.customCommands.listForDashboard()) {
-      rows.push([
-        c.kind,
-        c.name,
-        c.response ?? '',
-        c.group ?? '',
-        LEVEL_LABELS[c.permission] ?? String(c.permission),
-        c.enabled ? 'true' : 'false',
-        c.globalCooldown,
-        c.userCooldown,
-        c.usageCount,
-        c.target ?? '',
-        c.args ?? '',
-        c.createdAt ?? '',
-        c.updatedAt ?? '',
-      ]);
-    }
-    this.csvExport(res, 'commands.csv', ['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At'], rows);
-  }
-
-  private async importCommands(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const { body, rows } = await this.parseCsvImport(req, COMMAND_CSV_SPEC);
-    const mode = body.mode === 'replace' ? 'replace' : 'add';
-    const items = rows.map((m) => {
-      const type = (m.type ?? '').trim().toLowerCase();
-      const kind = type === 'phrase' ? 'phrase' : type === 'alias' ? 'alias' : 'trigger';
-      const en = (m.enabled ?? '').trim().toLowerCase();
-      return {
-        kind: kind as 'trigger' | 'phrase' | 'alias',
-        name: m.name ?? '',
-        response: m.response,
-        group: m.group,
-        permission: labelToLevel(m.access ?? ''),
-        enabled: en === '' ? true : !['false', 'no', '0', 'off', 'disabled'].includes(en),
-        globalCooldown: Number(m.globalCooldown) || 0,
-        userCooldown: Number(m.userCooldown) || 0,
-        usageCount: Number(m.usageCount) || 0,
-        target: m.target,
-        args: m.args,
-        createdAt: m.createdAt,
-        updatedAt: m.updatedAt,
-      };
-    });
-    const result = await this.customCommands.importCommands(items, mode);
-    this.json(res, 200, { ok: true, mode, ...result });
-  }
-
-  // ── Timers API ────────────────────────────────────────────────────────────────
-
-  /** Every timer with its runtime state (public read — mgmt is gated per-write). */
-  private async getTimers(res: ServerResponse): Promise<void> {
-    const timers = await this.timers.list();
-    this.json(res, 200, { timers });
-  }
-
-  /** Create a timer: { name, periodSeconds, command }. */
-  private async createTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.timers.add(String(body.name ?? ''), Number(body.periodSeconds), String(body.command ?? ''));
-    } catch (e) {
-      if (e instanceof TimerError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Update a timer's period + command: { name, periodSeconds, command }. */
-  private async updateTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.timers.edit(String(body.name ?? ''), Number(body.periodSeconds), String(body.command ?? ''));
-    } catch (e) {
-      if (e instanceof TimerError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Delete a timer: { name }. */
-  private async deleteTimer(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.timers.delete(String(body.name ?? ''));
-    } catch (e) {
-      if (e instanceof TimerError) throw new HttpError(404, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Arm/disarm loop mode: { name, on }. */
-  private async setTimerLoop(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      if (body.on) await this.timers.loop(String(body.name ?? ''));
-      else await this.timers.stop(String(body.name ?? ''));
-    } catch (e) {
-      if (e instanceof TimerError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
   // ── Overlays API ──────────────────────────────────────────────────────────────
 
-  /**
-   * Current !first standings for the OBS overlay. Gated by the read-only overlay
-   * token (no session — a browser source can't log in). Returns the same shape
-   * the live `first` hub broadcasts push incrementally.
-   */
-  private async getFirstOverlayData(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    this.requireOverlayToken(req, url);
-    const race = await this.first.currentRace();
-    this.json(res, 200, race);
-  }
-
-  /** Reveal the overlay URLs + token to an admin so they can add them in OBS. */
-  private async getAdminOverlays(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const token = this.config.overlayToken;
-    const base = this.config.web.publicUrl;
-    this.json(res, 200, {
-      configured: !!token,
-      token: token ?? null,
-      overlays: token
-        ? [{ id: 'first', name: 'First — race results', url: `${base}/overlays/first?token=${encodeURIComponent(token)}` }]
-        : [],
-    });
-  }
-
   /** Require the read-only overlay token (query `?token=` or `X-Overlay-Token`). */
-  private requireOverlayToken(req: IncomingMessage, url: URL): void {
+  requireOverlayToken(req: IncomingMessage, url: URL): void {
     const configured = this.config.overlayToken;
     if (!configured) throw new HttpError(503, 'Overlays are not configured (set OVERLAY_TOKEN).');
     const provided = url.searchParams.get('token') ?? req.headers['x-overlay-token'];
@@ -615,14 +255,8 @@ export class WebServer {
 
   // ── Lists API ─────────────────────────────────────────────────────────────────
 
-  /** Every list with its entries (public read — logged-out sees viewer access). */
-  private async getLists(res: ServerResponse): Promise<void> {
-    const lists = await this.lists.listAllForDashboard();
-    this.json(res, 200, { lists });
-  }
-
   /** Map a session's channel relationship to a numeric PermissionLevel. */
-  private sessionLevel(session: SessionData): number {
+  sessionLevel(session: SessionData): number {
     const r = session.relationship;
     if (r.botAdmin) return PermissionLevel.Admin;
     if (r.broadcaster) return PermissionLevel.Broadcaster;
@@ -636,7 +270,7 @@ export class WebServer {
    * Moderator (Broadcaster/Admin) — require that level too. Throws on an unknown
    * list (ListError, converted to 400 by the caller).
    */
-  private async requireListManage(req: IncomingMessage, listName: string): Promise<SessionData> {
+  async requireListManage(req: IncomingMessage, listName: string): Promise<SessionData> {
     const session = this.requireManager(req);
     const level = await this.lists.addPermission(listName);
     if (level > PermissionLevel.Moderator && this.sessionLevel(session) < level) {
@@ -645,314 +279,10 @@ export class WebServer {
     return session;
   }
 
-  private async createList(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const session = this.requireManager(req);
-    const body = await this.readJson(req);
-    const name = String(body.name ?? '').trim();
-    const actor = { id: session.user.id, displayName: session.user.displayName };
-    try {
-      await this.lists.create(name, body.displayName == null ? undefined : String(body.displayName), actor);
-      if (body.description != null && String(body.description).trim()) await this.lists.setDescription(name, String(body.description));
-      if (body.permission != null) await this.lists.setPermission(name, Number(body.permission) || PermissionLevel.Moderator);
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async updateList(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await this.readJson(req);
-    const name = String(body.name ?? '').trim();
-    try {
-      await this.requireListManage(req, name);
-      if ('displayName' in body) await this.lists.setDisplayName(name, String(body.displayName ?? ''));
-      if ('description' in body) await this.lists.setDescription(name, String(body.description ?? ''));
-      if ('permission' in body) await this.lists.setPermission(name, Number(body.permission) || 0);
-      if (body.newName != null && String(body.newName).trim()) await this.lists.rename(name, String(body.newName));
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async deleteList(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await this.readJson(req);
-    const name = String(body.name ?? '').trim();
-    try {
-      await this.requireListManage(req, name);
-      await this.lists.remove(name);
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async addListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const session = this.requireApiSession(req);
-    const body = await this.readJson(req);
-    const name = String(body.list ?? '').trim();
-    try {
-      const level = await this.lists.addPermission(name);
-      if (this.sessionLevel(session) < level) throw new HttpError(403, `Only ${LEVEL_LABELS[level]}+ can add to this list.`);
-      await this.lists.addEntry(name, String(body.text ?? ''), { id: session.user.id, displayName: session.user.displayName });
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async updateListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await this.readJson(req);
-    const name = String(body.list ?? '').trim();
-    try {
-      await this.requireListManage(req, name);
-      await this.lists.updateEntry(name, Number(body.id), String(body.text ?? ''));
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async deleteListEntry(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = await this.readJson(req);
-    const name = String(body.list ?? '').trim();
-    try {
-      await this.requireListManage(req, name);
-      await this.lists.removeEntry(name, Number(body.id));
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  // ── Admin API (broadcaster / bot admin only) ──────────────────────────────────
-
-  /**
-   * Every user with their aggregates and effective permission level.
-   *
-   * Broadcaster and admin come from config (no API call). The chat roles are
-   * resolved from three cached bulk lists rather than per-user lookups, and each
-   * degrades to "not in that role" independently if a scope is missing — so the
-   * table still renders when Twitch is unreachable, just with everyone as Viewer.
-   */
-  private async getAdminUsers(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const [rows, roles] = await Promise.all([this.users.listForAdmin(), this.relationships.roleSets()]);
-    const broadcaster = this.config.twitch.channel.toLowerCase();
-    const admins = new Set(this.config.twitch.admins.map((a) => a.toLowerCase()));
-
-    const users = rows.map((u) => {
-      let permission = PermissionLevel.Viewer;
-      if (roles.subscribers.has(u.id)) permission = PermissionLevel.Subscriber;
-      if (roles.vips.has(u.id)) permission = PermissionLevel.Vip;
-      if (roles.moderators.has(u.id)) permission = PermissionLevel.Moderator;
-      if (u.login === broadcaster) permission = PermissionLevel.Broadcaster;
-      if (admins.has(u.login)) permission = PermissionLevel.Admin;
-      return { ...u, permission, permissionLabel: LEVEL_LABELS[permission] ?? String(permission) };
-    });
-
-    this.json(res, 200, { users });
-  }
-
-  /** Registered, admin-editable chat strings grouped by feature. */
-  private getAdminStrings(req: IncomingMessage, res: ServerResponse): void {
-    this.requireAdmin(req);
-    this.json(res, 200, { groups: this.text.list() });
-  }
-
-  /** Set or reset a text string: { feature, key, value } or { feature, key, reset:true }. */
-  private async postAdminString(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const body = await this.readJson(req);
-    const feature = String(body.feature ?? '').trim();
-    const key = String(body.key ?? '').trim();
-    if (!feature || !key) throw new HttpError(400, 'Missing feature or key.');
-    if (body.reset) await this.text.reset(feature, key);
-    else await this.text.set(feature, key, String(body.value ?? ''));
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Create a user from a Twitch handle, before they have ever chatted. */
-  private async initAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const body = await this.readJson(req);
-    const handle = String(body.handle ?? '');
-    try {
-      const user = await this.users.initByHandle(handle);
-      if (!user) throw new HttpError(404, `There's no Twitch account called @${handle.replace(/^@/, '')}.`);
-      this.json(res, 200, { ok: true, user });
-    } catch (e) {
-      if (e instanceof AliasError) throw new HttpError(400, e.message);
-      throw e;
-    }
-  }
-
-  /**
-   * Apply an admin's edits to one user: display name, alias add/remove, and an
-   * outright points balance. Each field is optional and applied independently so
-   * a rejected alias doesn't silently discard a valid name change.
-   */
-  private async updateAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const body = await this.readJson(req);
-    const id = String(body.id ?? '');
-    if (!id) throw new HttpError(400, 'Provide a user id.');
-    if (!(await this.users.getById(id))) throw new HttpError(404, 'Unknown user.');
-
-    try {
-      if (typeof body.displayName === 'string' && body.displayName.trim()) {
-        await this.users.setDisplayName(id, body.displayName);
-      }
-      for (const alias of Array.isArray(body.addAliases) ? body.addAliases : []) {
-        await this.users.addAlias(id, String(alias));
-      }
-      for (const alias of Array.isArray(body.removeAliases) ? body.removeAliases : []) {
-        await this.users.removeAlias(id, String(alias));
-      }
-      if (body.points != null && body.points !== '') {
-        const points = Number(body.points);
-        if (!Number.isFinite(points) || points < 0) throw new HttpError(400, 'Points must be zero or more.');
-        await this.points.setBalance(id, points);
-      }
-    } catch (e) {
-      if (e instanceof AliasError) throw new HttpError(400, e.message);
-      throw e;
-    }
-
-    this.json(res, 200, { ok: true });
-  }
-
-  /** Delete a user. Their points and names go; authored content keeps its snapshot. */
-  private async deleteAdminUser(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const session = this.requireAdmin(req);
-    const body = await this.readJson(req);
-    const id = String(body.id ?? '');
-    const target = id ? await this.users.getById(id) : null;
-    if (!target) throw new HttpError(404, 'Unknown user.');
-    if (target.login === this.config.twitch.channel.toLowerCase()) {
-      throw new HttpError(400, 'The broadcaster account cannot be deleted.');
-    }
-    if (id === session.user.id) throw new HttpError(400, 'You cannot delete your own account.');
-
-    await this.users.deleteUser(id);
-    this.json(res, 200, { ok: true });
-  }
-
-  /**
-   * Inject a simulated stream event.
-   *
-   * The admin session is the only gate — this replaced a WebSocket harness that
-   * had to be kept off in production because anyone reaching the hub could post
-   * to its room. Effects are real: the bot posts to chat and writes points and
-   * EventLog rows.
-   */
-  private async simulateEvent(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireAdmin(req);
-    const body = await this.readJson(req);
-    const type = String(body.type ?? '');
-    if (!isSimEventType(type)) throw new HttpError(400, `Unknown event type "${type}".`);
-
-    const payload = (body.payload ?? {}) as Record<string, unknown>;
-    const event = await buildSimEvent(
-      { users: this.users, defaultChannel: this.config.twitch.channel },
-      type,
-      payload,
-    );
-    if (!event) throw new HttpError(400, `Could not build a "${type}" event.`);
-
-    await this.bus.publish(event);
-    this.json(res, 200, { ok: true, injected: event.type });
-  }
-
-  // ── Quotes API ────────────────────────────────────────────────────────────────
-
-  /** Every quote (public read — logged-out sees viewer access). */
-  private async getQuotes(res: ServerResponse): Promise<void> {
-    const quotes = await this.quotes.listAllForDashboard();
-    this.json(res, 200, { quotes });
-  }
-
-  /** Update a quote's editable fields (mod+). */
-  private async updateQuote(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    const id = Number(body.id);
-    try {
-      if ('text' in body) await this.quotes.setText(id, String(body.text ?? ''));
-      if ('user' in body) await this.quotes.setUser(id, String(body.user ?? ''));
-      if ('game' in body) await this.quotes.setGame(id, String(body.game ?? ''));
-      if ('date' in body) await this.quotes.setDate(id, String(body.date ?? ''));
-    } catch (e) {
-      if (e instanceof QuoteError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
-  private async deleteQuote(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const body = await this.readJson(req);
-    try {
-      await this.quotes.remove(Number(body.id));
-    } catch (e) {
-      if (e instanceof QuoteError) throw new HttpError(400, e.message);
-      throw e;
-    }
-    this.json(res, 200, { ok: true });
-  }
-
   // ── CSV import / export (mod+) ──────────────────────────────────────────────────
 
-  private async exportQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const quotes = await this.quotes.listAllForDashboard();
-    const rows: (string | number)[][] = [];
-    for (const q of quotes) rows.push([q.id, q.text, q.user, q.userId ?? '', q.game ?? '', q.date, q.quotedByName ?? '', q.quotedById ?? '', q.createdAt]);
-    this.csvExport(res, 'quotes.csv', ['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], rows);
-  }
-
-  private async importQuotes(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    this.requireManager(req);
-    const { body, rows } = await this.parseCsvImport(req, QUOTE_CSV_SPEC);
-    const mode = body.mode === 'replace' ? 'replace' : 'add';
-    const items = rows.map((m) => ({
-      id: m.id,
-      text: m.text!,
-      user: m.user!,
-      userId: m.userId,
-      game: m.game,
-      date: m.date,
-      quotedByName: m.quotedByName,
-      quotedById: m.quotedById,
-      createdAt: m.createdAt,
-    }));
-    const added = mode === 'replace' ? await this.quotes.replaceAllWith(items) : await this.quotes.bulkImport(items);
-    this.json(res, 200, { ok: true, mode, added });
-  }
-
-  private async exportLists(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
-    this.requireManager(req);
-    const scope = url.searchParams.get('scope') === 'active' ? 'active' : 'all';
-    const only = (url.searchParams.get('list') ?? '').toLowerCase();
-    let lists = await this.lists.listAllForDashboard();
-    if (scope === 'active') lists = lists.filter((l) => l.name === only);
-    const rows: (string | number)[][] = [];
-    for (const l of lists) {
-      const meta = [l.name, l.displayName ?? '', l.description ?? '', LEVEL_LABELS[l.permission] ?? String(l.permission), l.createdByName ?? '', l.createdById ?? '', l.createdAt, l.updatedAt];
-      if (l.entries.length === 0) rows.push([...meta, '', '', '', '']);
-      else for (const e of l.entries) rows.push([...meta, e.text, e.addedByName ?? '', e.addedById ?? '', e.addedAt]);
-    }
-    this.csvExport(res, scope === 'active' && only ? `${only}.csv` : 'lists.csv', ['List', 'Display Name', 'Description', 'Permission', 'Created By', 'Created By ID', 'List Created At', 'List Updated At', 'Entry', 'Added By', 'Added By ID', 'Date Added'], rows);
-  }
-
   /** Group per-entry list rows back into structured lists (metadata from the first row of each). */
-  private groupLists(mapped: Record<string, string>[]): ListImportItem[] {
+  groupLists(mapped: Record<string, string>[]): ListImportItem[] {
     const map = new Map<string, ListImportItem>();
     for (const m of mapped) {
       const name = (m.list ?? '').trim();
@@ -979,7 +309,7 @@ export class WebServer {
   }
 
   /** Replacing all lists needs mod+ AND at least the highest restriction level among existing lists. */
-  private async requireBulkListManager(req: IncomingMessage): Promise<SessionData> {
+  async requireBulkListManager(req: IncomingMessage): Promise<SessionData> {
     const session = this.requireManager(req);
     const max = await this.lists.maxPermission();
     if (this.sessionLevel(session) < max) {
@@ -988,35 +318,14 @@ export class WebServer {
     return session;
   }
 
-  private async importLists(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const { body, rows: mapped } = await this.parseCsvImport(req, LIST_CSV_SPEC);
-    const mode = String(body.mode ?? '');
-    const activeName = String(body.list ?? '').trim();
-    try {
-      if (mode === 'replace-all') {
-        const session = await this.requireBulkListManager(req);
-        const count = await this.lists.replaceAllLists(this.groupLists(mapped), { id: session.user.id, displayName: session.user.displayName });
-        this.json(res, 200, { ok: true, mode, lists: count });
-        return;
-      }
-      await this.requireListManage(req, activeName);
-      const entries = mapped.filter((m) => (m.text ?? '').trim()).map((m) => ({ text: m.text!, addedByName: m.addedByName, addedById: m.addedById, addedAt: m.addedAt }));
-      const added = mode === 'replace' ? await this.lists.replaceEntries(activeName, entries) : await this.lists.addEntries(activeName, entries);
-      this.json(res, 200, { ok: true, mode, added });
-    } catch (e) {
-      if (e instanceof ListError) throw new HttpError(400, e.message);
-      throw e;
-    }
-  }
-
   // ── Session / CSRF helpers ────────────────────────────────────────────────────
 
-  private getSession(req: IncomingMessage): SessionData | null {
+  getSession(req: IncomingMessage): SessionData | null {
     return verifySession(parseCookies(req.headers.cookie)[SESSION_COOKIE], this.config.web.sessionSecret);
   }
 
   /** For page routes: if unauthenticated, redirect to `/` and return false. */
-  private requireSession(req: IncomingMessage, res: ServerResponse): boolean {
+  requireSession(req: IncomingMessage, res: ServerResponse): boolean {
     if (this.getSession(req)) return true;
     this.redirect(res, '/');
     return false;
@@ -1027,7 +336,7 @@ export class WebServer {
    * `requireManager` — moderators can manage content, but not other people's
    * accounts, points, or event injection.
    */
-  private requireAdmin(req: IncomingMessage): SessionData {
+  requireAdmin(req: IncomingMessage): SessionData {
     const session = this.requireApiSession(req);
     const r = session.relationship;
     if (!(r.broadcaster || r.botAdmin)) throw new HttpError(403, 'Broadcaster or bot admin access required.');
@@ -1035,7 +344,7 @@ export class WebServer {
   }
 
   /** Page-level admin gate: redirect rather than error, like `requireSession`. */
-  private requireAdminPage(req: IncomingMessage, res: ServerResponse): boolean {
+  requireAdminPage(req: IncomingMessage, res: ServerResponse): boolean {
     const session = this.getSession(req);
     if (session && (session.relationship.broadcaster || session.relationship.botAdmin)) return true;
     this.redirect(res, '/');
@@ -1043,7 +352,7 @@ export class WebServer {
   }
 
   /** For API routes: require a session + a same-origin request, or throw. */
-  private requireApiSession(req: IncomingMessage): SessionData {
+  requireApiSession(req: IncomingMessage): SessionData {
     this.assertSameOrigin(req);
     const session = this.getSession(req);
     if (!session) throw new HttpError(401, 'unauthenticated');
@@ -1051,7 +360,7 @@ export class WebServer {
   }
 
   /** Require the caller to be a moderator or above (mod / broadcaster / admin). */
-  private requireManager(req: IncomingMessage): SessionData {
+  requireManager(req: IncomingMessage): SessionData {
     const session = this.requireApiSession(req);
     const r = session.relationship;
     if (!(r.moderator || r.broadcaster || r.botAdmin)) throw new HttpError(403, 'Moderator access required.');
@@ -1059,12 +368,12 @@ export class WebServer {
   }
 
   /** CSRF defense: reject state-changing requests whose Origin isn't ours. */
-  private assertSameOrigin(req: IncomingMessage): void {
+  assertSameOrigin(req: IncomingMessage): void {
     const origin = req.headers.origin;
     if (origin && origin !== this.config.web.publicUrl) throw new HttpError(403, 'Bad origin.');
   }
 
-  private async readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
+  async readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of req) {
@@ -1082,7 +391,7 @@ export class WebServer {
 
   // ── Response helpers ──────────────────────────────────────────────────────────
 
-  private async serveAsset(res: ServerResponse, pathname: string): Promise<void> {
+  async serveAsset(res: ServerResponse, pathname: string): Promise<void> {
     const name = pathname.slice('/assets/'.length);
     if (!/^[a-zA-Z0-9._-]+$/.test(name)) return this.send(res, 404, 'text/plain', 'Not Found');
     const ext = path.extname(name).toLowerCase();
@@ -1097,16 +406,16 @@ export class WebServer {
     }
   }
 
-  private html(res: ServerResponse, body: string): void {
+  html(res: ServerResponse, body: string): void {
     this.securityHeaders(res);
     this.send(res, 200, 'text/html; charset=utf-8', body);
   }
 
-  private json(res: ServerResponse, status: number, obj: unknown): void {
+  json(res: ServerResponse, status: number, obj: unknown): void {
     this.send(res, status, 'application/json', JSON.stringify(obj));
   }
 
-  private csvDownload(res: ServerResponse, filename: string, csv: string): void {
+  csvDownload(res: ServerResponse, filename: string, csv: string): void {
     this.securityHeaders(res);
     res.writeHead(200, {
       'Content-Type': 'text/csv; charset=utf-8',
@@ -1116,12 +425,12 @@ export class WebServer {
   }
 
   /** Serialize a header + data rows to CSV and send it as a download. */
-  private csvExport(res: ServerResponse, filename: string, header: string[], rows: (string | number)[][]): void {
+  csvExport(res: ServerResponse, filename: string, header: string[], rows: (string | number)[][]): void {
     this.csvDownload(res, filename, toCsv([header, ...rows]));
   }
 
   /** Read an import request body (larger cap) and map its CSV into keyed rows. */
-  private async parseCsvImport(
+  async parseCsvImport(
     req: IncomingMessage,
     spec: CsvColumn[],
   ): Promise<{ body: Record<string, unknown>; rows: Record<string, string>[] }> {
@@ -1129,17 +438,17 @@ export class WebServer {
     return { body, rows: mapCsvRows(parseCsv(String(body.csv ?? '')), spec) };
   }
 
-  private send(res: ServerResponse, status: number, contentType: string, body: string): void {
+  send(res: ServerResponse, status: number, contentType: string, body: string): void {
     res.writeHead(status, { 'Content-Type': contentType });
     res.end(body);
   }
 
-  private redirect(res: ServerResponse, location: string): void {
+  redirect(res: ServerResponse, location: string): void {
     res.writeHead(302, { Location: location });
     res.end();
   }
 
-  private securityHeaders(res: ServerResponse): void {
+  securityHeaders(res: ServerResponse): void {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
