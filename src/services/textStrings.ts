@@ -91,6 +91,22 @@ export class TextStringsService {
     return interpolate(this.get(feature, key), vars);
   }
 
+  /**
+   * Build a chat sender bound to a feature: `(channel, key, vars?) => Promise`.
+   * A blank (whitespace-only) result is silent — clearing a string on the
+   * dashboard disables that message. Plugins use this instead of hand-rolling the
+   * format-then-guard dance.
+   */
+  sayer(
+    chat: { say(channel: string, message: string): Promise<void> },
+    feature: string,
+  ): (channel: string, key: string, vars?: Record<string, string | number>) => Promise<void> {
+    return (channel, key, vars = {}) => {
+      const msg = this.format(feature, key, vars);
+      return msg.trim() ? chat.say(channel, msg) : Promise.resolve();
+    };
+  }
+
   /** Store an override for a string (persisted + cached). */
   async set(feature: string, key: string, value: string): Promise<void> {
     await this.db.textString.upsert({

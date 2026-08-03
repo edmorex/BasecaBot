@@ -118,10 +118,7 @@ export function pointsPlugin(): Plugin {
         { key: 'usage', label: 'Usage (give/grant)', default: 'Usage: !points {label} <user> <amount>', placeholders: ['label'] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'points', ...s });
-      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
-        const msg = ctx.text.format('points', key, vars);
-        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
-      };
+      const sayText = ctx.text.sayer(ctx.chat, 'points'); // blank string = silent
 
       // ── Commands ──────────────────────────────────────────────────────────
 

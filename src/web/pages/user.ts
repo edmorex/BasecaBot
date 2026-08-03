@@ -44,7 +44,6 @@ export function userPage(): string {
 
   const script = `
     var ROWS=[['broadcaster','Broadcaster'],['botAdmin','Bot Admin'],['moderator','Moderator'],['subscriber','Subscriber'],['follower','Follower']];
-    function toast(id,msg,ok){ var t=document.getElementById(id); t.textContent=msg; t.className='toast '+(ok?'ok':'err'); }
     function renderAliases(aliases){
       var box=document.getElementById('alias-chips');
       if(!aliases || !aliases.length){ box.innerHTML='<span class="muted">No aliases yet.</span>'; return; }

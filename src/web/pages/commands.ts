@@ -34,7 +34,7 @@ export function commandsPage(): string {
     </div>
     <div class="pager-wrap" id="cmd-pager"></div>
 
-    <dialog id="timer-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(34rem,94vw)">
+    <dialog id="timer-dlg" class="modal" style="width:min(34rem,94vw)">
       <h2 id="timer-dlg-title" style="margin-top:0">Edit Timer</h2>
       <label class="muted">Name <span class="muted">(a single word, used as the <code>!timer</code> target)</span></label>
       <input type="text" id="timer-name" maxlength="40" placeholder="e.g. socials" style="width:100%; margin:.35rem 0 .8rem" />
@@ -49,7 +49,7 @@ export function commandsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="tdel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+    <dialog id="tdel-dlg" class="modal" style="width:min(30rem,94vw)">
       <h2 style="margin-top:0">Delete timer?</h2>
       <p class="muted" id="tdel-msg"></p>
       <div class="toast err" id="tdel-toast"></div>
@@ -61,7 +61,7 @@ export function commandsPage(): string {
 
     ${commandModalsHtml()}
 
-    <dialog id="cimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+    <dialog id="cimp-dlg" class="modal" style="width:min(38rem,94vw)">
       <h2 style="margin-top:0">Import Commands from CSV</h2>
       <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>Type, Name, Response, Group, Access, Enabled, Global Cooldown, User Cooldown, Uses, Target, Args, Created At, Updated At</code>. Type is <code>trigger</code>, <code>phrase</code>, or <code>alias</code> (alias rows use Target + Args). Only custom commands are affected — built-ins are never touched. <strong>Wipe &amp; replace preserves timestamps</strong> for a true backup restore. A header row is optional.</p>
       <label class="muted">CSV file</label>
@@ -78,7 +78,7 @@ export function commandsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="cwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="cwarn-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0">⚠️ Wipe &amp; replace all custom commands?</h2>
       <p class="muted">This permanently deletes <strong>every custom command and alias</strong> (built-ins are unaffected) and replaces them with the rows in your CSV. This cannot be undone.</p>
       <div class="toast err" id="cwarn-toast"></div>
@@ -99,7 +99,6 @@ export function commandsPage(): string {
     // and drives its edit/delete actions on the Lists page.
     ${commandTableScript()}
     ${commandModalsScript()}
-    function pretty(g){ return String(g||'other').replace(/([a-z0-9])([A-Z])/g,'$1 $2').replace(/^./,function(m){return m.toUpperCase();}); }
     function byName(a,b){ return a.name.localeCompare(b.name); }
 
     window.onMe=function(me){
@@ -263,7 +262,7 @@ export function commandsPage(): string {
       document.getElementById('timer-command').value='';
       document.getElementById('timer-toast').textContent='';
       document.getElementById('timer-save').textContent='Create';
-      if(timerDlg.showModal) timerDlg.showModal(); else timerDlg.setAttribute('open','');
+      openDialog(timerDlg);
       nm.focus();
     }
     function openTimerEdit(t){
@@ -274,10 +273,10 @@ export function commandsPage(): string {
       document.getElementById('timer-command').value=t.command;
       document.getElementById('timer-toast').textContent='';
       document.getElementById('timer-save').textContent='Save';
-      if(timerDlg.showModal) timerDlg.showModal(); else timerDlg.setAttribute('open','');
+      openDialog(timerDlg);
     }
     document.getElementById('new-timer-btn').onclick=openTimerNew;
-    document.getElementById('timer-cancel').onclick=function(){ timerDlg.close?timerDlg.close():timerDlg.removeAttribute('open'); };
+    document.getElementById('timer-cancel').onclick=function(){ closeDialog(timerDlg); };
     document.getElementById('timer-save').onclick=async function(){
       var toast=document.getElementById('timer-toast');
       var name=document.getElementById('timer-name').value.trim();
@@ -296,7 +295,7 @@ export function commandsPage(): string {
         } else {
           await api('POST','/api/timers/update',{ name:editingTimer.name, periodSeconds:period, command:command });
         }
-        timerDlg.close?timerDlg.close():timerDlg.removeAttribute('open');
+        closeDialog(timerDlg);
         await load();
       }catch(e){ toast.textContent=e.message; }
     };
@@ -306,11 +305,11 @@ export function commandsPage(): string {
       if(!t) return; deletingTimer=t;
       document.getElementById('tdel-msg').textContent='This permanently deletes the timer "'+t.name+'". This cannot be undone.';
       document.getElementById('tdel-toast').textContent='';
-      if(tdelDlg.showModal) tdelDlg.showModal(); else tdelDlg.setAttribute('open','');
+      openDialog(tdelDlg);
     }
-    document.getElementById('tdel-cancel').onclick=function(){ tdelDlg.close?tdelDlg.close():tdelDlg.removeAttribute('open'); };
+    document.getElementById('tdel-cancel').onclick=function(){ closeDialog(tdelDlg); };
     document.getElementById('tdel-confirm').onclick=async function(){
-      try{ await api('POST','/api/timers/delete',{ name:deletingTimer.name }); tdelDlg.close?tdelDlg.close():tdelDlg.removeAttribute('open'); await load(); }
+      try{ await api('POST','/api/timers/delete',{ name:deletingTimer.name }); closeDialog(tdelDlg); await load(); }
       catch(e){ document.getElementById('tdel-toast').textContent='Delete failed: '+e.message; }
     };
 
@@ -399,23 +398,6 @@ export function commandsPage(): string {
     document.getElementById('new-alias-btn').onclick=function(){ openNewAlias(load); };
 
     // ── CSV export/import (custom commands + aliases only) ──────────────────────
-    function downloadCsv(filename, text){
-      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
-      var url=URL.createObjectURL(blob);
-      var a=document.createElement('a'); a.href=url; a.download=filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-    }
-    function readFileText(input){
-      return new Promise(function(resolve,reject){
-        var f=input.files && input.files[0];
-        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
-        var r=new FileReader();
-        r.onload=function(){ resolve(String(r.result||'')); };
-        r.onerror=function(){ reject(new Error('Could not read the file.')); };
-        r.readAsText(f);
-      });
-    }
     document.getElementById('cmd-export-btn').onclick=async function(){
       try{
         var res=await fetch('/api/commands/export',{ credentials:'same-origin' });
@@ -431,13 +413,13 @@ export function commandsPage(): string {
       document.getElementById('cimp-file').value='';
       var add=document.querySelector('input[name=cimp-mode][value=add]'); if(add) add.checked=true;
       document.getElementById('cimp-toast').textContent='';
-      if(cimpDlg.showModal) cimpDlg.showModal(); else cimpDlg.setAttribute('open','');
+      openDialog(cimpDlg);
     };
-    document.getElementById('cimp-cancel').onclick=function(){ cimpDlg.close?cimpDlg.close():cimpDlg.removeAttribute('open'); };
+    document.getElementById('cimp-cancel').onclick=function(){ closeDialog(cimpDlg); };
     async function doCmdImport(mode, csv){
       var d=await api('POST','/api/commands/import',{ mode:mode, csv:csv });
-      cimpDlg.close?cimpDlg.close():cimpDlg.removeAttribute('open');
-      cwarnDlg.close?cwarnDlg.close():cwarnDlg.removeAttribute('open');
+      closeDialog(cimpDlg);
+      closeDialog(cwarnDlg);
       await load();
       var sub=document.getElementById('cmd-sub');
       sub.textContent = 'Imported '+d.commands+' command'+(d.commands===1?'':'s')+' + '+d.aliases+' alias'+(d.aliases===1?'':'es')+(d.skipped?(' ('+d.skipped+' skipped)'):'')+'. '+sub.textContent;
@@ -445,11 +427,11 @@ export function commandsPage(): string {
     document.getElementById('cimp-go').onclick=async function(){
       try{
         cPendingCsv=await readFileText(document.getElementById('cimp-file'));
-        if(cimpMode()==='replace'){ document.getElementById('cwarn-toast').textContent=''; if(cwarnDlg.showModal) cwarnDlg.showModal(); else cwarnDlg.setAttribute('open',''); return; }
+        if(cimpMode()==='replace'){ document.getElementById('cwarn-toast').textContent=''; openDialog(cwarnDlg); return; }
         await doCmdImport('add', cPendingCsv);
       }catch(e){ document.getElementById('cimp-toast').textContent=e.message; }
     };
-    document.getElementById('cwarn-cancel').onclick=function(){ cwarnDlg.close?cwarnDlg.close():cwarnDlg.removeAttribute('open'); };
+    document.getElementById('cwarn-cancel').onclick=function(){ closeDialog(cwarnDlg); };
     document.getElementById('cwarn-confirm').onclick=async function(){
       try{ await doCmdImport('replace', cPendingCsv); }
       catch(e){ document.getElementById('cwarn-toast').textContent=e.message; }

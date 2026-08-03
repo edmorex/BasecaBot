@@ -172,6 +172,9 @@ const SHARED_STYLE = /* css */ `
   .toast { margin-top: 0.5rem; font-size: 0.9rem; min-height: 1.2em; }
   .toast.err { color: #ff6b6b; }
   .toast.ok { color: var(--green); }
+  /* Shared modal chrome — each <dialog class="modal"> only sets its own width. */
+  dialog.modal { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; }
+  dialog.modal::backdrop { background: rgba(0,0,0,0.5); }
 `;
 
 const SHELL_SCRIPT = /* js */ `
@@ -186,6 +189,27 @@ const SHELL_SCRIPT = /* js */ `
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
     return data;
   };
+  // Shared page helpers (available to every page script). Accept an element or id.
+  window.openDialog = (d) => { if (typeof d === 'string') d = document.getElementById(d); if (d) (d.showModal ? d.showModal() : d.setAttribute('open', '')); };
+  window.closeDialog = (d) => { if (typeof d === 'string') d = document.getElementById(d); if (d) (d.close ? d.close() : d.removeAttribute('open')); };
+  window.toast = (id, msg, ok) => { const t = document.getElementById(id); if (!t) return; t.textContent = msg; t.className = 'toast ' + (ok ? 'ok' : 'err'); };
+  window.pretty = (s) => String(s == null ? '' : s).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (m) => m.toUpperCase());
+  window.levelFromRel = (r) => !r ? 0 : r.botAdmin ? 5 : r.broadcaster ? 4 : r.moderator ? 3 : r.subscriber ? 1 : 0;
+  window.downloadCsv = (filename, text) => {
+    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  window.readFileText = (input) => new Promise((resolve, reject) => {
+    const f = input.files && input.files[0];
+    if (!f) { reject(new Error('Choose a CSV file first.')); return; }
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ''));
+    r.onerror = () => reject(new Error('Could not read the file.'));
+    r.readAsText(f);
+  });
   (async () => {
     let me = null;
     try { const r = await fetch('/api/me', { credentials: 'same-origin' }); if (r.ok) me = await r.json(); } catch {}

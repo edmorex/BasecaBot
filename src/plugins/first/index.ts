@@ -3,9 +3,7 @@ import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent, EventUser } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
 import type { LeaderRow } from '../../services/first.js';
-
-/** English pluralization: pick singular/plural by count. */
-const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+import { plural } from '../../services/strings.js';
 
 /**
  * The "!first" race. When the stream is live, users race to be the first to
@@ -40,10 +38,7 @@ export function firstPlugin(): Plugin {
         { key: 'stats', label: 'Stats — line', default: '📊 {name}’s FIRST stats — {body}', placeholders: ['name', 'body'] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'first', ...s });
-      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
-        const msg = ctx.text.format('first', key, vars);
-        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
-      };
+      const sayText = ctx.text.sayer(ctx.chat, 'first'); // blank string = silent
 
       // Per-user cooldown on check-in ATTEMPTS (the bare "!first"), so nobody can
       // spam it to jump the gun before the stream is live. The router doesn't

@@ -191,8 +191,8 @@ export function commandModalsScript(): string {
     var cmEditMode='edit', cmEditTarget=null, cmEditDone=null;
     var cmAliasMode='create', cmAliasTarget=null, cmAliasDone=null;
     var cmDelTarget=null, cmDelDone=null;
-    function cmOpen(d){ if(d.showModal) d.showModal(); else d.setAttribute('open',''); }
-    function cmClose(d){ if(d.close) d.close(); else d.removeAttribute('open'); }
+    function cmOpen(d){ openDialog(d); }
+    function cmClose(d){ closeDialog(d); }
     function cmSetPerm(v){ Array.prototype.forEach.call(document.querySelectorAll('input[name=edit-perm]'), function(r){ r.checked=(+r.value===(v||0)); }); }
     function cmGetPerm(){ var el=document.querySelector('input[name=edit-perm]:checked'); return el?+el.value:0; }
     function cmGetKind(){ var el=document.querySelector('input[name=edit-kind]:checked'); return el?el.value:'trigger'; }

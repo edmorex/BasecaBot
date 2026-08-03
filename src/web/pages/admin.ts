@@ -38,7 +38,7 @@ export function adminPage(): string {
       <div class="md-main card" id="admin-main"></div>
     </div>
 
-    <dialog id="user-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+    <dialog id="user-dlg" class="modal" style="width:min(38rem,94vw)">
       <h2 id="user-dlg-title" style="margin-top:0">Edit User</h2>
       <p class="muted" id="user-dlg-who" style="margin:0 0 .8rem"></p>
 
@@ -65,7 +65,7 @@ export function adminPage(): string {
       </div>
     </dialog>
 
-    <dialog id="init-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="init-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0">Init New User</h2>
       <p class="muted">Look up a Twitch account and add it to the database, so you can set points or aliases before they ever chat.</p>
       <label class="muted">Twitch username</label>
@@ -77,7 +77,7 @@ export function adminPage(): string {
       </div>
     </dialog>
 
-    <dialog id="udel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="udel-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0">Delete this user?</h2>
       <p id="udel-msg" style="margin:0 0 .6rem"></p>
       <p class="muted" style="margin:0 0 .8rem">
@@ -114,12 +114,6 @@ export function adminPage(): string {
     var draftAliases = [];     // alias list inside the edit dialog
     var pendingDelete = null;
 
-    function toast(id, msg, ok) {
-      var el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = msg || '';
-      el.className = 'toast ' + (ok ? 'ok' : 'err');
-    }
 
     function fmtDate(iso) {
       if (!iso) return '—';
@@ -216,7 +210,7 @@ export function adminPage(): string {
       document.getElementById('u-alias-new').value = '';
       renderDraftAliases();
       toast('user-toast', '');
-      document.getElementById('user-dlg').showModal();
+      openDialog('user-dlg');
     }
 
     function openDelete(u) {
@@ -225,7 +219,7 @@ export function adminPage(): string {
         '<strong>' + esc(u.displayName) + '</strong> (' + esc(u.canonical) + ') — ' +
         u.points + ' points, ' + u.quotes + (u.quotes === 1 ? ' quote' : ' quotes') + '.';
       toast('udel-toast', '');
-      document.getElementById('udel-dlg').showModal();
+      openDialog('udel-dlg');
     }
 
     async function reload() {
@@ -394,47 +388,6 @@ export function adminPage(): string {
     }
 
     // ── Text Strings: edit the chat text plugins post (grouped by feature) ───────
-    function prettyFeature(f) { return String(f || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, function (m) { return m.toUpperCase(); }); }
-    async function renderStrings() {
-      document.getElementById('init-user-btn').style.display = 'none';
-      document.getElementById('admin-sub').textContent = 'Edit the text the bot posts to chat.';
-      var main = document.getElementById('admin-main');
-      main.innerHTML = '<h2>Text Strings</h2><p class="muted">Loading…</p>';
-      try {
-        var d = await api('GET', '/api/admin/strings');
-        var groups = d.groups || [];
-        if (!groups.length) { main.innerHTML = '<h2>Text Strings</h2><p class="muted">No editable strings are registered yet.</p>'; return; }
-        var cards = groups.map(function (g) {
-          var rows = g.strings.map(function (s) {
-            var ph = (s.placeholders && s.placeholders.length)
-              ? '<div class="muted" style="font-size:.78rem; margin-top:.2rem">Placeholders: ' + s.placeholders.map(function (p) { return '<code>{' + esc(p) + '}</code>'; }).join(' ') + '</div>' : '';
-            var desc = s.description ? '<div class="muted" style="font-size:.8rem">' + esc(s.description) + '</div>' : '';
-            var reset = s.custom ? ' · <a href="#" class="linkish" data-reset data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">reset to default</a>' : '';
-            var tag = s.custom ? ' <span class="tag">custom</span>' : '';
-            return '<tr>' +
-              '<td style="vertical-align:top; white-space:nowrap"><strong>' + esc(s.label) + '</strong>' + tag +
-                '<div class="muted" style="font-size:.78rem"><code>' + esc(s.feature) + '.' + esc(s.key) + '</code>' + reset + '</div>' + desc + ph + '</td>' +
-              '<td style="width:100%; vertical-align:middle"><input type="text" value="' + esc(s.value) + '" style="width:100%" /></td>' +
-              '<td style="vertical-align:middle; text-align:right; white-space:nowrap"><button type="button" class="pink" data-save data-feature="' + esc(s.feature) + '" data-key="' + esc(s.key) + '">Save</button></td>' +
-              '</tr>';
-          }).join('');
-          return '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .6rem">' + esc(prettyFeature(g.feature)) + '</h3>' +
-            '<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th>Label</th><th>Text</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
-        }).join('');
-        main.innerHTML = '<h2>Text Strings</h2>' +
-          '<p class="muted">Edit the text the bot posts to chat, grouped by feature. Placeholders like <code>{user}</code> are filled in when the message is sent. Changes take effect immediately.</p>' +
-          cards;
-        // Dim the Save button until the text is edited; brighten on unsaved changes.
-        Array.prototype.forEach.call(document.querySelectorAll('[data-save]'), function (b) {
-          var inp = b.closest('tr').querySelector('input');
-          inp.setAttribute('data-orig', inp.value);
-          b.style.opacity = '.5';
-          inp.oninput = function () { b.style.opacity = (inp.value !== inp.getAttribute('data-orig')) ? '1' : '.5'; };
-          b.onclick = function () { saveString(b); };
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-reset]'), function (a) { a.onclick = function (ev) { ev.preventDefault(); resetString(a); }; });
-      } catch (e) { main.innerHTML = '<h2>Text Strings</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>'; }
-    }
     async function saveString(b) {
       var inp = b.closest('tr').querySelector('input');
       try {
@@ -505,7 +458,7 @@ export function adminPage(): string {
       }
     };
 
-    document.getElementById('u-cancel').onclick = function () { document.getElementById('user-dlg').close(); };
+    document.getElementById('u-cancel').onclick = function () { closeDialog('user-dlg'); };
     document.getElementById('u-alias-add').onclick = function () {
       var inp = document.getElementById('u-alias-new');
       var v = inp.value.trim();
@@ -532,7 +485,7 @@ export function adminPage(): string {
           removeAliases: remove,
           points: points === '' ? undefined : Number(points),
         });
-        document.getElementById('user-dlg').close();
+        closeDialog('user-dlg');
         await reload();
         render();
       } catch (e) {
@@ -542,16 +495,16 @@ export function adminPage(): string {
 
     document.getElementById('u-delete').onclick = function () {
       if (!editing) return;
-      document.getElementById('user-dlg').close();
+      closeDialog('user-dlg');
       openDelete(editing);
     };
 
-    document.getElementById('udel-cancel').onclick = function () { document.getElementById('udel-dlg').close(); };
+    document.getElementById('udel-cancel').onclick = function () { closeDialog('udel-dlg'); };
     document.getElementById('udel-confirm').onclick = async function () {
       if (!pendingDelete) return;
       try {
         await api('POST', '/api/admin/users/delete', { id: pendingDelete.id });
-        document.getElementById('udel-dlg').close();
+        closeDialog('udel-dlg');
         await reload();
         render();
       } catch (e) {
@@ -562,15 +515,15 @@ export function adminPage(): string {
     document.getElementById('init-user-btn').onclick = function () {
       document.getElementById('init-handle').value = '';
       toast('init-toast', '');
-      document.getElementById('init-dlg').showModal();
+      openDialog('init-dlg');
     };
-    document.getElementById('init-cancel').onclick = function () { document.getElementById('init-dlg').close(); };
+    document.getElementById('init-cancel').onclick = function () { closeDialog('init-dlg'); };
     document.getElementById('init-save').onclick = async function () {
       var handle = document.getElementById('init-handle').value.trim();
       if (!handle) { toast('init-toast', 'Enter a Twitch username.', false); return; }
       try {
         var d = await api('POST', '/api/admin/users/init', { handle: handle });
-        document.getElementById('init-dlg').close();
+        closeDialog('init-dlg');
         await reload();
         render();
         openEdit(users.filter(function (u) { return u.id === d.user.id; })[0] || d.user);

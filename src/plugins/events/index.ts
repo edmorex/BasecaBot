@@ -33,11 +33,7 @@ export function eventsPlugin(): Plugin {
         { key: 'donation', label: 'Donation', default: '💜 {name} donated {amount} {currency}! Thank you!', placeholders: ['name', 'amount', 'currency'] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'events', ...s });
-      // Blank string = silent: clearing a message on the dashboard disables it.
-      const say = (channel: string, key: string, vars: Record<string, string | number> = {}) => {
-        const msg = ctx.text.format('events', key, vars);
-        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
-      };
+      const say = ctx.text.sayer(ctx.chat, 'events'); // blank string = silent
 
       const log = (type: string, userId: string | null, amount: number | null, meta?: unknown) =>
         ctx.storage.prisma.eventLog

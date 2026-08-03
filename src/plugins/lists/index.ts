@@ -4,16 +4,10 @@ import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
 import { ListError, listRestrictKeywordToLevel, normalizeListName, type Actor } from '../../services/lists.js';
 import { toCsv } from '../../services/csv.js';
+import { firstAndRest } from '../../services/strings.js';
 
 const LEVEL_LABEL = ['Everyone', 'Subscriber', 'VIP', 'Moderator', 'Broadcaster', 'Admin'];
 
-/** Split the leading list-name token from the remaining text. */
-function firstAndRest(input: string): { first: string; rest: string } {
-  const s = input.trim();
-  const i = s.indexOf(' ');
-  if (i === -1) return { first: s, rest: '' };
-  return { first: s.slice(0, i), rest: s.slice(i + 1).trim() };
-}
 
 /**
  * Named lists: the `!list …` manager (mods+), plus `!list add` which anyone

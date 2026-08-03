@@ -2,6 +2,7 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
+import { firstAndRest, plural } from '../../services/strings.js';
 
 /** WebSocket room name the BasecaWheel web app connects to. */
 const ROOM = 'baseca-wheel';
@@ -46,18 +47,10 @@ function normalizeChannel(raw: string): string {
   return /^[a-z0-9_]{1,25}$/.test(name) ? name : '';
 }
 
-/** Split the leading token (channel / seconds) from the rest. */
-function firstAndRest(input: string): { first: string; rest: string } {
-  const s = input.trim();
-  const i = s.indexOf(' ');
-  if (i === -1) return { first: s, rest: '' };
-  return { first: s.slice(0, i), rest: s.slice(i + 1).trim() };
-}
-
 /** Human-friendly duration for announcements. */
 function formatDuration(seconds: number): string {
-  if (seconds % 3600 === 0) return `${seconds / 3600} hour${seconds === 3600 ? '' : 's'}`;
-  if (seconds % 60 === 0) return `${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
+  if (seconds % 3600 === 0) return `${seconds / 3600} ${plural(seconds / 3600, 'hour', 'hours')}`;
+  if (seconds % 60 === 0) return `${seconds / 60} ${plural(seconds / 60, 'minute', 'minutes')}`;
   return `${seconds} seconds`;
 }
 
@@ -87,10 +80,8 @@ export function basecaWheelPlugin(): Plugin {
   let guest: { channel: string; timer: ReturnType<typeof setTimeout> } | null = null;
 
   // Editable chat strings (Admin → Text Strings, feature "wheel"); blank = silent.
-  const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
-    const msg = ctx.text.format('wheel', key, vars);
-    return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
-  };
+  // Bound to the service in init() — ctx isn't available at factory scope yet.
+  let sayText: (channel: string, key: string, vars?: Record<string, string | number>) => Promise<void>;
 
   /** Leave the current guest channel (announcing first, unless shutting down). */
   async function partGuest(announce: boolean): Promise<void> {
@@ -126,6 +117,7 @@ export function basecaWheelPlugin(): Plugin {
         { key: 'usageConnect', label: 'Usage — connect', default: 'Usage: !wheel connect <guestChannel> [seconds]', placeholders: [] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'wheel', ...s });
+      sayText = ctx.text.sayer(ctx.chat, 'wheel');
 
       // Forward a subcommand to the web app, tagged with the originating channel.
       const forward = (e: WheelEvent, command: string, text: string) => {

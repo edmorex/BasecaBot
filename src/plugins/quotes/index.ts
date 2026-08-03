@@ -3,14 +3,7 @@ import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
 import { QuoteError, formatQuote, parseQuoteAddArgs, type QuoteView } from '../../services/quotes.js';
-
-/** Split the leading token (usually a quote ID) from the remaining text. */
-function firstAndRest(input: string): { first: string; rest: string } {
-  const s = input.trim();
-  const i = s.indexOf(' ');
-  if (i === -1) return { first: s, rest: '' };
-  return { first: s.slice(0, i), rest: s.slice(i + 1).trim() };
-}
+import { firstAndRest, plural } from '../../services/strings.js';
 
 function parseId(word: string): number | null {
   return /^\d+$/.test(word) ? Number.parseInt(word, 10) : null;
@@ -49,10 +42,7 @@ export function quotesPlugin(): Plugin {
         { key: 'searchUserCount', label: 'Count — by user', default: '{count} {noun} {be} attributed to {who}.', placeholders: ['count', 'noun', 'be', 'who'] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'quotes', ...s });
-      const sayText = (channel: string, key: string, vars: Record<string, string | number> = {}): Promise<void> => {
-        const msg = ctx.text.format('quotes', key, vars);
-        return msg.trim() ? ctx.chat.say(channel, msg) : Promise.resolve();
-      };
+      const sayText = ctx.text.sayer(ctx.chat, 'quotes'); // blank string = silent
 
       const getBroadcasterId = async (): Promise<string | undefined> => {
         if (broadcasterId) return broadcasterId;
@@ -210,7 +200,7 @@ export function quotesPlugin(): Plugin {
             description: 'Say how many quotes are saved.',
             handler: guard(async (e) => {
               const n = await svc.count();
-              await sayText(e.channel, 'count', { be: n === 1 ? 'is' : 'are', count: n, noun: n === 1 ? 'quote' : 'quotes' });
+              await sayText(e.channel, 'count', { be: plural(n, 'is', 'are'), count: n, noun: plural(n, 'quote', 'quotes') });
             }),
           },
           searchcount: {
@@ -220,7 +210,7 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const term = e.argString.trim();
               const n = await svc.countText(term);
-              await sayText(e.channel, 'searchCount', { count: n, noun: n === 1 ? 'quote' : 'quotes', term });
+              await sayText(e.channel, 'searchCount', { count: n, noun: plural(n, 'quote', 'quotes'), term });
             }),
           },
           searchusercount: {
@@ -230,7 +220,7 @@ export function quotesPlugin(): Plugin {
             handler: guard(async (e) => {
               const who = e.argString.trim();
               const n = await svc.countUser(who);
-              await sayText(e.channel, 'searchUserCount', { count: n, noun: n === 1 ? 'quote' : 'quotes', be: n === 1 ? 'is' : 'are', who });
+              await sayText(e.channel, 'searchUserCount', { count: n, noun: plural(n, 'quote', 'quotes'), be: plural(n, 'is', 'are'), who });
             }),
           },
         },

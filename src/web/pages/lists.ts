@@ -30,7 +30,7 @@ export function listsPage(): string {
       </div>
     </div>
 
-    <dialog id="list-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+    <dialog id="list-dlg" class="modal" style="width:min(38rem,94vw)">
       <h2 id="list-dlg-title" style="margin-top:0">New List</h2>
       <label class="muted">Reference name <span class="muted">(a single word, used as <code>!list</code> target)</span></label>
       <input type="text" id="list-name" maxlength="40" placeholder="e.g. quotes" style="width:100%; margin:.35rem 0 .8rem" />
@@ -57,7 +57,7 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="entry-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(34rem,94vw)">
+    <dialog id="entry-dlg" class="modal" style="width:min(34rem,94vw)">
       <h2 id="entry-dlg-title" style="margin-top:0">Add Entry</h2>
       <label class="muted">Entry text</label>
       <input type="text" id="entry-text" maxlength="500" style="width:100%; margin:.35rem 0 .8rem" />
@@ -68,7 +68,7 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="ldel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+    <dialog id="ldel-dlg" class="modal" style="width:min(30rem,94vw)">
       <h2 style="margin-top:0" id="del-title">Delete?</h2>
       <p class="muted" id="ldel-msg"></p>
       <div class="toast err" id="ldel-toast"></div>
@@ -78,7 +78,7 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="lexp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="lexp-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0">Export Lists to CSV</h2>
       <div class="radio-row" style="margin:.35rem 0 .8rem; flex-wrap:wrap">
         <label><input type="radio" name="lexp-scope" value="all" checked /> All lists</label>
@@ -91,7 +91,7 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="limp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+    <dialog id="limp-dlg" class="modal" style="width:min(38rem,94vw)">
       <h2 style="margin-top:0">Import Lists from CSV</h2>
       <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>List, Display Name, Description, Permission, Created By, Created By ID, List Created At, List Updated At, Entry, Added By, Added By ID, Date Added</code>. <strong>Wipe &amp; replace all is a true backup restore</strong> — it preserves creator IDs and timestamps. A header row is optional.</p>
       <label class="muted">CSV file</label>
@@ -109,7 +109,7 @@ export function listsPage(): string {
       </div>
     </dialog>
 
-    <dialog id="lwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="lwarn-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0" id="lwarn-title">⚠️ Confirm wipe &amp; replace</h2>
       <p class="muted" id="lwarn-msg"></p>
       <div class="toast err" id="lwarn-toast"></div>
@@ -130,7 +130,6 @@ export function listsPage(): string {
     ${commandTableScript()}
     ${commandModalsScript()}
     function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }catch(e){ return ''; } }
-    function levelFromRel(r){ if(!r) return 0; if(r.botAdmin) return 5; if(r.broadcaster) return 4; if(r.moderator) return 3; if(r.subscriber) return 1; return 0; }
     function current(){ return state.lists.filter(function(l){ return l.name===state.view; })[0] || null; }
     function canManageList(l){ return state.canManage && l && state.myLevel >= l.permission; }
     function canAddTo(l){ return l && state.myLevel >= l.permission; }
@@ -285,7 +284,7 @@ export function listsPage(): string {
       document.getElementById('list-delete').style.display='none';
       document.getElementById('list-toast').textContent='';
       document.getElementById('list-save').textContent='Create';
-      if(listDlg.showModal) listDlg.showModal(); else listDlg.setAttribute('open','');
+      openDialog(listDlg);
       document.getElementById('list-name').focus();
     }
     function openEditList(l){
@@ -298,15 +297,15 @@ export function listsPage(): string {
       document.getElementById('list-delete').style.display='';
       document.getElementById('list-toast').textContent='';
       document.getElementById('list-save').textContent='Save';
-      if(listDlg.showModal) listDlg.showModal(); else listDlg.setAttribute('open','');
+      openDialog(listDlg);
     }
     document.getElementById('list-delete').onclick=function(){
       var l=current(); if(!l) return;
-      listDlg.close?listDlg.close():listDlg.removeAttribute('open');
+      closeDialog(listDlg);
       askDeleteList(l);
     };
     document.getElementById('new-list-btn').onclick=openNewList;
-    document.getElementById('list-cancel').onclick=function(){ listDlg.close?listDlg.close():listDlg.removeAttribute('open'); };
+    document.getElementById('list-cancel').onclick=function(){ closeDialog(listDlg); };
     document.getElementById('list-save').onclick=async function(){
       var name=document.getElementById('list-name').value.trim();
       var display=document.getElementById('list-display').value;
@@ -321,7 +320,7 @@ export function listsPage(): string {
           await api('POST','/api/lists/update',{ name:editingListName, newName:name, displayName:display, description:desc, permission:perm });
           state.view=name.toLowerCase().replace(/^!/,'');
         }
-        listDlg.close?listDlg.close():listDlg.removeAttribute('open');
+        closeDialog(listDlg);
         await load();
       }catch(e){ document.getElementById('list-toast').textContent=e.message; }
     };
@@ -334,7 +333,7 @@ export function listsPage(): string {
       document.getElementById('entry-dlg-title').textContent='Add Entry';
       document.getElementById('entry-text').value='';
       document.getElementById('entry-toast').textContent='';
-      if(entryDlg.showModal) entryDlg.showModal(); else entryDlg.setAttribute('open','');
+      openDialog(entryDlg);
       document.getElementById('entry-text').focus();
     }
     function openEditEntry(l, id){
@@ -343,10 +342,10 @@ export function listsPage(): string {
       document.getElementById('entry-dlg-title').textContent='Edit Entry';
       document.getElementById('entry-text').value=en.text;
       document.getElementById('entry-toast').textContent='';
-      if(entryDlg.showModal) entryDlg.showModal(); else entryDlg.setAttribute('open','');
+      openDialog(entryDlg);
       document.getElementById('entry-text').focus();
     }
-    document.getElementById('entry-cancel').onclick=function(){ entryDlg.close?entryDlg.close():entryDlg.removeAttribute('open'); };
+    document.getElementById('entry-cancel').onclick=function(){ closeDialog(entryDlg); };
     document.getElementById('entry-text').onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); document.getElementById('entry-save').click(); } };
     document.getElementById('entry-save').onclick=async function(){
       var text=document.getElementById('entry-text').value;
@@ -354,7 +353,7 @@ export function listsPage(): string {
       try{
         if(entryMode==='add') await api('POST','/api/lists/entries/add',{ list:entryListName, text:text });
         else await api('POST','/api/lists/entries/update',{ list:entryListName, id:entryId, text:text });
-        entryDlg.close?entryDlg.close():entryDlg.removeAttribute('open');
+        closeDialog(entryDlg);
         await load();
       }catch(e){ document.getElementById('entry-toast').textContent=e.message; }
     };
@@ -367,44 +366,27 @@ export function listsPage(): string {
       document.getElementById('del-title').textContent='Delete list?';
       document.getElementById('ldel-msg').textContent='This permanently deletes "'+((l.displayName&&l.displayName.trim())||l.name)+'" and all '+l.entries.length+' of its entries.';
       document.getElementById('ldel-toast').textContent='';
-      if(lDelDlg.showModal) lDelDlg.showModal(); else lDelDlg.setAttribute('open','');
+      openDialog(lDelDlg);
     }
     function askDeleteEntry(l, id){
       delKind='entry'; delListName=l.name; delEntryId=id;
       document.getElementById('del-title').textContent='Delete entry?';
       document.getElementById('ldel-msg').textContent='This permanently removes the entry from "'+((l.displayName&&l.displayName.trim())||l.name)+'".';
       document.getElementById('ldel-toast').textContent='';
-      if(lDelDlg.showModal) lDelDlg.showModal(); else lDelDlg.setAttribute('open','');
+      openDialog(lDelDlg);
     }
-    document.getElementById('ldel-cancel').onclick=function(){ lDelDlg.close?lDelDlg.close():lDelDlg.removeAttribute('open'); };
+    document.getElementById('ldel-cancel').onclick=function(){ closeDialog(lDelDlg); };
     document.getElementById('ldel-confirm').onclick=async function(){
       try{
         if(delKind==='list') await api('POST','/api/lists/delete',{ name:delListName });
         else await api('POST','/api/lists/entries/delete',{ list:delListName, id:delEntryId });
-        lDelDlg.close?lDelDlg.close():lDelDlg.removeAttribute('open');
+        closeDialog(lDelDlg);
         if(delKind==='list') state.view=null;
         await load();
       }catch(e){ document.getElementById('ldel-toast').textContent='Delete failed: '+e.message; }
     };
 
     // ── CSV export/import ───────────────────────────────────────────────────────
-    function downloadCsv(filename, text){
-      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
-      var url=URL.createObjectURL(blob);
-      var a=document.createElement('a'); a.href=url; a.download=filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-    }
-    function readFileText(input){
-      return new Promise(function(resolve,reject){
-        var f=input.files && input.files[0];
-        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
-        var r=new FileReader();
-        r.onload=function(){ resolve(String(r.result||'')); };
-        r.onerror=function(){ reject(new Error('Could not read the file.')); };
-        r.readAsText(f);
-      });
-    }
 
     // Export (scope: all vs active list)
     var expDlg=document.getElementById('lexp-dlg');
@@ -414,9 +396,9 @@ export function listsPage(): string {
       if(activeEl) activeEl.disabled = !state.view;
       var allEl=document.querySelector('input[name=lexp-scope][value=all]'); if(allEl) allEl.checked=true;
       document.getElementById('lexp-toast').textContent='';
-      if(expDlg.showModal) expDlg.showModal(); else expDlg.setAttribute('open','');
+      openDialog(expDlg);
     };
-    document.getElementById('lexp-cancel').onclick=function(){ expDlg.close?expDlg.close():expDlg.removeAttribute('open'); };
+    document.getElementById('lexp-cancel').onclick=function(){ closeDialog(expDlg); };
     document.getElementById('lexp-go').onclick=async function(){
       var scopeEl=document.querySelector('input[name=lexp-scope]:checked'); var scope=scopeEl?scopeEl.value:'all';
       var qs = scope==='active' ? ('?scope=active&list='+encodeURIComponent(state.view||'')) : '?scope=all';
@@ -424,7 +406,7 @@ export function listsPage(): string {
         var res=await fetch('/api/lists/export'+qs,{ credentials:'same-origin' });
         if(!res.ok) throw new Error('HTTP '+res.status);
         downloadCsv(scope==='active'&&state.view ? state.view+'.csv' : 'lists.csv', await res.text());
-        expDlg.close?expDlg.close():expDlg.removeAttribute('open');
+        closeDialog(expDlg);
       }catch(e){ document.getElementById('lexp-toast').textContent='Export failed: '+e.message; }
     };
 
@@ -443,14 +425,14 @@ export function listsPage(): string {
       document.querySelector('input[name=limp-mode][value=replace]').disabled=needActive;
       if(needActive){ var ra=document.querySelector('input[name=limp-mode][value=replace-all]'); if(ra) ra.checked=true; }
       document.getElementById('limp-toast').textContent='';
-      if(limpDlg.showModal) limpDlg.showModal(); else limpDlg.setAttribute('open','');
+      openDialog(limpDlg);
     };
-    document.getElementById('limp-cancel').onclick=function(){ limpDlg.close?limpDlg.close():limpDlg.removeAttribute('open'); };
+    document.getElementById('limp-cancel').onclick=function(){ closeDialog(limpDlg); };
     async function doListImport(mode, csv){
       var body={ mode:mode, csv:csv }; if(mode!=='replace-all') body.list=state.view;
       var d=await api('POST','/api/lists/import', body);
-      limpDlg.close?limpDlg.close():limpDlg.removeAttribute('open');
-      lwarnDlg.close?lwarnDlg.close():lwarnDlg.removeAttribute('open');
+      closeDialog(limpDlg);
+      closeDialog(lwarnDlg);
       if(mode==='replace-all') state.view=null;
       await load();
       var sub=document.getElementById('list-sub');
@@ -469,13 +451,13 @@ export function listsPage(): string {
             : 'This permanently deletes all entries in <strong>'+esc(state.view)+'</strong> and replaces them with your CSV. This cannot be undone.';
           document.getElementById('lwarn-confirm').setAttribute('data-mode', mode);
           document.getElementById('lwarn-toast').textContent='';
-          if(lwarnDlg.showModal) lwarnDlg.showModal(); else lwarnDlg.setAttribute('open','');
+          openDialog(lwarnDlg);
           return;
         }
         await doListImport('add', lPendingCsv);
       }catch(e){ document.getElementById('limp-toast').textContent=e.message; }
     };
-    document.getElementById('lwarn-cancel').onclick=function(){ lwarnDlg.close?lwarnDlg.close():lwarnDlg.removeAttribute('open'); };
+    document.getElementById('lwarn-cancel').onclick=function(){ closeDialog(lwarnDlg); };
     document.getElementById('lwarn-confirm').onclick=async function(){
       try{ await doListImport(document.getElementById('lwarn-confirm').getAttribute('data-mode'), lPendingCsv); }
       catch(e){ document.getElementById('lwarn-toast').textContent=e.message; }

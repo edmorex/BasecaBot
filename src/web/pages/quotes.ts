@@ -22,7 +22,7 @@ export function quotesPage(): string {
     <div class="card" id="quote-card"><div class="md-main" id="quote-main"></div></div>
     <div class="pager-wrap" id="quote-pager"></div>
 
-    <dialog id="qedit-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(38rem,94vw)">
+    <dialog id="qedit-dlg" class="modal" style="width:min(38rem,94vw)">
       <h2 style="margin-top:0">Edit Quote <code id="qedit-id"></code></h2>
       <label class="muted">Quote text</label>
       <input type="text" id="qedit-text" maxlength="500" style="width:100%; margin:.35rem 0 .8rem" />
@@ -39,7 +39,7 @@ export function quotesPage(): string {
       </div>
     </dialog>
 
-    <dialog id="qdel-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(30rem,94vw)">
+    <dialog id="qdel-dlg" class="modal" style="width:min(30rem,94vw)">
       <h2 style="margin-top:0">Delete quote <code id="qdel-id"></code>?</h2>
       <p class="muted" id="qdel-msg"></p>
       <div class="toast err" id="qdel-toast"></div>
@@ -49,7 +49,7 @@ export function quotesPage(): string {
       </div>
     </dialog>
 
-    <dialog id="qimp-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(36rem,94vw)">
+    <dialog id="qimp-dlg" class="modal" style="width:min(36rem,94vw)">
       <h2 style="margin-top:0">Import Quotes from CSV</h2>
       <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>ID, Quote, User, Game, Date, Quoted By, Quoted By ID, Created At</code>. Additive keeps existing quotes and assigns new IDs; <strong>wipe &amp; replace is a true backup restore</strong> — it preserves the original IDs and timestamps. A header row is optional.</p>
       <label class="muted">CSV file</label>
@@ -66,7 +66,7 @@ export function quotesPage(): string {
       </div>
     </dialog>
 
-    <dialog id="qwarn-dlg" style="background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:12px; width:min(32rem,94vw)">
+    <dialog id="qwarn-dlg" class="modal" style="width:min(32rem,94vw)">
       <h2 style="margin-top:0">⚠️ Wipe &amp; replace all quotes?</h2>
       <p class="muted">This permanently deletes <strong>every existing quote</strong> and replaces them with the rows in your CSV. This cannot be undone.</p>
       <div class="toast err" id="qwarn-toast"></div>
@@ -177,9 +177,9 @@ export function quotesPage(): string {
       document.getElementById('qedit-game').value=q.game||'';
       document.getElementById('qedit-date').value=q.date||'';
       document.getElementById('qedit-toast').textContent='';
-      if(editDlg.showModal) editDlg.showModal(); else editDlg.setAttribute('open','');
+      openDialog(editDlg);
     }
-    document.getElementById('qedit-cancel').onclick=function(){ editDlg.close?editDlg.close():editDlg.removeAttribute('open'); };
+    document.getElementById('qedit-cancel').onclick=function(){ closeDialog(editDlg); };
     document.getElementById('qedit-save').onclick=async function(){
       if(!editing) return;
       var payload={ id:editing.id,
@@ -187,7 +187,7 @@ export function quotesPage(): string {
         user:document.getElementById('qedit-user').value,
         game:document.getElementById('qedit-game').value,
         date:document.getElementById('qedit-date').value };
-      try{ await api('POST','/api/quotes/update', payload); editDlg.close?editDlg.close():editDlg.removeAttribute('open'); await load(); }
+      try{ await api('POST','/api/quotes/update', payload); closeDialog(editDlg); await load(); }
       catch(e){ document.getElementById('qedit-toast').textContent=e.message; }
     };
 
@@ -199,23 +199,16 @@ export function quotesPage(): string {
       document.getElementById('qdel-id').textContent=q.id;
       document.getElementById('qdel-msg').textContent='This permanently removes: "'+q.text+'"';
       document.getElementById('qdel-toast').textContent='';
-      if(delDlg.showModal) delDlg.showModal(); else delDlg.setAttribute('open','');
+      openDialog(delDlg);
     }
-    document.getElementById('qdel-cancel').onclick=function(){ delDlg.close?delDlg.close():delDlg.removeAttribute('open'); };
+    document.getElementById('qdel-cancel').onclick=function(){ closeDialog(delDlg); };
     document.getElementById('qdel-confirm').onclick=async function(){
       if(!deleting) return;
-      try{ await api('POST','/api/quotes/delete',{ id:deleting.id }); delDlg.close?delDlg.close():delDlg.removeAttribute('open'); await load(); }
+      try{ await api('POST','/api/quotes/delete',{ id:deleting.id }); closeDialog(delDlg); await load(); }
       catch(e){ document.getElementById('qdel-toast').textContent='Delete failed: '+e.message; }
     };
 
     // ── CSV export/import ───────────────────────────────────────────────────────
-    function downloadCsv(filename, text){
-      var blob=new Blob([text], { type:'text/csv;charset=utf-8' });
-      var url=URL.createObjectURL(blob);
-      var a=document.createElement('a'); a.href=url; a.download=filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-    }
     document.getElementById('q-export-btn').onclick=async function(){
       try{
         var res=await fetch('/api/quotes/export',{ credentials:'same-origin' });
@@ -231,23 +224,13 @@ export function quotesPage(): string {
       document.getElementById('qimp-file').value='';
       var add=document.querySelector('input[name=qimp-mode][value=add]'); if(add) add.checked=true;
       document.getElementById('qimp-toast').textContent='';
-      if(impDlg.showModal) impDlg.showModal(); else impDlg.setAttribute('open','');
+      openDialog(impDlg);
     };
-    document.getElementById('qimp-cancel').onclick=function(){ impDlg.close?impDlg.close():impDlg.removeAttribute('open'); };
-    function readFileText(input){
-      return new Promise(function(resolve,reject){
-        var f=input.files && input.files[0];
-        if(!f){ reject(new Error('Choose a CSV file first.')); return; }
-        var r=new FileReader();
-        r.onload=function(){ resolve(String(r.result||'')); };
-        r.onerror=function(){ reject(new Error('Could not read the file.')); };
-        r.readAsText(f);
-      });
-    }
+    document.getElementById('qimp-cancel').onclick=function(){ closeDialog(impDlg); };
     async function doQuoteImport(mode, csv){
       var d=await api('POST','/api/quotes/import',{ mode:mode, csv:csv });
-      impDlg.close?impDlg.close():impDlg.removeAttribute('open');
-      warnDlg.close?warnDlg.close():warnDlg.removeAttribute('open');
+      closeDialog(impDlg);
+      closeDialog(warnDlg);
       await load();
       var sub=document.getElementById('quote-sub');
       sub.textContent = (mode==='replace'?'Replaced with ':'Imported ')+d.added+' quote'+(d.added===1?'':'s')+'. '+sub.textContent;
@@ -256,11 +239,11 @@ export function quotesPage(): string {
     document.getElementById('qimp-go').onclick=async function(){
       try{
         pendingCsv=await readFileText(document.getElementById('qimp-file'));
-        if(impMode()==='replace'){ document.getElementById('qwarn-toast').textContent=''; if(warnDlg.showModal) warnDlg.showModal(); else warnDlg.setAttribute('open',''); return; }
+        if(impMode()==='replace'){ document.getElementById('qwarn-toast').textContent=''; openDialog(warnDlg); return; }
         await doQuoteImport('add', pendingCsv);
       }catch(e){ document.getElementById('qimp-toast').textContent=e.message; }
     };
-    document.getElementById('qwarn-cancel').onclick=function(){ warnDlg.close?warnDlg.close():warnDlg.removeAttribute('open'); };
+    document.getElementById('qwarn-cancel').onclick=function(){ closeDialog(warnDlg); };
     document.getElementById('qwarn-confirm').onclick=async function(){
       try{ await doQuoteImport('replace', pendingCsv); }
       catch(e){ document.getElementById('qwarn-toast').textContent=e.message; }
