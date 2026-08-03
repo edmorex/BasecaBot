@@ -16,8 +16,6 @@ function parseId(word: string): number | null {
  * live when it was captured.
  */
 export function quotesPlugin(): Plugin {
-  let broadcasterId: string | undefined;
-
   return {
     name: 'quotes',
     version: '0.1.0',
@@ -43,24 +41,6 @@ export function quotesPlugin(): Plugin {
       ];
       for (const s of strings) ctx.text.register({ feature: 'quotes', ...s });
       const sayText = ctx.text.sayer(ctx.chat, 'quotes'); // blank string = silent
-
-      const getBroadcasterId = async (): Promise<string | undefined> => {
-        if (broadcasterId) return broadcasterId;
-        const u = await ctx.api.users.getUserByName(ctx.config.twitch.broadcasterUsername);
-        broadcasterId = u?.id;
-        return broadcasterId;
-      };
-      const currentGame = async (): Promise<string | null> => {
-        try {
-          const bid = await getBroadcasterId();
-          if (!bid) return null;
-          const info = await ctx.api.channels.getChannelInfoById(bid);
-          return info?.gameName?.trim() || null;
-        } catch (err) {
-          ctx.logger.warn({ err }, 'quotes: could not fetch current game');
-          return null;
-        }
-      };
 
       // Surface QuoteErrors to chat instead of throwing to the router.
       const guard =
@@ -118,7 +98,7 @@ export function quotesPlugin(): Plugin {
               // `"text" - Name` form; throws a QuoteError on an unparseable input.
               const { user, text } = parseQuoteAddArgs(e.argString);
               await ctx.users.touch(e.user);
-              const game = await currentGame();
+              const game = await ctx.stream.game();
               const quote = await svc.add({ user, text, game }, { id: e.user.id, displayName: e.user.displayName });
               await sayText(e.channel, 'added', { quote: formatQuote(quote) });
             }),

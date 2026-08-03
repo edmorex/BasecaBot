@@ -27,14 +27,6 @@ const NONSUB_CAP = 3000; // non-subscribers stop accruing past this
 export function pointsPlugin(): Plugin {
   let ctx: ServiceContext;
   let timer: ReturnType<typeof setInterval> | undefined;
-  let broadcasterId: string | undefined;
-
-  async function getBroadcasterId(): Promise<string | undefined> {
-    if (broadcasterId) return broadcasterId;
-    const u = await ctx.api.users.getUserByName(ctx.config.twitch.broadcasterUsername);
-    broadcasterId = u?.id;
-    return broadcasterId;
-  }
 
   /** Fetch a set of user ids from a paginated list, or empty on failure (e.g. missing scope). */
   async function idSet<T>(fetch: () => Promise<T[]>, getId: (x: T) => string, label: string): Promise<Set<string>> {
@@ -48,20 +40,12 @@ export function pointsPlugin(): Plugin {
 
   /** Pay out to everyone present in chat, but only while the channel is live. */
   async function payout(): Promise<void> {
-    const bid = await getBroadcasterId();
+    const bid = await ctx.stream.broadcasterId();
     if (!bid) {
       ctx.logger.error({ user: ctx.config.twitch.broadcasterUsername }, 'points: broadcaster not found');
       return;
     }
-
-    let live: boolean;
-    try {
-      live = (await ctx.api.streams.getStreamByUserId(bid)) !== null;
-    } catch (err) {
-      ctx.logger.error({ err }, 'points: live-check failed; skipping payout');
-      return;
-    }
-    if (!live) return;
+    if (!(await ctx.stream.isLive())) return; // only accrue while live
 
     // Everyone currently connected to chat (includes lurkers).
     let chatters: { userId: string; userName: string; userDisplayName: string }[];

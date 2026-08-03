@@ -13,6 +13,7 @@ import { QuotesService } from './services/quotes.js';
 import { FirstService } from './services/first.js';
 import { TimerService } from './services/timers.js';
 import { TextStringsService } from './services/textStrings.js';
+import { StreamService } from './services/stream.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
 import { WebServer } from './web/webServer.js';
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   // ── Twitch auth + chat client ──────────────────────────────────────────────
   const authProvider = await createAuthProvider(config);
   const api = new ApiClient({ authProvider });
+  const stream = new StreamService(api, config.twitch.broadcasterUsername, scopedLogger('stream'));
 
   // The Twitch lookup lets `@handle` resolve for accounts the bot has never seen
   // (a lurker being quoted), instead of rejecting them as unknown.
@@ -101,6 +103,7 @@ async function main(): Promise<void> {
     first,
     timers,
     text,
+    stream,
     storage,
     ws,
     api,

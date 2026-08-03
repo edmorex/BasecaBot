@@ -25,7 +25,7 @@ describe('first plugin', () => {
     statsFor: ReturnType<typeof vi.fn>;
     setActiveStream: ReturnType<typeof vi.fn>;
   };
-  let getStreamByUserId: ReturnType<typeof vi.fn>;
+  let liveStream: ReturnType<typeof vi.fn>;
   let broadcast: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof firstPlugin>;
   let text: TextStringsService;
@@ -43,7 +43,7 @@ describe('first plugin', () => {
       statsFor: vi.fn(async () => null),
       setActiveStream: vi.fn(),
     };
-    getStreamByUserId = vi.fn(async () => LIVE);
+    liveStream = vi.fn(async () => LIVE);
     broadcast = vi.fn();
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
@@ -58,12 +58,9 @@ describe('first plugin', () => {
       first,
       users: { touch: vi.fn(), resolveUserRef: vi.fn(async () => ({ kind: 'none' })) },
       ws: { broadcast },
+      stream: { stream: liveStream },
       api: {
-        users: {
-          getUserByName: vi.fn(async () => ({ id: 'b1' })),
-          getUserById: vi.fn(async () => ({ profilePictureUrl: 'https://cdn/pic.png' })),
-        },
-        streams: { getStreamByUserId },
+        users: { getUserById: vi.fn(async () => ({ profilePictureUrl: 'https://cdn/pic.png' })) },
       },
       config: { twitch: { broadcasterUsername: 'test' } },
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -81,7 +78,7 @@ describe('first plugin', () => {
   const last = () => String(say.mock.calls.at(-1)?.[1] ?? '');
 
   it('sasses users who try to claim first before the stream is live', async () => {
-    getStreamByUserId.mockResolvedValue(null);
+    liveStream.mockResolvedValue(null);
     await run('!first');
     expect(first.checkIn).not.toHaveBeenCalled();
     expect(last()).toBe('Very naughty! You are not the first person to try and claim first before the stream has started.');
@@ -114,7 +111,7 @@ describe('first plugin', () => {
 
   it('stays silent when a string is blanked (empty = disabled)', async () => {
     await text.set('first', 'notLive', '   ');
-    getStreamByUserId.mockResolvedValue(null);
+    liveStream.mockResolvedValue(null);
     await run('!first');
     expect(say).not.toHaveBeenCalled();
   });
@@ -142,7 +139,7 @@ describe('first plugin', () => {
       expect(first.setActiveStream).toHaveBeenLastCalledWith(LIVE.startDate.toISOString());
       expect(broadcast).not.toHaveBeenCalled();
 
-      getStreamByUserId.mockResolvedValue(null); // stream ends
+      liveStream.mockResolvedValue(null); // stream ends
       await vi.advanceTimersByTimeAsync(60 * 60_000); // next hourly poll detects offline
       expect(first.setActiveStream).toHaveBeenLastCalledWith(null);
       expect(broadcast).toHaveBeenCalledWith('first', 'clear', {});

@@ -47,31 +47,8 @@ export function firstPlugin(): Plugin {
       const CHECKIN_COOLDOWN_MS = 60_000;
       const lastAttempt = new Map<string, number>();
 
-      // ── Live-stream lookup (cached briefly; a stream's start time is its race id) ──
-      let broadcasterId: string | undefined;
-      let streamCache: { at: number; value: { startDate: Date } | null } | undefined;
-      const STREAM_TTL_MS = 10_000;
-
-      const getBroadcasterId = async (): Promise<string | undefined> => {
-        if (broadcasterId) return broadcasterId;
-        const u = await ctx.api.users.getUserByName(ctx.config.twitch.broadcasterUsername);
-        broadcasterId = u?.id;
-        return broadcasterId;
-      };
-
-      const currentStream = async (): Promise<{ startDate: Date } | null> => {
-        if (streamCache && Date.now() - streamCache.at < STREAM_TTL_MS) return streamCache.value;
-        let value: { startDate: Date } | null = streamCache?.value ?? null;
-        try {
-          const bid = await getBroadcasterId();
-          const s = bid ? await ctx.api.streams.getStreamByUserId(bid) : null;
-          value = s ? { startDate: s.startDate } : null;
-        } catch (err) {
-          ctx.logger.warn({ err }, 'first: live check failed; using last-known state');
-        }
-        streamCache = { at: Date.now(), value };
-        return value;
-      };
+      // A stream's start time is the race id; the shared StreamService caches it.
+      const currentStream = () => ctx.stream.stream();
 
       // ── Live monitor: keep the overlay's active race in sync with the stream,
       // and CLEAR the overlay when the stream goes offline (instead of leaving

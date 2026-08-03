@@ -7,8 +7,10 @@ import type { QuotesService } from './quotes.js';
 import type { ListsService } from './lists.js';
 import type { CustomCommandService } from './customCommands.js';
 import type { TimerService } from './timers.js';
+import { StreamService } from './stream.js';
 import { formatQuote } from './quotes.js';
 import { toCsv } from './csv.js';
+import { humanDuration } from './strings.js';
 
 /**
  * Custom-command variable engine — a StreamElements-style templating layer.
@@ -43,6 +45,8 @@ export interface VarDeps {
   customCommands: CustomCommandService;
   timers: TimerService;
   api: ApiClient;
+  /** Shared broadcaster/stream reads. Optional — the engine builds its own from `api` when absent (tests). */
+  stream?: StreamService;
   broadcasterUsername: string;
   pointsName: string;
   logger: Logger;
@@ -94,19 +98,6 @@ function sliceArgs(args: string[], from: number, to?: number): string {
   return args.slice(Math.max(0, from - 1), to).join(' ');
 }
 
-function humanDuration(ms: number): string {
-  if (ms < 0) ms = 0;
-  const totalMin = Math.floor(ms / 60000);
-  const days = Math.floor(totalMin / 1440);
-  const hours = Math.floor((totalMin % 1440) / 60);
-  const mins = totalMin % 60;
-  const parts: string[] = [];
-  if (days) parts.push(`${days} day${days === 1 ? '' : 's'}`);
-  if (hours) parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
-  parts.push(`${mins} minute${mins === 1 ? '' : 's'}`);
-  return parts.join(' ');
-}
-
 /** Parse a $(time.until) target: full ISO, or bare HH:MM (next occurrence, UTC). */
 function parseUntil(input: string): Date | null {
   const s = input.trim();
@@ -125,19 +116,20 @@ function parseUntil(input: string): Date | null {
 
 interface Cached<T> { value: T; at: number }
 
-/** Fetches + short-caches the Helix reads the channel.* / game / uptime / emote / chatter variables need. */
+/**
+ * Fetches + short-caches the Helix reads the emote / chatter / follower / other-
+ * channel variables need. The broadcaster id + live stream + channel info come
+ * from the shared StreamService (so there's one cache for those).
+ */
 class LiveData {
-  private bid: string | null | undefined; // undefined = not yet resolved
-  private streamC?: Cached<{ viewers: number; startDate: Date } | null>;
-  private infoC?: Cached<{ gameName: string; title: string; displayName: string } | null>;
   private followersC?: Cached<number>;
   private emotesC?: Cached<string[]>;
   private chattersC?: Cached<string[]>;
   private readonly byName = new Map<string, Cached<{ gameName: string; title: string; startDate: Date | null } | null>>();
 
   constructor(
+    private readonly streamSvc: StreamService,
     private readonly api: ApiClient,
-    private readonly broadcasterUsername: string,
     private readonly logger: Logger,
   ) {}
 
@@ -145,40 +137,19 @@ class LiveData {
     return !!c && Date.now() - c.at < ttl;
   }
 
-  private async broadcasterId(): Promise<string | null> {
-    if (this.bid !== undefined) return this.bid;
-    try {
-      const u = await this.api.users.getUserByName(this.broadcasterUsername);
-      this.bid = u?.id ?? null;
-    } catch (err) {
-      this.logger.debug({ err }, 'commandVars: broadcaster lookup failed');
-      this.bid = null;
-    }
-    return this.bid;
+  private broadcasterId(): Promise<string | null> {
+    return this.streamSvc.broadcasterId();
   }
 
-  async stream(): Promise<{ viewers: number; startDate: Date } | null> {
-    if (this.fresh(this.streamC, 15_000)) return this.streamC.value;
-    const bid = await this.broadcasterId();
-    let value: { viewers: number; startDate: Date } | null = null;
-    if (bid) {
-      const s = await this.api.streams.getStreamByUserId(bid);
-      value = s ? { viewers: s.viewers, startDate: s.startDate } : null;
-    }
-    this.streamC = { value, at: Date.now() };
-    return value;
+  // The broadcaster's stream / info / uptime are shared via StreamService.
+  stream(): Promise<{ viewers: number; startDate: Date } | null> {
+    return this.streamSvc.stream();
   }
-
-  async info(): Promise<{ gameName: string; title: string; displayName: string } | null> {
-    if (this.fresh(this.infoC, 15_000)) return this.infoC.value;
-    const bid = await this.broadcasterId();
-    let value: { gameName: string; title: string; displayName: string } | null = null;
-    if (bid) {
-      const c = await this.api.channels.getChannelInfoById(bid);
-      value = c ? { gameName: c.gameName, title: c.title, displayName: c.displayName } : null;
-    }
-    this.infoC = { value, at: Date.now() };
-    return value;
+  info(): Promise<{ gameName: string; title: string; displayName: string } | null> {
+    return this.streamSvc.info();
+  }
+  uptime(): Promise<string | null> {
+    return this.streamSvc.uptime();
   }
 
   async followerCount(): Promise<number> {
@@ -188,11 +159,6 @@ class LiveData {
     if (bid) value = (await this.api.channels.getChannelFollowers(bid)).total;
     this.followersC = { value, at: Date.now() };
     return value;
-  }
-
-  async uptime(): Promise<string | null> {
-    const s = await this.stream();
-    return s ? humanDuration(Date.now() - s.startDate.getTime()) : null;
   }
 
   private async emotes(): Promise<string[]> {
@@ -504,7 +470,8 @@ export class CommandVarEngine {
   private readonly live: LiveData;
 
   constructor(private readonly deps: VarDeps) {
-    this.live = new LiveData(deps.api, deps.broadcasterUsername, deps.logger);
+    const stream = deps.stream ?? new StreamService(deps.api, deps.broadcasterUsername, deps.logger);
+    this.live = new LiveData(stream, deps.api, deps.logger);
   }
 
   /** Expand a template. Never throws — resolver errors degrade to empty strings. */

@@ -26,32 +26,12 @@ export function timersPlugin(): Plugin {
     init(ctx: ServiceContext) {
       const say = (channel: string, msg: string) => ctx.chat.say(channel, msg);
 
-      // ── Broadcaster identity + live check (cached) ────────────────────────────
-      let broadcaster: { id: string; login: string; displayName: string } | undefined;
-      const getBroadcaster = async () => {
-        if (broadcaster) return broadcaster;
-        const u = await ctx.api.users.getUserByName(ctx.config.twitch.broadcasterUsername);
-        if (u) broadcaster = { id: u.id, login: u.name, displayName: u.displayName };
-        return broadcaster;
-      };
-
-      let streamCache: { at: number; live: boolean } | undefined;
-      const isLive = async (): Promise<boolean> => {
-        if (streamCache && Date.now() - streamCache.at < 10_000) return streamCache.live;
-        let live = streamCache?.live ?? false;
-        try {
-          const b = await getBroadcaster();
-          live = b ? (await ctx.api.streams.getStreamByUserId(b.id)) !== null : false;
-        } catch (err) {
-          ctx.logger.warn({ err }, 'timers: live check failed; using last-known state');
-        }
-        streamCache = { at: Date.now(), live };
-        return live;
-      };
+      // Loop mode skips fires while offline; the shared StreamService caches this.
+      const isLive = () => ctx.stream.isLive();
 
       // Run a bound command as the broadcaster, without any chat-side effects.
       const fire = async (command: string): Promise<void> => {
-        const b = await getBroadcaster();
+        const b = await ctx.stream.broadcaster();
         if (!b) {
           ctx.logger.warn({ command }, 'timers: cannot fire — broadcaster not resolved');
           return;

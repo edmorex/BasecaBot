@@ -9,6 +9,7 @@ import type { QuotesService } from '../services/quotes.js';
 import type { FirstService } from '../services/first.js';
 import type { TimerService } from '../services/timers.js';
 import type { TextStringsService } from '../services/textStrings.js';
+import type { StreamService } from '../services/stream.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
 import type { AppConfig } from '../services/config.js';
@@ -47,6 +48,8 @@ export interface ServiceContext {
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */
   readonly ws: WsHub;
+  /** Cached broadcaster/live-stream/game reads (shared by plugins + variables). */
+  readonly stream: StreamService;
   /** Twitch Helix API client (e.g. to check whether the channel is live). */
   readonly api: ApiClient;
   /** Validated app configuration. */

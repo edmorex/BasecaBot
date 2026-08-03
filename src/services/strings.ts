@@ -19,3 +19,17 @@ export function firstAndRest(input: string): { first: string; rest: string } {
   if (i === -1) return { first: s, rest: '' };
   return { first: s.slice(0, i), rest: s.slice(i + 1).trim() };
 }
+
+/** A duration in ms as a human string, e.g. "2 hours 15 minutes" (minutes always shown). */
+export function humanDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days} ${plural(days, 'day', 'days')}`);
+  if (hours) parts.push(`${hours} ${plural(hours, 'hour', 'hours')}`);
+  parts.push(`${mins} ${plural(mins, 'minute', 'minutes')}`);
+  return parts.join(' ');
+}

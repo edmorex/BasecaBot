@@ -54,7 +54,10 @@ describe('timers plugin', () => {
       commands,
       chat: chatSvc,
       timers,
-      api: { users: { getUserByName: vi.fn(async () => ({ id: 'b1', name: 'baseca', displayName: 'Baseca' })) }, streams: { getStreamByUserId: vi.fn(async () => ({})) } },
+      stream: {
+        broadcaster: vi.fn(async () => ({ id: 'b1', login: 'baseca', displayName: 'Baseca' })),
+        isLive: vi.fn(async () => true),
+      },
       config: { twitch: { broadcasterUsername: 'baseca', channel: 'baseca' } },
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     } as unknown as ServiceContext;
