@@ -1,4 +1,5 @@
 import type { Storage } from './storage/index.js';
+import { ChatError } from '../core/chatError.js';
 import type { EventUser } from '../core/events.js';
 
 /** Normalize a name for lookup/uniqueness: lowercase, strip a leading @. */
@@ -15,7 +16,7 @@ function isUniqueViolation(err: unknown, field: string): boolean {
   return targets.includes(field);
 }
 
-export class AliasError extends Error {}
+export class AliasError extends ChatError {}
 
 /**
  * Where an indexed name came from. Also its precedence when two users claim the

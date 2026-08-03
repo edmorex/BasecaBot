@@ -47,7 +47,7 @@ export function timersPlugin(): Plugin {
       stopRuntime = () => ctx.timers.stopAllRuntime();
       resume = () => ctx.timers.resumeLoops();
 
-      // ── Argument parsing + error guard ────────────────────────────────────────
+      // ── Argument parsing (bad input throws a TimerError → router replies) ──────
       // add/edit: "<name> <period> <!command> [options]".
       const parseDef = (e: CommandEvent) => {
         const parts = e.argString.trim().split(/\s+/).filter(Boolean);
@@ -61,16 +61,6 @@ export function timersPlugin(): Plugin {
         if (!name) throw new TimerError('Provide a timer name.');
         return name;
       };
-      const guard =
-        (fn: (e: CommandEvent) => Promise<void>) =>
-        async (e: CommandEvent): Promise<void> => {
-          try {
-            await fn(e);
-          } catch (err) {
-            if (err instanceof TimerError) await say(e.channel, err.message);
-            else throw err;
-          }
-        };
 
       ctx.commands.registerGroup('timer', {
         description:
@@ -81,44 +71,44 @@ export function timersPlugin(): Plugin {
             description: 'Create a timer bound to a command: !timer add <name> <periodSeconds> <!command> [options].',
             usage: '<name> <periodSeconds> <!command> [options]',
             aliases: ['new', 'create', 'make'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const { name, period, command } = parseDef(e);
               const t = await ctx.timers.add(name, period, command);
               await say(e.channel, `Timer "${t.name}" created — runs ${t.command} every ${t.periodSeconds}s. Start it with !timer start ${t.name} or !timer loop ${t.name}.`);
-            }),
+            },
           },
           start: {
             description: 'Start a one-shot: fire the timer’s command once after its period.',
             usage: '<name>',
             aliases: ['go', 'activate', 'begin', 'enable'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const t = await ctx.timers.start(nameArg(e));
               await say(e.channel, `Timer "${t.name}" started — ${t.command} fires in ${t.periodSeconds}s.`);
-            }),
+            },
           },
           loop: {
             description: 'Start loop mode: fire the timer’s command every period (skipped while offline, but stays armed).',
             usage: '<name>',
             aliases: ['repeat'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const t = await ctx.timers.loop(nameArg(e));
               await say(e.channel, `Timer "${t.name}" looping — ${t.command} every ${t.periodSeconds}s.`);
-            }),
+            },
           },
           stop: {
             description: 'Disable loop mode (if any) and abort the current countdown.',
             usage: '<name>',
             aliases: ['end', 'abort', 'disable', 'cancel'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const t = await ctx.timers.stop(nameArg(e));
               await say(e.channel, `Timer "${t.name}" stopped.`);
-            }),
+            },
           },
           status: {
             description: 'Report the time left on a timer.',
             usage: '<name>',
             aliases: ['remaining', 'timeleft'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const name = nameArg(e);
               const t = await ctx.timers.get(name);
               if (!t) throw new TimerError(`No timer named "${name}".`);
@@ -127,27 +117,27 @@ export function timersPlugin(): Plugin {
                 return;
               }
               await say(e.channel, `Timer "${t.name}" fires in ${t.secondsLeft}s${t.mode === 'loop' ? ' (looping)' : ''}.`);
-            }),
+            },
           },
           delete: {
             description: 'Abort (if running) and delete a timer.',
             usage: '<name>',
             aliases: ['remove'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const name = nameArg(e);
               await ctx.timers.delete(name);
               await say(e.channel, `Timer "${name}" deleted.`);
-            }),
+            },
           },
           edit: {
             description: 'Update a timer’s period and command: !timer edit <name> <periodSeconds> <!command> [options].',
             usage: '<name> <periodSeconds> <!command> [options]',
             aliases: ['update', 'modify', 'change'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const { name, period, command } = parseDef(e);
               const t = await ctx.timers.edit(name, period, command);
               await say(e.channel, `Timer "${t.name}" updated — runs ${t.command} every ${t.periodSeconds}s.`);
-            }),
+            },
           },
         },
       });

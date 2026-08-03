@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventBus } from './eventBus.js';
 import { CommandRouter } from './commandRouter.js';
 import { PermissionLevel, type ChatEvent, type CommandEvent, type EventUser } from './events.js';
+import { ChatError } from './chatError.js';
 import type { ChatService } from '../services/chat.js';
 
 const noopChat: ChatService = {
@@ -83,6 +84,39 @@ describe('CommandRouter dispatch', () => {
     router.setFallback(fallback);
     await bus.publish(chat('!doesnotexist'));
     expect(fallback).toHaveBeenCalledOnce();
+  });
+
+  it('says a ChatError thrown by a handler as the chat reply', async () => {
+    const say = vi.spyOn(noopChat, 'say');
+    router.register('boom', async () => {
+      throw new ChatError('nope — bad input');
+    });
+    await bus.publish(chat('!boom'));
+    expect(say).toHaveBeenCalledWith('test', 'nope — bad input');
+    say.mockRestore();
+  });
+
+  it('shows a generic message for a non-ChatError (an actual bug)', async () => {
+    const say = vi.spyOn(noopChat, 'say');
+    router.register('crash', async () => {
+      throw new Error('internal detail');
+    });
+    await bus.publish(chat('!crash'));
+    expect(say).toHaveBeenCalledWith('test', 'Something went wrong running !crash.');
+    say.mockRestore();
+  });
+
+  it('says a ChatError thrown from a group onUnknown handler', async () => {
+    const say = vi.spyOn(noopChat, 'say');
+    router.registerGroup('quote', {
+      onUnknown: async () => {
+        throw new ChatError('no quote #999');
+      },
+      subcommands: { help: { handler: vi.fn() } },
+    });
+    await bus.publish(chat('!quote 999'));
+    expect(say).toHaveBeenCalledWith('test', 'no quote #999');
+    say.mockRestore();
   });
 
   it('reports registered commands and aliases via isRegistered', () => {

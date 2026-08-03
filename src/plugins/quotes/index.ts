@@ -42,36 +42,24 @@ export function quotesPlugin(): Plugin {
       for (const s of strings) ctx.text.register({ feature: 'quotes', ...s });
       const sayText = ctx.text.sayer(ctx.chat, 'quotes'); // blank string = silent
 
-      // Surface QuoteErrors to chat instead of throwing to the router.
-      const guard =
-        (fn: (e: CommandEvent) => Promise<void>) =>
-        async (e: CommandEvent): Promise<void> => {
-          try {
-            await fn(e);
-          } catch (err) {
-            if (err instanceof QuoteError) await say(e.channel, err.message);
-            else throw err;
-          }
-        };
-
       // An edit subcommand: first arg is the ID, the rest is the new value.
       const editHandler = (
         label: string,
         apply: (id: number, value: string) => Promise<QuoteView>,
       ) =>
-        guard(async (e) => {
+        async (e: CommandEvent) => {
           const { first, rest } = firstAndRest(e.argString);
           const id = parseId(first);
           if (id === null) throw new QuoteError(`Usage: !quote ${label} <quoteId> <new value>`);
           await say(e.channel, formatQuote(await apply(id, rest)));
-        });
+        };
 
       ctx.commands.registerGroup('quote', {
         description:
           'Quotes: !quote (random), !quote <id>, and search/searchuser/searchdate/searchgame print quotes (anyone). Subs can add. Mods: remove, edittext, edituser, editgame, editdate.',
         permission: PermissionLevel.Viewer,
         // Bare `!quote` or `!quote <id>` (no matching subcommand).
-        onUnknown: guard(async (e) => {
+        onUnknown: async (e) => {
           const id = e.args[0] ? parseId(e.args[0]) : null;
           if (id !== null) {
             await say(e.channel, formatQuote(await svc.getById(id)));
@@ -80,20 +68,20 @@ export function quotesPlugin(): Plugin {
           const q = await svc.random();
           if (q) await say(e.channel, formatQuote(q));
           else await sayText(e.channel, 'none');
-        }),
+        },
         subcommands: {
           help: {
             description: 'Show how to use the quote commands.',
-            handler: guard(async (e) => {
+            handler: async (e) => {
               await sayText(e.channel, 'help');
-            }),
+            },
           },
           add: {
             description:
               'Add a new quote: !quote add <username> <quote text>, or !quote add "quote text" - Name. The name can be an @handle, display name, or alias.',
             usage: '<username> <quoteText>',
             permission: PermissionLevel.Subscriber,
-            handler: guard(async (e) => {
+            handler: async (e) => {
               // Accepts the standard `<username> <text>` and the alternate
               // `"text" - Name` form; throws a QuoteError on an unparseable input.
               const { user, text } = parseQuoteAddArgs(e.argString);
@@ -101,18 +89,18 @@ export function quotesPlugin(): Plugin {
               const game = await ctx.stream.game();
               const quote = await svc.add({ user, text, game }, { id: e.user.id, displayName: e.user.displayName });
               await sayText(e.channel, 'added', { quote: formatQuote(quote) });
-            }),
+            },
           },
           remove: {
             description: 'Remove a quote by its ID.',
             usage: '<quoteId>',
             permission: PermissionLevel.Moderator,
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const id = parseId(firstAndRest(e.argString).first);
               if (id === null) throw new QuoteError('Usage: !quote remove <quoteId>');
               await svc.remove(id);
               await sayText(e.channel, 'removed', { id });
-            }),
+            },
           },
           edittext: {
             description: 'Edit the text of a quote.',
@@ -142,66 +130,66 @@ export function quotesPlugin(): Plugin {
             description: 'Print a random quote matching the search term(s).',
             usage: '<searchTerm>',
             aliases: ['about'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const q = await svc.searchText(e.argString);
               if (q) await say(e.channel, formatQuote(q));
               else await sayText(e.channel, 'noSearchMatch');
-            }),
+            },
           },
           searchuser: {
             description: 'Print a random quote said by the given user (any of their names).',
             usage: '<username>',
             aliases: ['by'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const q = await svc.searchUser(e.argString);
               if (q) await say(e.channel, formatQuote(q));
               else await sayText(e.channel, 'noUserMatch');
-            }),
+            },
           },
           searchdate: {
             description: 'Print a random quote from the given date (YYYY MM DD).',
             usage: '<YYYY MM DD>',
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const q = await svc.searchDate(e.argString);
               if (q) await say(e.channel, formatQuote(q));
               else await sayText(e.channel, 'noDateMatch');
-            }),
+            },
           },
           searchgame: {
             description: 'Print a random quote captured during the given game.',
             usage: '<searchTerm>',
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const q = await svc.searchGame(e.argString);
               if (q) await say(e.channel, formatQuote(q));
               else await sayText(e.channel, 'noGameMatch');
-            }),
+            },
           },
           count: {
             description: 'Say how many quotes are saved.',
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const n = await svc.count();
               await sayText(e.channel, 'count', { be: plural(n, 'is', 'are'), count: n, noun: plural(n, 'quote', 'quotes') });
-            }),
+            },
           },
           searchcount: {
             description: 'Say how many quotes match the search term(s).',
             usage: '<searchTerm>',
             aliases: ['aboutcount'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const term = e.argString.trim();
               const n = await svc.countText(term);
               await sayText(e.channel, 'searchCount', { count: n, noun: plural(n, 'quote', 'quotes'), term });
-            }),
+            },
           },
           searchusercount: {
             description: 'Say how many quotes are attributed to the given user.',
             usage: '<username>',
             aliases: ['bycount'],
-            handler: guard(async (e) => {
+            handler: async (e) => {
               const who = e.argString.trim();
               const n = await svc.countUser(who);
               await sayText(e.channel, 'searchUserCount', { count: n, noun: plural(n, 'quote', 'quotes'), be: plural(n, 'is', 'are'), who });
-            }),
+            },
           },
         },
       });

@@ -1,8 +1,9 @@
 import type { Storage } from './storage/index.js';
+import { ChatError } from '../core/chatError.js';
 import { PermissionLevel } from '../core/events.js';
 
 /** User-facing error (message is safe to show in chat / API responses). */
-export class CommandError extends Error {}
+export class CommandError extends ChatError {}
 
 export type CommandKind = 'trigger' | 'phrase';
 

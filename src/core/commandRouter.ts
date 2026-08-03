@@ -1,6 +1,7 @@
 import type { EventBus } from './eventBus.js';
 import type { ChatService } from '../services/chat.js';
 import { PermissionLevel, type ChatEvent, type CommandEvent, type EventUser } from './events.js';
+import { ChatError } from './chatError.js';
 import { scopedLogger } from '../services/logger.js';
 
 const log = scopedLogger('commandRouter');
@@ -184,7 +185,10 @@ export class CommandRouter {
     const sub = subName ? cmd.subcommands.get(subName) : undefined;
 
     if (!sub) {
-      if (cmd.onUnknown) return void cmd.onUnknown(e);
+      if (cmd.onUnknown) {
+        await cmd.onUnknown(e); // awaited so a thrown ChatError reaches execute's catch
+        return;
+      }
       const primaries = [...new Set([...cmd.subcommands.values()].map((s) => s.name))];
       const usage = cmd.description || `Usage: !${cmd.name} <${primaries.join('|')}>`;
       await this.chat.say(e.channel, usage);
@@ -235,10 +239,23 @@ export class CommandRouter {
     try {
       await cmd.handler(parsed);
     } catch (err) {
-      log.error({ err, command: cmd.name }, 'aliased built-in handler threw');
-      await this.chat.say(base.channel, `Something went wrong running !${cmd.name}.`).catch(() => {});
+      await this.sayHandlerError(base.channel, cmd.name, err);
     }
     return true;
+  }
+
+  /**
+   * Turn a handler failure into a chat reply. A `ChatError` is a user-facing
+   * problem, so we say its message; anything else is a bug — log it and show the
+   * generic message. Never throws (a failing `say` is swallowed).
+   */
+  private async sayHandlerError(channel: string, cmdName: string, err: unknown): Promise<void> {
+    if (err instanceof ChatError) {
+      await this.chat.say(channel, err.message).catch(() => {});
+      return;
+    }
+    log.error({ err, command: cmdName }, 'command handler threw');
+    await this.chat.say(channel, `Something went wrong running !${cmdName}.`).catch(() => {});
   }
 
   /**
@@ -336,8 +353,7 @@ export class CommandRouter {
     try {
       await cmd.handler(parsed);
     } catch (err) {
-      log.error({ err, command: cmd.name }, 'command handler threw');
-      await this.chat.say(base.channel, `Something went wrong running !${cmd.name}.`).catch(() => {});
+      await this.sayHandlerError(base.channel, cmd.name, err);
     }
   }
 

@@ -1,8 +1,9 @@
 import type { Storage } from './storage/index.js';
+import { ChatError } from '../core/chatError.js';
 import type { UsersService } from './users.js';
 
 /** User-facing error (message is safe to show in chat / API responses). */
-export class QuoteError extends Error {}
+export class QuoteError extends ChatError {}
 
 /**
  * Pull the live display names of both people attached to a quote — who was

@@ -1,8 +1,9 @@
 import type { Storage } from './storage/index.js';
+import { ChatError } from '../core/chatError.js';
 import type { Logger } from './logger.js';
 
 /** A user-facing timer error (bad name, duplicate, unknown timer, …). */
-export class TimerError extends Error {
+export class TimerError extends ChatError {
   constructor(message: string) {
     super(message);
     this.name = 'TimerError';
