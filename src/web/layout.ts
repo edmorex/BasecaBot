@@ -38,7 +38,12 @@ const SHARED_STYLE = /* css */ `
   nav.links a { color: var(--muted); font-weight: 600; padding: 0.35rem 0.2rem; border-bottom: 2px solid transparent; }
   nav.links a:hover { color: var(--text); }
   nav.links a.active { color: var(--text); border-bottom-color: var(--pink); }
-  .spacer { flex: 1; }
+  /* Fills the header between the brand and the right edge; space-between anchors
+     the links on the left (next to the brand) and the user area on the right. */
+  .nav-menu { display: flex; align-items: center; gap: 1.25rem; flex: 1; justify-content: space-between; }
+  /* Hamburger — hidden on desktop, shown at the mobile breakpoint below. */
+  .nav-toggle { display: none; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 1.25rem; line-height: 1; padding: .35rem .55rem; border-radius: 8px; cursor: pointer; }
+  .nav-toggle:hover { background: #241f2b; }
   a.nav-user { display: flex; align-items: center; gap: 0.55rem; color: var(--text); font-weight: 600; }
   a.nav-user img { height: 34px; width: 34px; border-radius: 50%; border: 2px solid var(--purple); }
   main { width: min(56rem, 92vw); margin: 2rem auto; }
@@ -53,6 +58,8 @@ const SHARED_STYLE = /* css */ `
   .page-head h1 { margin-bottom: .25rem; }
   .md-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
   .md-side { flex: 0 0 16.5rem; padding: .85rem; position: sticky; top: 4.75rem; }
+  /* The sidebar's mobile "dropdown" toggle — hidden on desktop. */
+  .md-side-toggle { display: none; }
   .md-side .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .75rem .2rem .35rem; }
   .md-side .item { display: block; width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .55rem .75rem; margin-bottom: .4rem; color: var(--text); cursor: pointer; font-size: .95rem; font-family: inherit; white-space: nowrap; }
   .md-side .item:hover { border-color: var(--purple); }
@@ -81,7 +88,41 @@ const SHARED_STYLE = /* css */ `
   table.cmd-builtins th:nth-child(3), table.cmd-builtins td:nth-child(3) { white-space: nowrap; width: 9rem; }
   table.cmd-builtins td:nth-child(3) .cd-cell { flex-wrap: nowrap; }
   table.cmd-builtins th:nth-child(4), table.cmd-builtins td:nth-child(4) { white-space: normal; width: 100%; }
-  @media (max-width: 720px) { .md-layout { flex-direction: column; } .md-side { flex-basis: auto; width: 100%; position: static; } }
+  /* ── Mobile (phones) ── main nav collapses to a hamburger dropdown; the
+     master-detail sidebar collapses to a tap-to-open dropdown. */
+  @media (max-width: 640px) {
+    header.nav { gap: .6rem; padding: .55rem .8rem; }
+    .brand .title { font-size: 1.1rem; }
+    .nav-toggle { display: block; margin-left: auto; } /* anchor the hamburger on the right */
+    .nav-menu {
+      display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+      flex-direction: column; align-items: stretch; justify-content: flex-start; gap: .25rem;
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: .5rem .8rem; box-shadow: 0 10px 18px rgba(0,0,0,.4);
+    }
+    .nav-menu.open { display: flex; }
+    nav.links { flex-direction: column; align-items: stretch; gap: 0; width: 100%; }
+    nav.links a { padding: .65rem .4rem; border-bottom: 1px solid var(--border); }
+    nav.links a.active { color: var(--pink); }
+    #nav-right { padding-top: .5rem; }
+    #nav-right a.nav-user, #nav-right a.btn { width: 100%; justify-content: center; }
+
+    main { width: 94vw; margin: 1rem auto; }
+    main.wide { width: 96vw; }
+    .card { padding: 1rem; }
+    .page-head { flex-wrap: wrap; }
+
+    .md-layout { flex-direction: column; gap: .7rem; }
+    .md-side { position: static; width: 100%; flex-basis: auto; display: none; padding: .6rem; }
+    .md-side.open { display: block; }
+    .md-side-toggle {
+      display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%;
+      background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: inherit;
+      font-weight: 600; font-size: .95rem; padding: .6rem .8rem; border-radius: 8px; cursor: pointer; text-align: left;
+    }
+    .md-side-toggle::after { content: '▾'; color: var(--muted); }
+    .md-side-toggle.open::after { content: '▴'; }
+  }
   /* connected-squares pagination (lives outside the panel, centered) */
   .pager-wrap { display: flex; flex-direction: column; align-items: center; gap: .55rem; margin: 1.25rem 0 .5rem; }
   .pager { display: inline-flex; }
@@ -179,15 +220,30 @@ const SHARED_STYLE = /* css */ `
 
 const SHELL_SCRIPT = /* js */ `
   window.esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  // A single dropped request must never strand a panel on "Loading…" forever. A
+  // GET is idempotent, so on a network-level failure or a 5xx (e.g. the dev
+  // preview server restarting, or a keep-alive socket closed mid-reuse) retry it
+  // a few times with a short backoff before surfacing the error. POSTs are not
+  // idempotent, so they're tried exactly once.
   window.api = async (method, url, body) => {
-    const res = await fetch(url, {
-      method, credentials: 'same-origin',
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    let data = null; try { data = await res.json(); } catch {}
-    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    return data;
+    const waits = method === 'GET' ? [0, 250, 600, 1200] : [0];
+    let lastErr = null;
+    for (const wait of waits) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      let res;
+      try {
+        res = await fetch(url, {
+          method, credentials: 'same-origin',
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (e) { lastErr = e; continue; }                 // network dropped — retry (GET only)
+      if (method === 'GET' && res.status >= 500) { lastErr = new Error('HTTP ' + res.status); continue; }
+      let data = null; try { data = await res.json(); } catch {}
+      if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+      return data;
+    }
+    throw lastErr || new Error('Request failed');
   };
   // Shared page helpers (available to every page script). Accept an element or id.
   window.openDialog = (d) => { if (typeof d === 'string') d = document.getElementById(d); if (d) (d.showModal ? d.showModal() : d.setAttribute('open', '')); };
@@ -210,9 +266,48 @@ const SHELL_SCRIPT = /* js */ `
     r.onerror = () => reject(new Error('Could not read the file.'));
     r.readAsText(f);
   });
+  // ── Mobile: top-nav hamburger dropdown ──
+  const navToggle = document.getElementById('nav-toggle');
+  const navMenu = document.getElementById('nav-menu');
+  if (navToggle && navMenu) {
+    const setNav = (open) => { navMenu.classList.toggle('open', open); navToggle.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+    navToggle.addEventListener('click', (e) => { e.stopPropagation(); setNav(!navMenu.classList.contains('open')); });
+    navMenu.addEventListener('click', (e) => { if (e.target.closest('a')) setNav(false); });
+    document.addEventListener('click', (e) => { if (!navMenu.contains(e.target) && e.target !== navToggle) setNav(false); });
+  }
+
+  // ── Mobile: master-detail sidebar collapses to a tap-to-open dropdown. The
+  // toggle button lives outside the sidebar (which pages re-render), and its
+  // label tracks the active item via a MutationObserver. ──
+  document.querySelectorAll('.md-side-toggle').forEach((btn) => {
+    const side = document.getElementById(btn.getAttribute('data-side'));
+    if (!side) return;
+    const labelEl = btn.querySelector('.mst-label');
+    const setLabel = () => {
+      const active = side.querySelector('.item.active');
+      let text = btn.getAttribute('data-default') || 'Menu';
+      if (active) { const c = active.cloneNode(true); const cnt = c.querySelector('.count'); if (cnt) cnt.remove(); text = c.textContent.trim() || text; }
+      if (labelEl) labelEl.textContent = text;
+    };
+    btn.addEventListener('click', () => { const open = side.classList.toggle('open'); btn.classList.toggle('open', open); });
+    side.addEventListener('click', (e) => { if (e.target.closest('.item')) { side.classList.remove('open'); btn.classList.remove('open'); } });
+    new MutationObserver(setLabel).observe(side, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    setLabel();
+  });
+
   (async () => {
     let me = null;
-    try { const r = await fetch('/api/me', { credentials: 'same-origin' }); if (r.ok) me = await r.json(); } catch {}
+    // Same resilience as window.api: a dropped /api/me would leave every page
+    // stuck (onMe never fires), so retry a transient failure before giving up.
+    for (const wait of [0, 250, 600, 1200]) {
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      try {
+        const r = await fetch('/api/me', { credentials: 'same-origin' });
+        if (r.status >= 500) continue;           // transient — retry
+        if (r.ok) me = await r.json();
+        break;                                   // 200, or a real 401/4xx — done
+      } catch {}                                 // network dropped — retry
+    }
     const navRight = document.getElementById('nav-right');
     if (navRight) {
       navRight.innerHTML = me
@@ -250,14 +345,16 @@ export function renderLayout(opts: LayoutOptions): string {
         <img class="logo" src="/assets/logo.png" alt="BasecaBot logo" onerror="this.style.display='none'" />
         <span class="title">BasecaBot</span>
       </a>
-      <nav class="links">
-        <a href="/commands" class="${commandsActive.trim()}">Commands</a>
-        <a href="/lists" class="${listsActive.trim()}">Lists</a>
-        <a href="/quotes" class="${quotesActive.trim()}">Quotes</a>
-        <a href="/admin" id="nav-admin" class="${adminActive.trim()}" style="display:none">Admin</a>
-      </nav>
-      <span class="spacer"></span>
-      <span id="nav-right"></span>
+      <div class="nav-menu" id="nav-menu">
+        <nav class="links">
+          <a href="/commands" class="${commandsActive.trim()}">Commands</a>
+          <a href="/lists" class="${listsActive.trim()}">Lists</a>
+          <a href="/quotes" class="${quotesActive.trim()}">Quotes</a>
+          <a href="/admin" id="nav-admin" class="${adminActive.trim()}" style="display:none">Admin</a>
+        </nav>
+        <span id="nav-right"></span>
+      </div>
+      <button type="button" class="nav-toggle" id="nav-toggle" aria-label="Menu" aria-expanded="false">☰</button>
     </header>
     <main${mainClass}>${opts.body}</main>
     <script>${SHELL_SCRIPT}</script>

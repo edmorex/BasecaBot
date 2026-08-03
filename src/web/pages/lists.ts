@@ -23,6 +23,7 @@ export function listsPage(): string {
       </div>
     </div>
     <div class="md-layout">
+      <button type="button" class="md-side-toggle" data-side="list-side" data-default="Lists"><span class="mst-label">Lists</span></button>
       <nav class="md-side card" id="list-side"></nav>
       <div class="md-col">
         <div class="md-main card" id="list-main"></div>

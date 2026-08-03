@@ -25,6 +25,7 @@ export function commandsPage(): string {
       </div>
     </div>
     <div class="md-layout">
+      <button type="button" class="md-side-toggle" data-side="cmd-side" data-default="Commands"><span class="mst-label">Commands</span></button>
       <nav class="md-side card" id="cmd-side"></nav>
       <div class="md-col">
         <div class="md-main card" id="cmd-main"></div>
