@@ -100,6 +100,7 @@ export function adminPage(): string {
       { id: 'eventsim', label: 'EventSimulator' },
       { id: 'overlays', label: 'Overlays' },
       { id: 'strings', label: 'Text Strings' },
+      { id: 'tts', label: 'TTS' },
     ];
     var section = 'users';
     var users = [];
@@ -385,6 +386,7 @@ export function adminPage(): string {
       if (section === 'users') renderUsers();
       else if (section === 'overlays') renderOverlays();
       else if (section === 'strings') renderStrings();
+      else if (section === 'tts') renderTts();
       else renderSim();
     }
 
@@ -480,6 +482,115 @@ export function adminPage(): string {
         });
       } catch (e) {
         main.innerHTML = '<h2>Overlays</h2><p class="muted">Could not load overlays: ' + esc(e.message) + '</p>';
+      }
+    }
+
+    // ── TTS: mute, voice knobs, and a test-fire box for the audio overlay ────────
+    var TTS_KNOBS = [
+      { key: 'lengthScale', label: 'Speed', min: 0.5, max: 2, step: 0.05, hint: 'higher = slower' },
+      { key: 'noiseScale', label: 'Expressiveness', min: 0, max: 1, step: 0.01, hint: 'pitch / intonation variability' },
+      { key: 'noiseW', label: 'Cadence variation', min: 0, max: 1, step: 0.01, hint: 'phoneme-duration variation' },
+      { key: 'sentenceSilence', label: 'Sentence pause', min: 0, max: 1, step: 0.05, hint: 'seconds after each sentence' },
+      { key: 'volume', label: 'Volume', min: 0, max: 1, step: 0.05, hint: 'playback loudness' }
+    ];
+    function ttsFmt(key, val) { return key === 'volume' ? Math.round(val * 100) + '%' : (Math.round(val * 100) / 100).toFixed(2); }
+
+    async function renderTts() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Vocalize messages through the TTS audio overlay.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">Loading…</p>';
+      try {
+        var d = await api('GET', '/api/admin/tts');
+        if (!d.configured) {
+          main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">TTS is not configured. Set <code>PIPER_MODEL</code> (and, if needed, <code>PIPER_BIN</code>) in the bot <code>.env</code> and restart to enable it — see <code>.env.example</code>. Install piper + a voice from <code>github.com/rhasspy/piper</code>.</p>';
+          return;
+        }
+        var defaults = d.defaults || {};
+        var voice = d.voice || {};
+        var speakers = (d.speakers && d.speakers.speakers) || [];
+
+        var sliders = TTS_KNOBS.map(function (k) {
+          var v = (voice[k.key] != null) ? voice[k.key] : defaults[k.key];
+          return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
+            '<label style="flex:0 0 13rem">' + esc(k.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(k.hint) + ')</span></label>' +
+            '<input type="range" data-knob="' + k.key + '" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" value="' + v + '" style="flex:1; accent-color:var(--pink)">' +
+            '<span class="muted" data-val="' + k.key + '" style="flex:0 0 3.5em; text-align:right"></span>' +
+            '</div>';
+        }).join('');
+        var speakerRow = '';
+        if (speakers.length) {
+          speakerRow = '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
+            '<label style="flex:0 0 13rem">Speaker</label>' +
+            '<select id="tts-speaker" style="flex:1">' + speakers.map(function (sp) {
+              return '<option value="' + sp.id + '"' + (((voice.speaker || 0) === sp.id) ? ' selected' : '') + '>' + esc(sp.name) + '</option>';
+            }).join('') + '</select><span style="flex:0 0 3.5em"></span></div>';
+        }
+
+        main.innerHTML = '<h2>Text-to-Speech</h2>' +
+          '<p class="muted">Piper reads messages aloud through the <strong>TTS audio overlay</strong> — add its URL from the <strong>Overlays</strong> section as a Browser Source in OBS. Changes apply to the next spoken line.</p>' +
+          '<div class="card" style="margin:0 0 1rem"><div class="row"><div><strong>Mute TTS</strong>' +
+            '<div class="muted" style="font-size:.82rem">When muted, nothing is spoken — the service ignores all speak requests.</div></div>' +
+            '<label class="switch"><input type="checkbox" id="tts-mute"' + (d.muted ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Voice settings</h3>' + sliders + speakerRow +
+            '<div class="rowline" style="gap:.8rem; margin-top:.7rem; align-items:center"><button type="button" class="pink" id="tts-save">Save</button>' +
+            '<button type="button" class="linkish" id="tts-reset">Reset to defaults</button></div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Test</h3>' +
+            '<div class="rowline" style="gap:.6rem"><input type="text" id="tts-say" placeholder="Type something to speak…" style="flex:1" maxlength="500"><button type="button" class="pink" id="tts-say-btn">Speak</button></div>' +
+            '<div class="toast" id="tts-toast"></div></div>';
+
+        function updateVal(key) {
+          var inp = document.querySelector('[data-knob="' + key + '"]');
+          var out = document.querySelector('[data-val="' + key + '"]');
+          if (inp && out) out.textContent = ttsFmt(key, parseFloat(inp.value));
+        }
+        TTS_KNOBS.forEach(function (k) {
+          updateVal(k.key);
+          document.querySelector('[data-knob="' + k.key + '"]').oninput = function () { updateVal(k.key); };
+        });
+        function collectVoice() {
+          var out = {};
+          TTS_KNOBS.forEach(function (k) { out[k.key] = parseFloat(document.querySelector('[data-knob="' + k.key + '"]').value); });
+          var sp = document.getElementById('tts-speaker');
+          if (sp) out.speaker = parseInt(sp.value, 10) || 0;
+          return out;
+        }
+        function saveVoice(msg) {
+          return api('POST', '/api/admin/tts', { voice: collectVoice() })
+            .then(function () { toast('tts-toast', msg, true); })
+            .catch(function (e) { toast('tts-toast', e.message, false); });
+        }
+        document.getElementById('tts-save').onclick = function () { saveVoice('Voice settings saved.'); };
+        document.getElementById('tts-reset').onclick = function () {
+          TTS_KNOBS.forEach(function (k) {
+            var inp = document.querySelector('[data-knob="' + k.key + '"]');
+            if (defaults[k.key] != null) inp.value = defaults[k.key];
+            updateVal(k.key);
+          });
+          var sp = document.getElementById('tts-speaker'); if (sp) sp.value = '0';
+          saveVoice('Reset to defaults.');
+        };
+
+        var muteEl = document.getElementById('tts-mute');
+        var sayEl = document.getElementById('tts-say');
+        var sayBtn = document.getElementById('tts-say-btn');
+        function setSpeakEnabled(en) { sayBtn.disabled = !en; sayEl.disabled = !en; }
+        setSpeakEnabled(!d.muted);
+        muteEl.onchange = function () {
+          var muted = muteEl.checked;
+          api('POST', '/api/admin/tts', { muted: muted })
+            .then(function () { setSpeakEnabled(!muted); toast('tts-toast', muted ? 'TTS muted.' : 'TTS unmuted.', true); })
+            .catch(function (e) { muteEl.checked = !muted; toast('tts-toast', e.message, false); });
+        };
+        sayBtn.onclick = function () {
+          var t = sayEl.value.trim();
+          if (!t) { toast('tts-toast', 'Enter something to say.', false); return; }
+          api('POST', '/api/admin/tts/say', { text: t })
+            .then(function () { toast('tts-toast', 'Sent to the overlay.', true); })
+            .catch(function (e) { toast('tts-toast', e.message, false); });
+        };
+      } catch (e) {
+        main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
       }
     }
 

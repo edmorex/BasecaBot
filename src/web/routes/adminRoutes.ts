@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebServer } from '../webServer.js';
 import { HttpError, LEVEL_LABELS } from '../httpShared.js';
 import { AliasError } from '../../services/users.js';
+import type { VoiceParams } from '../../services/tts.js';
 import { PermissionLevel } from '../../core/events.js';
 import { buildSimEvent, isSimEventType } from '../../services/eventSimulator.js';
 
@@ -39,6 +40,48 @@ export async function postAdminString(s: WebServer, req: IncomingMessage, res: S
   if (!feature || !key) throw new HttpError(400, 'Missing feature or key.');
   if (body.reset) await s.text.reset(feature, key);
   else await s.text.set(feature, key, String(body.value ?? ''));
+  s.json(res, 200, { ok: true });
+}
+
+// ── Text-to-Speech ────────────────────────────────────────────────────────────
+
+/** Friendly messages for a non-ok `TtsService.speak()` reason. */
+const SPEAK_ERRORS: Record<string, string> = {
+  empty: 'Enter something to say.',
+  'too-long': 'Message is too long.',
+  unconfigured: 'TTS is not configured (set PIPER_MODEL and restart).',
+  muted: 'TTS is muted — unmute to test.',
+  'synth-failed': 'Speech synthesis failed — check the piper binary and voice model.',
+};
+
+export function getAdminTts(s: WebServer, req: IncomingMessage, res: ServerResponse): void {
+  s.requireAdmin(req);
+  s.json(res, 200, {
+    configured: s.tts.configured,
+    muted: s.tts.isMuted(),
+    voice: s.tts.getVoice(),
+    speakers: s.tts.getSpeakers(),
+    defaults: s.tts.defaults,
+  });
+}
+
+export async function postAdminTts(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  if ('muted' in body) await s.tts.setMuted(!!body.muted);
+  if (body.voice && typeof body.voice === 'object') await s.tts.setVoice(body.voice as Partial<VoiceParams>);
+  s.json(res, 200, { ok: true, muted: s.tts.isMuted(), voice: s.tts.getVoice() });
+}
+
+export async function postAdminTtsSay(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const text = String(body.text ?? '').trim();
+  if (!text) throw new HttpError(400, 'Enter something to say.');
+  const result = await s.tts.speak(text, { source: 'admin' });
+  if (!result.ok) {
+    throw new HttpError(result.reason === 'muted' ? 409 : 400, SPEAK_ERRORS[result.reason ?? ''] ?? 'Could not speak.');
+  }
   s.json(res, 200, { ok: true });
 }
 

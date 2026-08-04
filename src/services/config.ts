@@ -31,6 +31,13 @@ const EnvSchema = z.object({
   // it can never send hub messages or mutate anything. Keep it private (it lives
   // in the overlay URL). Overlays are disabled if unset.
   OVERLAY_TOKEN: z.string().optional(),
+  // ── Text-to-Speech (Piper) ────────────────────────────────────────────────
+  // Path to the `piper` binary (or just "piper" if it's on PATH) and to a voice
+  // model (.onnx). TTS is only enabled ("configured") when PIPER_MODEL is set and
+  // the binary resolves. Voices: https://github.com/rhasspy/piper (download a
+  // <voice>.onnx + its <voice>.onnx.json alongside it).
+  PIPER_BIN: z.string().default('piper'),
+  PIPER_MODEL: z.string().optional(),
   LOG_LEVEL: z.string().default('info'),
   // Display name of the loyalty currency (shown by the points plugin and the
   // $(pointsname) command variable). e.g. "points", "BascaPoints".
@@ -69,6 +76,8 @@ export interface AppConfig {
   ws: { port: number; secret: string };
   /** Read-only token for OBS overlays (WS receive + read-only overlay APIs). Undefined disables overlays. */
   overlayToken?: string;
+  /** Text-to-Speech (Piper). `model` undefined disables TTS. */
+  tts: { piperBin: string; model?: string };
   disabledPlugins: string[];
   points: { name: string };
   web: {
@@ -121,6 +130,7 @@ export function loadConfig(): AppConfig {
     databaseUrl: env.DATABASE_URL,
     ws: { port: env.WS_HUB_PORT, secret: env.WS_HUB_SECRET },
     overlayToken: env.OVERLAY_TOKEN,
+    tts: { piperBin: env.PIPER_BIN, model: env.PIPER_MODEL },
     disabledPlugins: csv(env.DISABLED_PLUGINS),
     points: { name: env.POINTS_NAME },
     web: {

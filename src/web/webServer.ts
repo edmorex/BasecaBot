@@ -12,6 +12,7 @@ import type { PointsService } from '../services/points.js';
 import type { TimerService } from '../services/timers.js';
 import type { FirstService } from '../services/first.js';
 import type { TextStringsService } from '../services/textStrings.js';
+import type { TtsService } from '../services/tts.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -26,14 +27,15 @@ import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
+import { ttsOverlayPage } from './pages/overlayTts.js';
 
 import { handleLogin, handleCallback, handleLogout, getMe, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
 import { getLists, createList, updateList, deleteList, addListEntry, updateListEntry, deleteListEntry, exportLists, importLists } from './routes/listsRoutes.js';
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
-import { getFirstOverlayData, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, postAdminTts, postAdminTtsSay, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -75,6 +77,7 @@ export class WebServer {
     readonly timers: TimerService,
     readonly first: FirstService,
     readonly text: TextStringsService,
+    readonly tts: TtsService,
   ) {}
 
   start(): void {
@@ -104,6 +107,8 @@ export class WebServer {
 
     // Static assets.
     if (method === 'GET' && p.startsWith('/assets/')) return this.serveAsset(res, p);
+    // Token-gated TTS audio clips (dynamic id, so before the exact-match switch).
+    if (method === 'GET' && p.startsWith('/overlays/tts/audio/')) return getTtsAudio(this, req, res, url);
 
     if (method === 'GET') {
       switch (p) {
@@ -128,6 +133,9 @@ export class WebServer {
           // OBS overlay page. Public HTML — it shows nothing without the
           // read-only ?token=... it uses to fetch data + subscribe.
           return this.html(res, firstOverlayPage());
+        case '/overlays/tts':
+          // OBS audio overlay. Public HTML; inert without the read-only ?token=.
+          return this.html(res, ttsOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':
@@ -158,6 +166,8 @@ export class WebServer {
           return getAdminUsers(this, req, res);
         case '/api/admin/strings':
           return getAdminStrings(this, req, res);
+        case '/api/admin/tts':
+          return getAdminTts(this, req, res);
         case '/healthz':
           return this.send(res, 200, 'text/plain', 'ok');
         default:
@@ -225,6 +235,10 @@ export class WebServer {
           return simulateEvent(this, req, res);
         case '/api/admin/strings':
           return postAdminString(this, req, res);
+        case '/api/admin/tts':
+          return postAdminTts(this, req, res);
+        case '/api/admin/tts/say':
+          return postAdminTtsSay(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }

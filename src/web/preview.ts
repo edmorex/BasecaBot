@@ -8,6 +8,8 @@ import { listsPage } from './pages/lists.js';
 import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
+import { ttsOverlayPage } from './pages/overlayTts.js';
+import { VOICE_DEFAULTS } from '../services/tts.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import { TextStringsService } from '../services/textStrings.js';
@@ -223,6 +225,16 @@ const mockFirstRace = {
   ],
 };
 
+// Mock TTS state (exercises the Admin → TTS section: mute, voice knobs, multi-
+// speaker dropdown, test box). Multi-speaker so the reviewer sees the dropdown.
+let previewTtsMuted = false;
+const previewTtsVoice: Record<string, number> = { ...VOICE_DEFAULTS };
+const previewTtsSpeakers = [
+  { id: 0, name: 'Amy' },
+  { id: 1, name: 'Ryan' },
+  { id: 2, name: 'Kathleen' },
+];
+
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
 const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
@@ -273,6 +285,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/quotes') return html(quotesPage());
     if (p === '/admin') return html(adminPage());
     if (p === '/overlays/first') return html(firstOverlayPage());
+    if (p === '/overlays/tts') return html(ttsOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
@@ -288,9 +301,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/overlay/first') return json(200, mockFirstRace);
     if (p === '/api/admin/overlays') {
       const base = 'http://localhost:' + PORT;
-      return json(200, { configured: true, token: 'preview-token', overlays: [{ id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' }] });
+      return json(200, { configured: true, token: 'preview-token', overlays: [
+        { id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' },
+        { id: 'tts', name: 'TTS — audio source', url: base + '/overlays/tts?token=preview-token' },
+      ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
+    if (p === '/api/admin/tts') return json(200, {
+      configured: true, muted: previewTtsMuted, voice: previewTtsVoice,
+      speakers: { numSpeakers: previewTtsSpeakers.length, speakers: previewTtsSpeakers }, defaults: VOICE_DEFAULTS,
+    });
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
@@ -439,6 +459,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       const key = String(body.key ?? '');
       if (body.reset) await previewText.reset(feature, key);
       else await previewText.set(feature, key, String(body.value ?? ''));
+      return json(200, { ok: true });
+    }
+    if (p === '/api/admin/tts') {
+      if ('muted' in body) previewTtsMuted = !!body.muted;
+      if (body.voice && typeof body.voice === 'object') Object.assign(previewTtsVoice, body.voice);
+      return json(200, { ok: true, muted: previewTtsMuted, voice: previewTtsVoice });
+    }
+    if (p === '/api/admin/tts/say') {
+      if (previewTtsMuted) return json(409, { error: 'TTS is muted — unmute to test.' });
+      if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });
       return json(200, { ok: true });
     }
     if (p === '/api/timers/create') {

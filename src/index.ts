@@ -13,6 +13,7 @@ import { QuotesService } from './services/quotes.js';
 import { FirstService } from './services/first.js';
 import { TimerService } from './services/timers.js';
 import { TextStringsService } from './services/textStrings.js';
+import { TtsService } from './services/tts.js';
 import { StreamService } from './services/stream.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
@@ -81,13 +82,17 @@ async function main(): Promise<void> {
   });
   ws.start();
 
+  // ── Text-to-Speech (Piper) ──────────────────────────────────────────────────
+  const tts = new TtsService(storage, ws, config, scopedLogger('tts'));
+  await tts.init(); // load persisted mute + voice settings, read the model's speakers
+
   // ── Web dashboard + "Login with Twitch" ────────────────────────────────────
   const broadcasterUser = await api.users.getUserByName(config.twitch.broadcasterUsername);
   if (!broadcasterUser) {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text, tts);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -103,6 +108,7 @@ async function main(): Promise<void> {
     first,
     timers,
     text,
+    tts,
     stream,
     storage,
     ws,

@@ -9,6 +9,16 @@ export async function getFirstOverlayData(s: WebServer, req: IncomingMessage, re
   s.json(res, 200, race);
 }
 
+/** Serve a cached TTS clip by id (token-gated), same-origin, for the overlay to play. */
+export function getTtsAudio(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): void {
+  s.requireOverlayToken(req, url);
+  const id = url.pathname.slice('/overlays/tts/audio/'.length);
+  const buf = /^[a-f0-9]{40}$/.test(id) ? s.tts.getAudio(id) : undefined;
+  if (!buf) return s.send(res, 404, 'text/plain', 'Not Found');
+  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+  res.end(buf);
+}
+
 export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const token = s.config.overlayToken;
@@ -17,7 +27,10 @@ export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: 
     configured: !!token,
     token: token ?? null,
     overlays: token
-      ? [{ id: 'first', name: 'First — race results', url: `${base}/overlays/first?token=${encodeURIComponent(token)}` }]
+      ? [
+          { id: 'first', name: 'First — race results', url: `${base}/overlays/first?token=${encodeURIComponent(token)}` },
+          { id: 'tts', name: 'TTS — audio source', url: `${base}/overlays/tts?token=${encodeURIComponent(token)}` },
+        ]
       : [],
   });
 }

@@ -27,6 +27,11 @@ services:
     volumes:
       - botdata:/data
       - bottokens:/app/.tokens
+      # Piper TTS: the binary + voice files you placed on the host at /opt/piper,
+      # mounted read-only at the SAME path so PIPER_BIN / PIPER_MODEL in .env use
+      # the host paths as-is. Comment this out to disable TTS. See
+      # docs/text-to-speech.md.
+      - /opt/piper:/opt/piper:ro
     expose:
       - '8080' # WebSocket hub — reached by the edge Caddy over the `edge` network
       - '8090' # HTTP server (dashboard + OAuth + API) — also via the edge Caddy
