@@ -35,7 +35,7 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, postAdminTts, postAdminTtsSay, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, postAdminTts, postAdminTtsSay, postAdminTtsPreview, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -239,6 +239,8 @@ export class WebServer {
           return postAdminTts(this, req, res);
         case '/api/admin/tts/say':
           return postAdminTtsSay(this, req, res);
+        case '/api/admin/tts/preview':
+          return postAdminTtsPreview(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }

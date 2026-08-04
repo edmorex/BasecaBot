@@ -536,7 +536,10 @@ export function adminPage(): string {
             '<div class="rowline" style="gap:.8rem; margin-top:.7rem; align-items:center"><button type="button" class="pink" id="tts-save">Save</button>' +
             '<button type="button" class="linkish" id="tts-reset">Reset to defaults</button></div></div>' +
           '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Test</h3>' +
-            '<div class="rowline" style="gap:.6rem"><input type="text" id="tts-say" placeholder="Type something to speak…" style="flex:1" maxlength="500"><button type="button" class="pink" id="tts-say-btn">Speak</button></div>' +
+            '<div class="rowline" style="gap:.6rem"><input type="text" id="tts-say" placeholder="Type something to speak…" style="flex:1" maxlength="500">' +
+              '<button type="button" class="pink" id="tts-voice-btn">Test Voice</button>' +
+              '<button type="button" class="pink" id="tts-say-btn">Test Overlay</button></div>' +
+            '<p class="muted" style="font-size:.8rem; margin:.4rem 0 0"><strong>Test Voice</strong> plays here on the page (works even when muted); <strong>Test Overlay</strong> sends it to the OBS overlay.</p>' +
             '<div class="toast" id="tts-toast"></div></div>';
 
         function updateVal(key) {
@@ -574,12 +577,14 @@ export function adminPage(): string {
         var muteEl = document.getElementById('tts-mute');
         var sayEl = document.getElementById('tts-say');
         var sayBtn = document.getElementById('tts-say-btn');
-        function setSpeakEnabled(en) { sayBtn.disabled = !en; sayEl.disabled = !en; }
-        setSpeakEnabled(!d.muted);
+        var voiceBtn = document.getElementById('tts-voice-btn');
+        // Only Test Overlay respects mute; Test Voice (local preview) + the input stay usable.
+        function setOverlayEnabled(en) { sayBtn.disabled = !en; }
+        setOverlayEnabled(!d.muted);
         muteEl.onchange = function () {
           var muted = muteEl.checked;
           api('POST', '/api/admin/tts', { muted: muted })
-            .then(function () { setSpeakEnabled(!muted); toast('tts-toast', muted ? 'TTS muted.' : 'TTS unmuted.', true); })
+            .then(function () { setOverlayEnabled(!muted); toast('tts-toast', muted ? 'TTS muted.' : 'TTS unmuted.', true); })
             .catch(function (e) { muteEl.checked = !muted; toast('tts-toast', e.message, false); });
         };
         sayBtn.onclick = function () {
@@ -588,6 +593,24 @@ export function adminPage(): string {
           api('POST', '/api/admin/tts/say', { text: t })
             .then(function () { toast('tts-toast', 'Sent to the overlay.', true); })
             .catch(function (e) { toast('tts-toast', e.message, false); });
+        };
+        voiceBtn.onclick = function () {
+          var t = sayEl.value.trim();
+          if (!t) { toast('tts-toast', 'Enter something to say.', false); return; }
+          voiceBtn.disabled = true;
+          fetch('/api/admin/tts/preview', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) })
+            .then(function (r) { if (!r.ok) return r.json().then(function (d) { throw new Error((d && d.error) || ('HTTP ' + r.status)); }); return r.blob(); })
+            .then(function (blob) {
+              var url = URL.createObjectURL(blob);
+              var a = new Audio(url);
+              var vol = document.querySelector('[data-knob="volume"]'); // preview at the current volume slider
+              a.volume = vol ? Math.max(0, Math.min(1, parseFloat(vol.value))) : 1;
+              a.onended = function () { URL.revokeObjectURL(url); };
+              a.play();
+              toast('tts-toast', 'Playing on this page.', true);
+            })
+            .catch(function (e) { toast('tts-toast', e.message, false); })
+            .then(function () { voiceBtn.disabled = false; });
         };
       } catch (e) {
         main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';

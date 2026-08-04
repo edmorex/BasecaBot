@@ -177,14 +177,39 @@ export class TtsService {
    * non-ok result to a friendly error.
    */
   async speak(text: string, opts?: { source?: string }): Promise<SpeakResult> {
+    if (this.muted) return { ok: false, reason: 'muted' };
+    const prep = await this.prepareClip(text);
+    if (!prep.ok) return prep;
+    this.ws.broadcast('tts', 'speak', { id: prep.id, text: prep.clean, volume: this.getVoice().volume });
+    this.logger.info({ id: prep.id, source: opts?.source ?? 'plugin', chars: prep.clean.length }, 'tts: spoke');
+    return { ok: true, id: prep.id };
+  }
+
+  /**
+   * Render a clip and return its wav bytes for a LOCAL preview (the admin "Test
+   * Voice" button plays it on the dashboard). Ignores mute and never broadcasts
+   * to the overlay — it's purely a synthesis preview for tuning the voice.
+   */
+  async preview(text: string): Promise<{ ok: true; id: string; wav: Buffer } | { ok: false; reason: SpeakReason }> {
+    const prep = await this.prepareClip(text);
+    if (!prep.ok) return prep;
+    return { ok: true, id: prep.id, wav: this.getAudio(prep.id)! };
+  }
+
+  /**
+   * Shared core of speak()/preview(): validate + synthesize (or reuse a cached
+   * clip) for `text` with the current voice. Does NOT check mute and does NOT
+   * broadcast. Volume is applied at playback, so it's excluded from the cache key.
+   */
+  private async prepareClip(
+    text: string,
+  ): Promise<{ ok: true; id: string; clean: string } | { ok: false; reason: SpeakReason }> {
     const clean = String(text ?? '').trim();
     if (!clean) return { ok: false, reason: 'empty' };
     if (clean.length > MAX_CHARS) return { ok: false, reason: 'too-long' };
     if (!this.configured) return { ok: false, reason: 'unconfigured' };
-    if (this.muted) return { ok: false, reason: 'muted' };
 
     const voice = this.getVoice();
-    // Volume is applied at playback, not synthesis, so it's excluded from the key.
     const id = createHash('sha1')
       .update(JSON.stringify({ t: clean, v: { ...voice, volume: undefined } }))
       .digest('hex');
@@ -197,9 +222,7 @@ export class TtsService {
         return { ok: false, reason: 'synth-failed' };
       }
     }
-    this.ws.broadcast('tts', 'speak', { id, text: clean, volume: voice.volume });
-    this.logger.info({ id, source: opts?.source ?? 'plugin', chars: clean.length }, 'tts: spoke');
-    return { ok: true, id };
+    return { ok: true, id, clean };
   }
 
   /** Run piper: text on stdin, wav to a temp file, returned as a Buffer. */

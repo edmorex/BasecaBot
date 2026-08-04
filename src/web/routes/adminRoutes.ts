@@ -85,6 +85,19 @@ export async function postAdminTtsSay(s: WebServer, req: IncomingMessage, res: S
   s.json(res, 200, { ok: true });
 }
 
+/** "Test Voice": synthesize and return the wav bytes to play on the dashboard
+ * (no overlay broadcast; works even when muted). */
+export async function postAdminTtsPreview(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const text = String(body.text ?? '').trim();
+  if (!text) throw new HttpError(400, 'Enter something to say.');
+  const result = await s.tts.preview(text);
+  if (!result.ok) throw new HttpError(400, SPEAK_ERRORS[result.reason ?? ''] ?? 'Could not synthesize.');
+  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+  res.end(result.wav);
+}
+
 export async function initAdminUser(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const body = await s.readJson(req);

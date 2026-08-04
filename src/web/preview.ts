@@ -256,6 +256,28 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   try { return chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}; } catch { return {}; }
 }
 
+/** A short silent 16-bit mono WAV, so the admin "Test Voice" button plays
+ * something in the preview (no real piper here). */
+function makeSilentWav(ms = 250): Buffer {
+  const sampleRate = 8000;
+  const dataLen = Math.floor((sampleRate * ms) / 1000) * 2;
+  const buf = Buffer.alloc(44 + dataLen);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataLen, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20); // PCM
+  buf.writeUInt16LE(1, 22); // mono
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataLen, 40);
+  return buf; // data region stays zero-filled = silence
+}
+
 const server = createServer((req, res) => {
   // A rejected handler must never leave the socket hanging: an unanswered
   // /api/me stalls the shell script's window.onMe(), so the page sits on
@@ -470,6 +492,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       if (previewTtsMuted) return json(409, { error: 'TTS is muted — unmute to test.' });
       if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });
       return json(200, { ok: true });
+    }
+    if (p === '/api/admin/tts/preview') {
+      if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+      return res.end(makeSilentWav());
     }
     if (p === '/api/timers/create') {
       const name = String(body.name ?? '').trim();
