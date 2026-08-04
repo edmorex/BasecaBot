@@ -15,8 +15,8 @@ export function quotesPage(): string {
       </div>
       <div class="rowline" style="flex:none; gap:.5rem; align-items:center; justify-content:flex-end">
         <input type="text" id="quote-search" placeholder="Search quotes…" style="width:min(18rem,40vw)" />
-        <button type="button" class="pink" id="q-import-btn" style="display:none">Import CSV</button>
-        <button type="button" class="pink" id="q-export-btn" style="display:none">Export CSV</button>
+        <button type="button" class="pink csv-btn" id="q-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink csv-btn" id="q-export-btn" style="display:none">Export CSV</button>
       </div>
     </div>
     <div class="card" id="quote-card"><div class="md-main" id="quote-main"></div></div>
@@ -120,17 +120,20 @@ export function quotesPage(): string {
         var actions='<td class="col-actions"><div class="actions-cell">'
           +'<button class="secondary icon-btn" data-edit="'+q.__i+'"'+dis+' title="Edit">'+icon('pencil')+'</button>'
           +'<button class="danger icon-btn" data-del="'+q.__i+'"'+dis+' title="Delete">'+icon('trash-2')+'</button></div></td>';
+        // Phone-only combined cell: '#<id> "<quote>" - <user>' (see .q-mobile CSS).
+        var mobile='<td class="q-mobile wrap"><span class="muted">#'+q.id+'</span> "'+esc(q.text)+'" <span class="muted">- '+esc(q.user)+'</span></td>';
         return '<tr>'
-          +'<td>'+q.id+'</td>'
-          +'<td class="wrap">'+esc(q.text)+'</td>'
-          +'<td>'+esc(q.user)+'</td>'
-          +'<td>'+(q.game?esc(q.game):'<span class="muted">—</span>')+'</td>'
-          +'<td>'+fmtDate(q.date)+'</td>'
-          +'<td class="muted">'+esc(q.quotedByName||'—')+'</td>'
+          +mobile
+          +'<td class="q-desk">'+q.id+'</td>'
+          +'<td class="wrap q-desk">'+esc(q.text)+'</td>'
+          +'<td class="q-desk">'+esc(q.user)+'</td>'
+          +'<td class="q-desk">'+(q.game?esc(q.game):'<span class="muted">—</span>')+'</td>'
+          +'<td class="q-desk">'+fmtDate(q.date)+'</td>'
+          +'<td class="muted q-desk">'+esc(q.quotedByName||'—')+'</td>'
           +actions+'</tr>';
       }).join('') || '<tr><td colspan="7" class="muted">'+(state.filter?'No quotes match your search.':'No quotes yet. Add one in chat with <code>!quote add</code>.')+'</td></tr>';
       main.innerHTML='<div style="overflow-x:auto"><table>'
-        +'<thead><tr><th style="width:1%">ID</th><th class="wrap">Quote</th><th>User</th><th>Game</th><th>Date</th><th>Quoted By</th><th class="col-actions">Actions</th></tr></thead>'
+        +'<thead><tr><th class="q-mobile wrap">Quote</th><th class="q-desk" style="width:1%">ID</th><th class="wrap q-desk">Quote</th><th class="q-desk">User</th><th class="q-desk">Game</th><th class="q-desk">Date</th><th class="q-desk">Quoted By</th><th class="col-actions">Actions</th></tr></thead>'
         +'<tbody>'+body+'</tbody></table></div>';
       var q=function(sel,fn){ Array.prototype.forEach.call(main.querySelectorAll(sel), fn); };
       q('button[data-edit]', function(b){ b.onclick=function(){ openEdit(+b.getAttribute('data-edit')); }; });

@@ -18,8 +18,8 @@ export function listsPage(): string {
       </div>
       <div class="rowline" style="flex:none; gap:.5rem; justify-content:flex-end">
         <button type="button" class="pink" id="new-list-btn" style="display:none">+ Add List</button>
-        <button type="button" class="pink" id="l-import-btn" style="display:none">Import CSV</button>
-        <button type="button" class="pink" id="l-export-btn" style="display:none">Export CSV</button>
+        <button type="button" class="pink csv-btn" id="l-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink csv-btn" id="l-export-btn" style="display:none">Export CSV</button>
       </div>
     </div>
     <div class="md-layout">
@@ -243,11 +243,12 @@ export function listsPage(): string {
       if(l.createdByName) meta+=' <span class="muted">· created by '+esc(l.createdByName)+(l.createdAt?' on '+esc(fmtDate(l.createdAt)):'')+'</span>';
       var btns='';
       if(canManageList(l)) btns+='<button type="button" class="pink" id="edit-list-btn">Edit List</button>';
-      if(canAddTo(l)) btns+='<button type="button" class="pink" id="add-entry-btn">+ Add Entry</button>';
+      if(canAddTo(l)) btns+='<button type="button" class="pink" id="add-entry-btn">+Entry</button>';
 
-      var head='<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem">'
+      var head='<div class="list-detail-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem">'
         +'<div><h2 style="margin:0 0 .35rem">'+esc(title)+' <span class="ref-name">('+esc(l.name)+')</span></h2>'
-        +'<p class="muted" style="margin:.15rem 0 .5rem">'+(l.description?esc(l.description):'<em>No description.</em>')+'</p>'+meta+'</div>'
+        +'<p class="muted list-detail-desc" style="margin:.15rem 0 .5rem">'+(l.description?esc(l.description):'<em>No description.</em>')+'</p>'
+        +'<div class="list-detail-meta">'+meta+'</div></div>'
         +'<div class="rowline" style="flex:none; justify-content:flex-end">'+btns+'</div></div>';
 
       var manage=canManageList(l);
@@ -259,9 +260,9 @@ export function listsPage(): string {
             +'<button class="danger icon-btn" data-del="'+en.id+'" title="Delete">'+icon('trash-2')+'</button></div>';
         } else { actions='<span class="muted">—</span>'; }
         return '<tr><td>'+(i+1)+'</td><td class="wrap">'+esc(en.text)+'</td><td>'+esc(en.addedByName||'—')+'</td><td class="muted">'+esc(fmtDate(en.addedAt))+'</td><td class="col-actions">'+actions+'</td></tr>';
-      }).join('') || '<tr><td colspan="5" class="muted">No entries yet.'+(canAddTo(l)?' Add one with <strong>+ Add Entry</strong>.':'')+'</td></tr>';
+      }).join('') || '<tr><td colspan="5" class="muted">No entries yet.'+(canAddTo(l)?' Add one with <strong>+Entry</strong>.':'')+'</td></tr>';
 
-      main.innerHTML=head+'<div style="overflow-x:auto"><table><thead><tr><th style="width:1%">#</th><th class="wrap">Entry</th><th>Added by</th><th>Date added</th><th class="col-actions">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      main.innerHTML=head+'<div style="overflow-x:auto"><table class="list-entries"><thead><tr><th style="width:1%">#</th><th class="wrap">Entry</th><th>Added by</th><th>Date added</th><th class="col-actions">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 
       var eb=document.getElementById('edit-list-btn'); if(eb) eb.onclick=function(){ openEditList(l); };
       var ab=document.getElementById('add-entry-btn'); if(ab) ab.onclick=function(){ openAddEntry(l); };

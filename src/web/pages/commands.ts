@@ -17,11 +17,11 @@ export function commandsPage(): string {
         <p class="muted" id="cmd-sub" style="margin:0; padding:0">Loading…</p>
       </div>
       <div class="rowline" style="flex:none; gap:.5rem; justify-content:flex-end">
-        <button type="button" class="pink" id="new-cmd-btn" style="display:none">+ New Command</button>
-        <button type="button" class="pink" id="new-alias-btn" style="display:none">+ Add Alias</button>
-        <button type="button" class="pink" id="new-timer-btn" style="display:none">+ New Timer</button>
-        <button type="button" class="pink" id="cmd-import-btn" style="display:none">Import CSV</button>
-        <button type="button" class="pink" id="cmd-export-btn" style="display:none">Export CSV</button>
+        <button type="button" class="pink" id="new-cmd-btn" style="display:none">+Command</button>
+        <button type="button" class="pink" id="new-alias-btn" style="display:none">+Alias</button>
+        <button type="button" class="pink" id="new-timer-btn" style="display:none">+Timer</button>
+        <button type="button" class="pink csv-btn" id="cmd-import-btn" style="display:none">Import CSV</button>
+        <button type="button" class="pink csv-btn" id="cmd-export-btn" style="display:none">Export CSV</button>
       </div>
     </div>
     <div class="md-layout">
@@ -200,7 +200,7 @@ export function commandsPage(): string {
           +'<td class="col-actions">'+actions+'</td></tr>';
       }).join('') || '<tr><td colspan="5" class="muted">No timers yet. Create one in chat with <code>!timer add &lt;name&gt; &lt;periodSeconds&gt; &lt;!command&gt;</code>.</td></tr>';
       panel.innerHTML='<h2 style="margin-top:0">Timers <span class="count">('+(state.timers||[]).length+')</span></h2>'
-        +'<div style="overflow-x:auto"><table><thead><tr><th class="col-toggle">Loop</th><th>Name</th><th>Period (s)</th><th class="wrap">Command</th><th class="col-actions">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+        +'<div style="overflow-x:auto"><table class="cmd-timers"><thead><tr><th class="col-toggle">Loop</th><th>Name</th><th>Period (s)</th><th class="wrap">Command</th><th class="col-actions">Actions</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       wireTimersTable(panel); wireCopy(panel);
     }
     function wireTimersTable(panel){
@@ -394,7 +394,7 @@ export function commandsPage(): string {
       wrap.querySelector('[data-showall]').onclick=function(){ state.showAll=true; renderMain(); };
     }
 
-    // The + New Command / + Add Alias buttons open the shared modals; load() reloads on success.
+    // The +Command / +Alias buttons open the shared modals; load() reloads on success.
     document.getElementById('new-cmd-btn').onclick=function(){ openNew(load); };
     document.getElementById('new-alias-btn').onclick=function(){ openNewAlias(load); };
 

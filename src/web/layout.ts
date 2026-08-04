@@ -50,6 +50,8 @@ const SHARED_STYLE = /* css */ `
   main.wide { width: min(115rem, 98vw); }
   td.wrap { white-space: normal; min-width: 11rem; }
   th.wrap { min-width: 11rem; }
+  /* Quotes: a combined "#id "quote" - user" cell, shown only at the phone breakpoint. */
+  td.q-mobile, th.q-mobile { display: none; }
   section.cmd-group { margin-bottom: 1.75rem; }
   section.cmd-group > h2 { display: flex; align-items: baseline; gap: .5rem; }
   section.cmd-group > h2 .count, h2 .count { font-size: .8rem; color: var(--muted); font-weight: 500; }
@@ -109,10 +111,14 @@ const SHARED_STYLE = /* css */ `
 
     main { width: 94vw; margin: 1rem auto; }
     main.wide { width: 96vw; }
+    /* Hide CSV import/export on phones (Commands, Lists, Quotes) to save space. */
+    .csv-btn { display: none !important; }
     .card { padding: 1rem; }
     .page-head { flex-wrap: wrap; }
 
-    .md-layout { flex-direction: column; gap: .7rem; }
+    /* Column layout on phones: stretch children to full width (the base
+       align-items:flex-start would otherwise shrink .md-col to its content). */
+    .md-layout { flex-direction: column; align-items: stretch; gap: .7rem; }
     .md-side { position: static; width: 100%; flex-basis: auto; display: none; padding: .6rem; }
     .md-side.open { display: block; }
     .md-side-toggle {
@@ -122,6 +128,44 @@ const SHARED_STYLE = /* css */ `
     }
     .md-side-toggle::after { content: '▾'; color: var(--muted); }
     .md-side-toggle.open::after { content: '▴'; }
+
+    /* Commands: the custom-commands table collapses to toggle + command +
+       actions. Hide the middle columns (Type…Group = 3rd–8th); the command column
+       flexes to width:100% so the toggle anchors left, the action buttons anchor
+       right, and the command fills the space between. */
+    table.cmd-custom th:nth-child(n+3):nth-child(-n+8),
+    table.cmd-custom td:nth-child(n+3):nth-child(-n+8) { display: none; }
+    table.cmd-custom th:nth-child(2), table.cmd-custom td:nth-child(2) { width: 100%; }
+
+    /* Timers (toggle/name/actions) and Lists entries (#/entry/actions) collapse
+       the same way: hide the 3rd + 4th columns; the 2nd column flexes to fill. */
+    table.cmd-timers th:nth-child(n+3):nth-child(-n+4),
+    table.cmd-timers td:nth-child(n+3):nth-child(-n+4),
+    table.list-entries th:nth-child(n+3):nth-child(-n+4),
+    table.list-entries td:nth-child(n+3):nth-child(-n+4) { display: none; }
+    table.cmd-timers th:nth-child(2), table.cmd-timers td:nth-child(2),
+    table.list-entries th:nth-child(2), table.list-entries td:nth-child(2) { width: 100%; }
+
+    /* Lists detail header: keep just the name + reference, drop the description
+       and meta, and stack the Edit List / +Entry buttons below the name. */
+    .list-detail-head { flex-direction: column; }
+    .list-detail-desc, .list-detail-meta { display: none; }
+
+    /* Quotes table collapses to the combined cell + actions: hide the desktop
+       columns, show the combined cell and let it fill the width. */
+    td.q-desk, th.q-desk { display: none; }
+    td.q-mobile, th.q-mobile { display: table-cell; width: 100%; }
+
+    /* Action columns stay snug on phones across all the collapsed tables. */
+    .col-actions { min-width: 0; }
+
+    /* Built-in command tables collapse to just the Command column, full width and
+       wrapping (a long command + options can span multiple lines). Overrides the
+       desktop nowrap/width:1% pin on the first column. */
+    table.cmd-builtins th:nth-child(n+2),
+    table.cmd-builtins td:nth-child(n+2) { display: none; }
+    table.cmd-builtins th:nth-child(1),
+    table.cmd-builtins td:nth-child(1) { width: 100%; white-space: normal; }
   }
   /* connected-squares pagination (lives outside the panel, centered) */
   .pager-wrap { display: flex; flex-direction: column; align-items: center; gap: .55rem; margin: 1.25rem 0 .5rem; }

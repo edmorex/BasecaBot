@@ -84,7 +84,7 @@ export function commandTableScript(): string {
     // Full table (header + rows) for a set of command objects. \`emptyMsg\` is raw HTML.
     function customTableHtml(cmds, emptyMsg){
       var b=cmds.map(customRow).join('') || '<tr><td colspan="9" class="muted">'+emptyMsg+'</td></tr>';
-      return '<div style="overflow-x:auto"><table><thead>'+CUSTOM_TABLE_HEAD+'</thead><tbody>'+b+'</tbody></table></div>';
+      return '<div style="overflow-x:auto"><table class="cmd-custom"><thead>'+CUSTOM_TABLE_HEAD+'</thead><tbody>'+b+'</tbody></table></div>';
     }
 
     // Attach click-to-copy to every [data-copy] element in a rendered view.
