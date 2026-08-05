@@ -278,6 +278,26 @@ function makeSilentWav(ms = 250): Buffer {
   return buf; // data region stays zero-filled = silence
 }
 
+/** Serve a wav with Range support (mirrors WebServer.sendAudioBuffer) so Safari's
+ * <audio> plays it in the preview too. */
+function sendWav(req: IncomingMessage, res: ServerResponse, buf: Buffer): void {
+  const total = buf.length;
+  const base = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+  if (m) {
+    let start = m[1] ? parseInt(m[1], 10) : 0;
+    let end = m[2] ? parseInt(m[2], 10) : total - 1;
+    if (Number.isNaN(start)) start = 0;
+    if (Number.isNaN(end) || end >= total) end = total - 1;
+    const chunk = buf.subarray(start, end + 1);
+    res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': chunk.length });
+    res.end(chunk);
+    return;
+  }
+  res.writeHead(200, { ...base, 'Content-Length': total });
+  res.end(buf);
+}
+
 const server = createServer((req, res) => {
   // A rejected handler must never leave the socket hanging: an unanswered
   // /api/me stalls the shell script's window.onMe(), so the page sits on
@@ -335,8 +355,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     });
     if (p === '/api/admin/tts/preview') {
       if (!(url.searchParams.get('text') ?? '').trim()) return json(400, { error: 'Enter something to say.' });
-      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
-      return res.end(makeSilentWav());
+      return sendWav(req, res, makeSilentWav());
     }
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {

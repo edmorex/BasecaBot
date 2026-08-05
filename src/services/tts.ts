@@ -97,6 +97,9 @@ export class TtsService {
 
   /** Load persisted mute + voice settings and the model's speaker list. */
   async init(): Promise<void> {
+    // Read the model's speaker count FIRST, so a saved multi-speaker `speaker` id
+    // isn't clamped to 0 below (clampVoice bounds it by numSpeakers).
+    this.loadSpeakers();
     try {
       const rows = await this.db.setting.findMany({ where: { key: { in: ['tts.muted', 'tts.voice'] } } });
       for (const r of rows) {
@@ -106,7 +109,6 @@ export class TtsService {
     } catch (err) {
       this.logger.warn({ err }, 'tts: could not load settings');
     }
-    this.loadSpeakers();
   }
 
   /** Read `<model>.onnx.json` for the speaker count/names (multi-speaker voices). */
@@ -124,8 +126,6 @@ export class TtsService {
         for (const [name, id] of Object.entries(json.speaker_id_map)) names[id] = name;
         this.speakerNames = names;
       }
-      // Re-clamp the persisted speaker id against the now-known speaker count.
-      this.voice = this.clampVoice(this.voice);
     } catch {
       // No sidecar json / single-speaker voice — leave numSpeakers = 1.
     }

@@ -15,8 +15,7 @@ export function getTtsAudio(s: WebServer, req: IncomingMessage, res: ServerRespo
   const id = url.pathname.slice('/overlays/tts/audio/'.length);
   const buf = /^[a-f0-9]{40}$/.test(id) ? s.tts.getAudio(id) : undefined;
   if (!buf) return s.send(res, 404, 'text/plain', 'Not Found');
-  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
-  res.end(buf);
+  s.sendAudioBuffer(req, res, buf);
 }
 
 export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {

@@ -95,8 +95,7 @@ export async function getAdminTtsPreview(s: WebServer, req: IncomingMessage, res
   if (!text) throw new HttpError(400, 'Enter something to say.');
   const result = await s.tts.preview(text);
   if (!result.ok) throw new HttpError(400, SPEAK_ERRORS[result.reason ?? ''] ?? 'Could not synthesize.');
-  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
-  res.end(result.wav);
+  s.sendAudioBuffer(req, res, result.wav);
 }
 
 export async function initAdminUser(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {

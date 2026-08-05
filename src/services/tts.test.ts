@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import { TtsService, VOICE_DEFAULTS } from './tts.js';
 import type { Storage } from './storage/index.js';
 import type { AppConfig } from './config.js';
@@ -73,5 +77,20 @@ describe('TtsService voice settings', () => {
     const { tts } = make('/nope/model.onnx');
     await tts.init(); // no sidecar json -> single speaker
     expect(tts.getSpeakers()).toEqual({ numSpeakers: 1, speakers: [] });
+  });
+
+  it('keeps a saved multi-speaker speaker id across init (regression)', async () => {
+    // A sidecar config declaring 10 speakers, next to a fake model path.
+    const model = path.join(os.tmpdir(), `basecabot-tts-test-${randomUUID()}.onnx`);
+    writeFileSync(model + '.json', JSON.stringify({ num_speakers: 10, speaker_id_map: {} }));
+    try {
+      const { tts, settings } = make(model);
+      settings.set('tts.voice', JSON.stringify({ ...VOICE_DEFAULTS, speaker: 5 }));
+      await tts.init();
+      expect(tts.getSpeakers().numSpeakers).toBe(10);
+      expect(tts.getVoice().speaker).toBe(5); // not clamped back to 0
+    } finally {
+      unlinkSync(model + '.json');
+    }
   });
 });

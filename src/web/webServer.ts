@@ -459,6 +459,33 @@ export class WebServer {
     res.end(body);
   }
 
+  /**
+   * Serve an in-memory audio buffer with HTTP Range support + Content-Length.
+   * Safari's <audio> element probes with a `Range` header and refuses to play a
+   * chunked `200` response, so honor Range (206 + Content-Range) — Chrome is
+   * happy either way. Used by the TTS overlay clip + admin "Test Voice" routes.
+   */
+  sendAudioBuffer(req: IncomingMessage, res: ServerResponse, buf: Buffer, contentType = 'audio/wav'): void {
+    const total = buf.length;
+    const base = { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+    const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+    if (m) {
+      let start = m[1] ? parseInt(m[1], 10) : 0;
+      let end = m[2] ? parseInt(m[2], 10) : total - 1;
+      if (Number.isNaN(start)) start = 0;
+      if (Number.isNaN(end) || end >= total) end = total - 1;
+      if (start > end || start >= total) {
+        res.writeHead(416, { ...base, 'Content-Range': `bytes */${total}` });
+        return void res.end();
+      }
+      const chunk = buf.subarray(start, end + 1);
+      res.writeHead(206, { ...base, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': chunk.length });
+      return void res.end(chunk);
+    }
+    res.writeHead(200, { ...base, 'Content-Length': total });
+    res.end(buf);
+  }
+
   redirect(res: ServerResponse, location: string): void {
     res.writeHead(302, { Location: location });
     res.end();
