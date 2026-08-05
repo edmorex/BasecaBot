@@ -333,6 +333,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       configured: true, muted: previewTtsMuted, voice: previewTtsVoice,
       speakers: { numSpeakers: previewTtsSpeakers.length, speakers: previewTtsSpeakers }, defaults: VOICE_DEFAULTS,
     });
+    if (p === '/api/admin/tts/preview') {
+      if (!(url.searchParams.get('text') ?? '').trim()) return json(400, { error: 'Enter something to say.' });
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
+      return res.end(makeSilentWav());
+    }
     if (p === '/api/quotes') return json(200, { quotes: mockQuotes });
     if (p === '/api/quotes/export') {
       const rows: (string | number)[][] = [['ID', 'Quote', 'User', 'User ID', 'Game', 'Date', 'Quoted By', 'Quoted By ID', 'Created At'], ...mockQuotes.map((q) => [q.id, q.text, q.user, '', q.game ?? '', q.date, q.quotedByName ?? '', '', q.createdAt])];
@@ -492,11 +497,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       if (previewTtsMuted) return json(409, { error: 'TTS is muted — unmute to test.' });
       if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });
       return json(200, { ok: true });
-    }
-    if (p === '/api/admin/tts/preview') {
-      if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });
-      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store' });
-      return res.end(makeSilentWav());
     }
     if (p === '/api/timers/create') {
       const name = String(body.name ?? '').trim();

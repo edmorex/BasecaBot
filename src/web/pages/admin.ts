@@ -597,20 +597,15 @@ export function adminPage(): string {
         voiceBtn.onclick = function () {
           var t = sayEl.value.trim();
           if (!t) { toast('tts-toast', 'Enter something to say.', false); return; }
-          voiceBtn.disabled = true;
-          fetch('/api/admin/tts/preview', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) })
-            .then(function (r) { if (!r.ok) return r.json().then(function (d) { throw new Error((d && d.error) || ('HTTP ' + r.status)); }); return r.blob(); })
-            .then(function (blob) {
-              var url = URL.createObjectURL(blob);
-              var a = new Audio(url);
-              var vol = document.querySelector('[data-knob="volume"]'); // preview at the current volume slider
-              a.volume = vol ? Math.max(0, Math.min(1, parseFloat(vol.value))) : 1;
-              a.onended = function () { URL.revokeObjectURL(url); };
-              a.play();
-              toast('tts-toast', 'Playing on this page.', true);
-            })
-            .catch(function (e) { toast('tts-toast', e.message, false); })
-            .then(function () { voiceBtn.disabled = false; });
+          // Same-origin <audio> src (not a blob: URL, which the page CSP would block)
+          // and play() called inside this click so the browser allows playback.
+          var vol = document.querySelector('[data-knob="volume"]'); // preview at the current volume slider
+          var a = new Audio('/api/admin/tts/preview?text=' + encodeURIComponent(t));
+          a.volume = vol ? Math.max(0, Math.min(1, parseFloat(vol.value))) : 1;
+          a.onerror = function () { toast('tts-toast', 'Could not play the clip (synthesis may have failed).', false); };
+          var p = a.play();
+          if (p && p.then) p.then(function () { toast('tts-toast', 'Playing on this page.', true); })
+            .catch(function (e) { toast('tts-toast', (e && e.name === 'NotAllowedError') ? 'Browser blocked playback — click the page and retry.' : 'Could not play the clip.', false); });
         };
       } catch (e) {
         main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';

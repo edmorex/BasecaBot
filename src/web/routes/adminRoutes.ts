@@ -86,11 +86,12 @@ export async function postAdminTtsSay(s: WebServer, req: IncomingMessage, res: S
 }
 
 /** "Test Voice": synthesize and return the wav bytes to play on the dashboard
- * (no overlay broadcast; works even when muted). */
-export async function postAdminTtsPreview(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+ * (no overlay broadcast; works even when muted). GET so an <audio> element can
+ * point straight at it — a same-origin URL plays under the page CSP (a fetched
+ * blob: URL would not), and play() stays inside the click's user gesture. */
+export async function getAdminTtsPreview(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   s.requireAdmin(req);
-  const body = await s.readJson(req);
-  const text = String(body.text ?? '').trim();
+  const text = (url.searchParams.get('text') ?? '').trim();
   if (!text) throw new HttpError(400, 'Enter something to say.');
   const result = await s.tts.preview(text);
   if (!result.ok) throw new HttpError(400, SPEAK_ERRORS[result.reason ?? ''] ?? 'Could not synthesize.');
