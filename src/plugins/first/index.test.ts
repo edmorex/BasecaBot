@@ -56,7 +56,9 @@ describe('first plugin', () => {
       chat: chatSvc,
       text,
       first,
-      users: { touch: vi.fn(), resolveUserRef: vi.fn(async () => ({ kind: 'none' })) },
+      // getById returns the bot's STORED display name (distinct from the event's
+      // Twitch name 'Alice') so the overlay-broadcast test proves the custom name wins.
+      users: { touch: vi.fn(), getById: vi.fn(async () => ({ displayName: 'AliceCustom' })), resolveUserRef: vi.fn(async () => ({ kind: 'none' })) },
       ws: { broadcast },
       stream: { stream: liveStream },
       api: {
@@ -116,12 +118,14 @@ describe('first plugin', () => {
     expect(say).not.toHaveBeenCalled();
   });
 
-  it('broadcasts the check-in to the "first" overlay room with an avatar', async () => {
+  it('broadcasts the check-in with the STORED display name (custom name) + avatar', async () => {
     first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
     await run('!first');
     await new Promise((r) => setTimeout(r, 0)); // let the async avatar fetch + broadcast settle
+    // 'AliceCustom' (from getById), NOT the event's Twitch name 'Alice' — so the
+    // live overlay matches the snapshot at /api/overlay/first.
     expect(broadcast).toHaveBeenCalledWith('first', 'checkin', expect.objectContaining({
-      place: 1, name: 'Alice', timeSeconds: 42, avatarUrl: 'https://cdn/pic.png',
+      place: 1, name: 'AliceCustom', timeSeconds: 42, avatarUrl: 'https://cdn/pic.png',
     }));
   });
 

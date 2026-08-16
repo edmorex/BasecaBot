@@ -101,7 +101,13 @@ export function firstPlugin(): Plugin {
         } catch (err) {
           ctx.logger.debug({ err, user: u.login }, 'first: overlay avatar fetch failed');
         }
-        ctx.ws.broadcast('first', 'checkin', { streamKey, place, name: u.displayName, avatarUrl, timeSeconds });
+        // Use the bot's STORED display name (honors custom/locked names), not the
+        // raw Twitch name on the chat event — so the live overlay matches the
+        // snapshot at GET /api/overlay/first (which reads User.displayName). The
+        // user is already persisted (touch runs before this) so getById resolves.
+        const stored = await ctx.users.getById(u.id);
+        const name = stored?.displayName ?? u.displayName;
+        ctx.ws.broadcast('first', 'checkin', { streamKey, place, name, avatarUrl, timeSeconds });
       };
 
       ctx.commands.registerGroup('first', {
