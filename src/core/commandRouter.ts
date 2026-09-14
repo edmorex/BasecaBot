@@ -1,5 +1,6 @@
 import type { EventBus } from './eventBus.js';
 import type { ChatService } from '../services/chat.js';
+import type { GuestPolicy } from '../services/guestChannels.js';
 import { PermissionLevel, type ChatEvent, type CommandEvent, type EventUser } from './events.js';
 import { ChatError } from './chatError.js';
 import { scopedLogger } from '../services/logger.js';
@@ -101,12 +102,24 @@ export class CommandRouter {
   private fallback: CommandHandler | undefined;
   /** Group applied to subsequent register() calls (set by PluginManager per plugin). */
   private currentGroup: string | undefined;
+  /** Optional guest-channel policy: gates which commands run in guest channels. */
+  private guests: GuestPolicy | undefined;
 
   constructor(
     private readonly bus: EventBus,
     private readonly chat: ChatService,
   ) {
     this.bus.on('chat', (event) => this.handleChat(event));
+  }
+
+  /**
+   * Wire the guest-channel policy. When set, a command in a guest channel runs
+   * only if the policy allows it — this is what keeps non-whitelisted commands
+   * (and, since the guard sits before the fallback, custom commands) from acting
+   * in a guest channel. The primary channel is always allowed.
+   */
+  setGuestPolicy(guests: GuestPolicy): void {
+    this.guests = guests;
   }
 
   register(name: string, handler: CommandHandler, options: CommandOptions = {}): void {
@@ -232,6 +245,7 @@ export class CommandRouter {
   ): Promise<boolean> {
     const parsed = CommandRouter.parse(message, base);
     if (!parsed) return false;
+    if (this.guests && !this.guests.commandAllowed(parsed.channel, parsed.name)) return false;
     const cmd = this.resolve(parsed.name);
     if (!cmd) return false; // not a built-in — do nothing (no fallback, no loop)
     if (!this.checkPermission(parsed.user, cmd.permission)) return false;
@@ -334,6 +348,10 @@ export class CommandRouter {
   async execute(message: string, base: Pick<CommandEvent, 'channel' | 'ts' | 'user'>): Promise<void> {
     const parsed = CommandRouter.parse(message, base);
     if (!parsed) return;
+
+    // Guest-channel gate: only whitelisted commands act in a guest channel. Sits
+    // BEFORE resolve/fallback, so custom commands are suppressed there too.
+    if (this.guests && !this.guests.commandAllowed(parsed.channel, parsed.name)) return;
 
     const cmd = this.resolve(parsed.name);
     if (!cmd) {

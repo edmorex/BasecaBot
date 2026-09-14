@@ -52,6 +52,7 @@ run('commands plugin — alias argument handling (integration)', () => {
       points: { getBalance: noop },
       quotes: {},
       lists: {},
+      guests: { isGuest: () => false },
       config: { twitch: { botUsername: 'bot', broadcasterUsername: 'chan' }, points: { name: 'points' } },
       logger: { warn() {}, debug() {}, info() {}, error() {}, child() { return this; } },
     } as unknown as ServiceContext;

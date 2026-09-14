@@ -10,6 +10,7 @@ import type { FirstService } from '../services/first.js';
 import type { TimerService } from '../services/timers.js';
 import type { TextStringsService } from '../services/textStrings.js';
 import type { TtsService } from '../services/tts.js';
+import type { GuestChannelService } from '../services/guestChannels.js';
 import type { StreamService } from '../services/stream.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
@@ -47,6 +48,8 @@ export interface ServiceContext {
   readonly text: TextStringsService;
   /** Text-to-Speech (Piper): `speak(text)` synthesizes + plays via the TTS overlay. */
   readonly tts: TtsService;
+  /** Temporary guest-channel connections + the whitelist of features allowed there. */
+  readonly guests: GuestChannelService;
   /** Raw persistence (Prisma) for plugin-specific tables/queries. */
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */

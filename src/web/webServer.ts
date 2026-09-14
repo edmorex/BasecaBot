@@ -28,6 +28,7 @@ import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
+import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 
 import { handleLogin, handleCallback, handleLogout, getMe, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
@@ -136,6 +137,9 @@ export class WebServer {
         case '/overlays/tts':
           // OBS audio overlay. Public HTML; inert without the read-only ?token=.
           return this.html(res, ttsOverlayPage());
+        case '/overlays/chat-stats':
+          // OBS chat-activity stats overlay. Public HTML; inert without ?token=.
+          return this.html(res, chatStatsOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':

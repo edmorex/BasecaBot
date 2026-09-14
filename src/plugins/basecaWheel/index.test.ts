@@ -21,6 +21,7 @@ describe('basecaWheel plugin', () => {
   let broadcast: ReturnType<typeof vi.fn>;
   let join: ReturnType<typeof vi.fn>;
   let part: ReturnType<typeof vi.fn>;
+  let registerFeature: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     bus = new EventBus();
@@ -32,16 +33,22 @@ describe('basecaWheel plugin', () => {
     const commands = new CommandRouter(bus, chatSvc);
     const text = new TextStringsService({ prisma: { textString: { findMany: async () => [] } } } as never);
     await text.init();
+    registerFeature = vi.fn();
     const ctx = {
       bus,
       commands,
       chat: chatSvc,
       text,
       ws: { broadcast },
+      guests: { registerFeature },
       config: { twitch: { channel: 'test' } },
       logger: { debug: vi.fn(), info: vi.fn(), error: vi.fn() },
     } as unknown as ServiceContext;
     await basecaWheelPlugin().init(ctx);
+  });
+
+  it('registers itself as a guest-channel feature owning !wheel', () => {
+    expect(registerFeature).toHaveBeenCalledWith(expect.objectContaining({ id: 'wheel', ownedCommands: ['wheel'] }));
   });
 
   it('forwards a title command with the display name and permission int', async () => {
@@ -132,17 +139,5 @@ describe('basecaWheel plugin', () => {
       ts: Date.now(),
     });
     expect(say).toHaveBeenCalledWith('guestchan', 'Round over!');
-  });
-
-  it('lets a broadcaster connect to a guest channel (joins + greets both)', async () => {
-    await bus.publish(chat('!wheel connect GuestChan 60', user({ permission: PermissionLevel.Broadcaster })));
-    expect(join).toHaveBeenCalledWith('guestchan');
-    expect(say).toHaveBeenCalledWith('guestchan', expect.stringContaining('BasecaWheel'));
-    expect(say).toHaveBeenCalledWith('test', expect.stringContaining('Connected to guestchan'));
-  });
-
-  it('does not let a non-broadcaster connect to a guest channel', async () => {
-    await bus.publish(chat('!wheel connect guestchan', user({ permission: PermissionLevel.Moderator })));
-    expect(join).not.toHaveBeenCalled();
   });
 });

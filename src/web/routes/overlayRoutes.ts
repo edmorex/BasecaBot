@@ -29,6 +29,7 @@ export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: 
       ? [
           { id: 'first', name: 'First — race results', url: `${base}/overlays/first?token=${encodeURIComponent(token)}` },
           { id: 'tts', name: 'TTS — audio source', url: `${base}/overlays/tts?token=${encodeURIComponent(token)}` },
+          { id: 'chat-stats', name: 'Chat activity — stats', url: `${base}/overlays/chat-stats?token=${encodeURIComponent(token)}` },
         ]
       : [],
   });

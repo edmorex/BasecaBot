@@ -256,6 +256,7 @@ export function commandsPlugin(): Plugin {
       // ── Phrase runtime: fire on phrases appearing in normal chat ────────────
       ctx.bus.on('chat', async (e) => {
         if (e.user.login === ctx.config.twitch.botUsername) return; // ignore the bot itself
+        if (ctx.guests.isGuest(e.channel)) return; // custom commands/phrases are primary-only
         const matches = svc.matchPhrases(e.message);
         for (const cmd of matches) {
           if (!svc.canTrigger(cmd, e.user.id, e.user.permission)) continue;

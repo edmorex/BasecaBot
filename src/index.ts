@@ -14,6 +14,7 @@ import { FirstService } from './services/first.js';
 import { TimerService } from './services/timers.js';
 import { TextStringsService } from './services/textStrings.js';
 import { TtsService } from './services/tts.js';
+import { GuestChannelService } from './services/guestChannels.js';
 import { StreamService } from './services/stream.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
@@ -73,6 +74,13 @@ async function main(): Promise<void> {
   // Block custom commands/aliases from shadowing built-in (plugin) commands.
   customCommands.useReservedWords((word) => commands.isRegistered(word));
 
+  // Guest channels: the bot can be invited into another channel with !connect,
+  // where only whitelisted features act. The adapter + router consult it to gate
+  // guest traffic; plugins register their guest-capable features in init().
+  const guests = new GuestChannelService(config, chat, text, scopedLogger('guests'));
+  chatAdapter.setGuestPolicy(guests);
+  commands.setGuestPolicy(guests);
+
   // ── WebSocket hub (web-app integration) ────────────────────────────────────
   const ws = new WsHub(bus, {
     port: config.ws.port,
@@ -109,6 +117,7 @@ async function main(): Promise<void> {
     timers,
     text,
     tts,
+    guests,
     stream,
     storage,
     ws,
@@ -131,6 +140,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'shutting down');
     await plugins.stopAll();
+    await guests.stop(); // leave any guest channel cleanly
     await eventSub.stop();
     await chatAdapter.disconnect();
     await webServer.stop();

@@ -119,6 +119,35 @@ describe('CommandRouter dispatch', () => {
     say.mockRestore();
   });
 
+  it('gates commands in a guest channel to the policy allowlist (custom commands too)', async () => {
+    // Policy: 'guestchan' is a guest that allows only !wheel; primary allows all.
+    router.setGuestPolicy({
+      isGuest: (c) => c === 'guestchan',
+      commandAllowed: (c, name) => c !== 'guestchan' || name === 'wheel',
+      shouldForwardGuestMessage: () => true,
+    });
+    const wheel = vi.fn();
+    const points = vi.fn();
+    const fallback = vi.fn();
+    router.registerGroup('wheel', { subcommands: { spin: { handler: wheel } } });
+    router.register('points', points);
+    router.setFallback(fallback);
+
+    const inGuest = (message: string): ChatEvent => ({ type: 'chat', channel: 'guestchan', ts: Date.now(), message, user: user() });
+    await bus.publish(inGuest('!wheel spin')); // whitelisted → runs
+    await bus.publish(inGuest('!points')); // not whitelisted → blocked
+    await bus.publish(inGuest('!hug someone')); // custom (fallback) → blocked before fallback
+    expect(wheel).toHaveBeenCalledOnce();
+    expect(points).not.toHaveBeenCalled();
+    expect(fallback).not.toHaveBeenCalled();
+
+    // The same commands all run on the primary channel.
+    await bus.publish(chat('!points'));
+    await bus.publish(chat('!hug someone'));
+    expect(points).toHaveBeenCalledOnce();
+    expect(fallback).toHaveBeenCalledOnce(); // !hug hit the custom fallback on primary
+  });
+
   it('reports registered commands and aliases via isRegistered', () => {
     router.register('points', vi.fn(), { aliases: ['p'] });
     router.registerGroup('wheel', { subcommands: { spin: { handler: vi.fn() } } });

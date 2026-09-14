@@ -5,6 +5,8 @@ import { listsPlugin } from './lists/index.js';
 import { quotesPlugin } from './quotes/index.js';
 import { eventsPlugin } from './events/index.js';
 import { basecaWheelPlugin } from './basecaWheel/index.js';
+import { guestsPlugin } from './guests/index.js';
+import { chatStatsPlugin } from './chatStats/index.js';
 import { firstPlugin } from './first/index.js';
 import { timersPlugin } from './timers/index.js';
 
@@ -20,6 +22,8 @@ export const pluginRegistry: PluginFactory[] = [
   quotesPlugin,
   eventsPlugin,
   basecaWheelPlugin,
+  guestsPlugin,
+  chatStatsPlugin,
   firstPlugin,
   timersPlugin,
 ];

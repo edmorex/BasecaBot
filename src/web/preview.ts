@@ -9,6 +9,7 @@ import { quotesPage } from './pages/quotes.js';
 import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
+import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
@@ -101,6 +102,7 @@ async function collectBuiltins() {
     quotes: {},
     timers: { configure: noop, resumeLoops: asyncNoop, stopAllRuntime: noop, list: async () => [], status: () => 0 },
     text: previewText, // real service — plugins register their editable strings here
+    guests: { registerFeature: noop }, // plugins declare guest-channel features here
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -328,6 +330,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/admin') return html(adminPage());
     if (p === '/overlays/first') return html(firstOverlayPage());
     if (p === '/overlays/tts') return html(ttsOverlayPage());
+    if (p === '/overlays/chat-stats') return html(chatStatsOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/commands') return json(200, { commands });
@@ -346,6 +349,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       return json(200, { configured: true, token: 'preview-token', overlays: [
         { id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' },
         { id: 'tts', name: 'TTS — audio source', url: base + '/overlays/tts?token=preview-token' },
+        { id: 'chat-stats', name: 'Chat activity — stats', url: base + '/overlays/chat-stats?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });

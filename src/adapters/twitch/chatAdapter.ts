@@ -4,12 +4,34 @@ import type { EventBus } from '../../core/eventBus.js';
 import type { UsersService } from '../../services/users.js';
 import type { AppConfig } from '../../services/config.js';
 import { PermissionLevel, type EventUser } from '../../core/events.js';
+import type { GuestPolicy } from '../../services/guestChannels.js';
 import { scopedLogger } from '../../services/logger.js';
 
 const log = scopedLogger('chatAdapter');
 
-/** Matches a `!wheel` command (the only thing processed in guest channels). */
-const WHEEL_COMMAND = /^\s*!wheel(\s|$)/i;
+/**
+ * Extract Twitch-native emotes from a message's IRC tags. `emoteOffsets` maps an
+ * emote id to its character ranges ("start-end"); the count is how many ranges,
+ * and the name is the message text at the first range. Third-party emotes
+ * (BTTV/FFZ/7TV) aren't in the tags and aren't captured.
+ */
+function extractEmotes(text: string, msg: ChatMessage): { id: string; name: string; count: number }[] {
+  const offsets = msg.emoteOffsets;
+  if (!offsets || offsets.size === 0) return [];
+  const chars = [...text]; // code-point aware, matching Twitch's offset indexing
+  const out: { id: string; name: string; count: number }[] = [];
+  for (const [id, ranges] of offsets) {
+    let name = id;
+    const parts = ranges[0]?.split('-');
+    if (parts && parts.length === 2) {
+      const a = Number(parts[0]);
+      const b = Number(parts[1]);
+      if (Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b < chars.length) name = chars.slice(a, b + 1).join('');
+    }
+    out.push({ id, name, count: ranges.length });
+  }
+  return out;
+}
 
 /**
  * Bridges Twurple's ChatClient to the EventBus: every incoming message becomes
@@ -18,12 +40,13 @@ const WHEEL_COMMAND = /^\s*!wheel(\s|$)/i;
  * ChatService wraps for outbound messages.
  *
  * The bot operates in ONE primary channel (the broadcaster's). It may join
- * additional "guest" channels temporarily (e.g. BasecaWheel), but in those it
- * ONLY processes `!wheel` commands — all other messages are ignored and no user
- * data is persisted from them.
+ * temporary "guest" channels; in those, the injected GuestPolicy decides which
+ * messages are forwarded (only whitelisted features act there), and guest users
+ * are never persisted.
  */
 export class TwitchChatAdapter {
   readonly client: ChatClient;
+  private guests?: GuestPolicy;
 
   constructor(
     authProvider: AuthProvider,
@@ -32,6 +55,11 @@ export class TwitchChatAdapter {
     private readonly config: AppConfig,
   ) {
     this.client = new ChatClient({ authProvider, channels: [config.twitch.channel] });
+  }
+
+  /** Wire the guest-channel policy (set before connect()). */
+  setGuestPolicy(guests: GuestPolicy): void {
+    this.guests = guests;
   }
 
   async connect(): Promise<void> {
@@ -52,9 +80,10 @@ export class TwitchChatAdapter {
   private async onMessage(channel: string, text: string, msg: ChatMessage): Promise<void> {
     const channelName = channel.replace(/^#/, '').toLowerCase();
     const isPrimary = channelName === this.config.twitch.channel;
-    // In guest channels, only `!wheel` commands are processed; ignore everything
-    // else (and don't persist those users — guest chat is not tracked).
-    if (!isPrimary && !WHEEL_COMMAND.test(text)) return;
+    // In a guest channel, forward only what the guest policy allows (feature-owned
+    // commands, or all chat when a raw-chat feature is active). Guest users are
+    // never persisted (guest chat is not tracked).
+    if (!isPrimary && !this.guests?.shouldForwardGuestMessage(channelName, text)) return;
 
     const user = this.resolveUser(msg);
     if (isPrimary) {
@@ -68,6 +97,7 @@ export class TwitchChatAdapter {
       ts: Date.now(),
       message: text,
       user,
+      emotes: extractEmotes(text, msg),
     });
   }
 

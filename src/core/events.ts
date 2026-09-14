@@ -43,6 +43,8 @@ export interface ChatEvent extends BaseEvent {
   type: 'chat';
   user: EventUser;
   message: string;
+  /** Twitch-native emotes used in the message (from IRC tags), when available. */
+  emotes?: { id: string; name: string; count: number }[];
 }
 
 /** A parsed command invocation (`!name arg1 arg2`). */
