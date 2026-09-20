@@ -30,6 +30,7 @@ describe('quotes plugin — help', () => {
     const text = new TextStringsService({ prisma: { textString: { findMany: async () => [] } } } as never);
     await text.init();
     const ctx = {
+      achievements: { evaluate: vi.fn(async () => []) },
       bus,
       commands,
       chat: chatSvc,

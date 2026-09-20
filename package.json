@@ -21,6 +21,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
+    "backfill:achievements": "tsx scripts/backfillAchievements.ts",
     "preview:admin": "PREVIEW_USER=admin tsx watch src/web/preview.ts"
   },
   "dependencies": {

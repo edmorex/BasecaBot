@@ -51,6 +51,7 @@ describe('first plugin', () => {
     text = new TextStringsService({ prisma: { textString: { findMany: async () => [], upsert: async () => {}, deleteMany: async () => {} } } } as never);
     await text.init();
     const ctx = {
+      achievements: { evaluate: vi.fn(async () => []) },
       bus,
       commands,
       chat: chatSvc,

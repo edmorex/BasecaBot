@@ -96,3 +96,18 @@ export async function postAlias(s: WebServer, req: IncomingMessage, res: ServerR
   const profile = await s.users.getProfile(session.user.id);
   s.json(res, 200, { aliases: profile?.aliases ?? [] });
 }
+
+/**
+ * The signed-in user's achievements: the WHOLE catalog with progress, so the
+ * profile can show locked entries and how close they are, plus a summary for
+ * the header. Progress is derived live (nothing to keep in sync).
+ */
+export async function getMyAchievements(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const session = s.requireApiSession(req);
+  const achievements = await s.achievements.listForUser(session.user.id);
+  const unlocked = achievements.filter((a) => a.unlocked);
+  s.json(res, 200, {
+    achievements,
+    summary: { unlocked: unlocked.length, total: achievements.length },
+  });
+}

@@ -10,7 +10,9 @@ import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
+import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
+import { ACHIEVEMENTS } from '../services/achievementCatalog.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
 import { pluginRegistry } from '../plugins/index.js';
 import { TextStringsService } from '../services/textStrings.js';
@@ -102,7 +104,8 @@ async function collectBuiltins() {
     quotes: {},
     timers: { configure: noop, resumeLoops: asyncNoop, stopAllRuntime: noop, list: async () => [], status: () => 0 },
     text: previewText, // real service — plugins register their editable strings here
-    guests: { registerFeature: noop }, // plugins declare guest-channel features here
+    guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
+    achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -331,8 +334,24 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/overlays/first') return html(firstOverlayPage());
     if (p === '/overlays/tts') return html(ttsOverlayPage());
     if (p === '/overlays/chat-stats') return html(chatStatsOverlayPage());
+    if (p === '/overlays/achievement') return html(achievementOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
+    if (p === '/api/me/achievements') {
+      const a = (key: string, name: string, description: string, emoji: string, tier: string, current: number, target: number, unlockedAt: string | null) =>
+        ({ key, name, description, emoji, tier, group: 'first', current, target, unlocked: unlockedAt !== null, unlockedAt });
+      const achievements = [
+        a('first.blood', 'First Blood', 'Win !first for the very first time.', '🩸', 'bronze', 12, 1, '2026-03-04T10:00:00.000Z'),
+        a('first.champion1', 'Champion I', 'Win !first 10 times.', '🏆', 'bronze', 12, 10, '2026-08-01T10:00:00.000Z'),
+        a('quote.quoted1', 'Quotable I', 'Be quoted for the first time.', '💬', 'bronze', 3, 1, '2026-05-20T10:00:00.000Z'),
+        a('sub.loyal2', 'Loyal II', 'Stay subscribed for 6 months.', '💜', 'silver', 7, 6, '2026-09-01T10:00:00.000Z'),
+        a('first.champion2', 'Champion II', 'Win !first 50 times.', '🏆', 'silver', 12, 50, null),
+        a('bits.supernova', 'Supernova', 'Cheer 10,000 bits in total.', '🌟', 'gold', 1100, 10000, null),
+        a('tenure.foster3', 'Foster Fam III', 'Known to the bot for 2 years.', '🏰', 'gold', 14, 24, null),
+      ];
+      const unlocked = achievements.filter((x) => x.unlocked);
+      return json(200, { achievements, summary: { unlocked: unlocked.length, total: achievements.length } });
+    }
     if (p === '/api/commands') return json(200, { commands });
     if (p === '/api/commands/export') {
       const rows: (string | number)[][] = [['Type', 'Name', 'Response', 'Group', 'Access', 'Enabled', 'Global Cooldown', 'User Cooldown', 'Uses', 'Target', 'Args', 'Created At', 'Updated At']];
@@ -350,9 +369,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         { id: 'first', name: 'First — race results', url: base + '/overlays/first?token=preview-token' },
         { id: 'tts', name: 'TTS — audio source', url: base + '/overlays/tts?token=preview-token' },
         { id: 'chat-stats', name: 'Chat activity — stats', url: base + '/overlays/chat-stats?token=preview-token' },
+        { id: 'achievement', name: 'Achievement — unlock pop', url: base + '/overlays/achievement?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
+    if (p === '/api/admin/achievements') {
+      // Real catalog so the preview stays in sync; holders are faked.
+      const achievements = ACHIEVEMENTS.map((d, i) => ({
+        key: d.key, name: d.name, description: d.description, emoji: d.emoji,
+        tier: d.tier, group: d.group, target: d.target, repeatable: !!d.keyFor,
+        holders: (i * 7) % 23,
+      }));
+      return json(200, { achievements, totals: { catalog: achievements.length, awarded: achievements.reduce((n, a) => n + a.holders, 0) } });
+    }
     if (p === '/api/admin/tts') return json(200, {
       configured: true, muted: previewTtsMuted, voice: previewTtsVoice,
       speakers: { numSpeakers: previewTtsSpeakers.length, speakers: previewTtsSpeakers }, defaults: VOICE_DEFAULTS,
@@ -516,6 +545,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       if (body.voice && typeof body.voice === 'object') Object.assign(previewTtsVoice, body.voice);
       return json(200, { ok: true, muted: previewTtsMuted, voice: previewTtsVoice });
     }
+    if (p === '/api/admin/achievements/simulate') {
+      if (!String(body.key ?? '').trim()) return json(400, { error: 'Pick an achievement.' });
+      return json(200, { ok: true, announced: !!body.announce });
+    }
+    if (p === '/api/admin/achievements/backfill') return json(200, { ok: true, users: 42, granted: 137 });
     if (p === '/api/admin/tts/say') {
       if (previewTtsMuted) return json(409, { error: 'TTS is muted — unmute to test.' });
       if (!String(body.text ?? '').trim()) return json(400, { error: 'Enter something to say.' });

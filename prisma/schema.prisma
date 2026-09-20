@@ -46,6 +46,7 @@ model User {
   quotedIn     Quote[]          @relation("QuotedUser")
   firstStat     FirstStat?
   firstCheckins FirstCheckin[]
+  achievements  UserAchievement[]
 }
 
 /// Cumulative all-time "!first" scoreboard for a user. Only top-10 finishes
@@ -286,6 +287,28 @@ model Setting {
   id    Int    @id @default(autoincrement())
   key   String @unique
   value String
+}
+
+/// An achievement a user has unlocked. Definitions live in CODE
+/// (services/achievementCatalog.ts); only UNLOCKS are persisted here. Progress
+/// is always derived from the underlying tables (FirstStat, Quote, EventLog,
+/// User), so a single evaluator serves live unlocking, the backfill, and the
+/// profile page's progress bars — and re-running any of them is idempotent.
+model UserAchievement {
+  id     Int    @id @default(autoincrement())
+  userId String
+  /// Catalog key, e.g. "first.champion1". A REPEATABLE achievement carries an
+  /// occurrence suffix (e.g. "tenure.anniversary:2") so each occurrence is its
+  /// own row under the unique index below.
+  key    String
+  /// The metric value at the moment it unlocked, snapshotted for display.
+  value  Int?
+  unlockedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key]) // makes granting idempotent
+  @@index([userId])
 }
 
 /// Audit log of notable events (subs, bits, donations, raids...).

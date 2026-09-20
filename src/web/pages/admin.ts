@@ -101,6 +101,7 @@ export function adminPage(): string {
       { id: 'overlays', label: 'Overlays' },
       { id: 'strings', label: 'Text Strings' },
       { id: 'tts', label: 'TTS' },
+      { id: 'achievements', label: 'Achievements' },
     ];
     var section = 'users';
     var users = [];
@@ -387,6 +388,7 @@ export function adminPage(): string {
       else if (section === 'overlays') renderOverlays();
       else if (section === 'strings') renderStrings();
       else if (section === 'tts') renderTts();
+      else if (section === 'achievements') renderAchievements();
       else renderSim();
     }
 
@@ -609,6 +611,72 @@ export function adminPage(): string {
         };
       } catch (e) {
         main.innerHTML = '<h2>Text-to-Speech</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
+      }
+    }
+
+    // ── Achievements: browse the catalog and fire simulated unlocks ─────────────
+    async function renderAchievements() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Browse the catalog and fire test unlocks at the overlay.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Achievements</h2><p class="muted">Loading…</p>';
+      try {
+        var d = await api('GET', '/api/admin/achievements');
+        var list = d.achievements || [];
+        var totals = d.totals || { catalog: 0, awarded: 0 };
+
+        var rows = list.map(function (a) {
+          return '<tr>' +
+            '<td style="font-size:1.3rem; text-align:center">' + esc(a.emoji) + '</td>' +
+            '<td><strong>' + esc(a.name) + '</strong>' + (a.repeatable ? ' <span class="tag">repeatable</span>' : '') +
+              '<div class="muted" style="font-size:.78rem">' + esc(a.description) + '</div>' +
+              '<div class="muted" style="font-size:.75rem"><code>' + esc(a.key) + '</code></div></td>' +
+            '<td>' + esc(pretty(a.group)) + '</td>' +
+            '<td><span class="tag">' + esc(a.tier) + '</span></td>' +
+            '<td style="text-align:right">' + a.holders + '</td>' +
+            '<td style="text-align:right; white-space:nowrap"><button type="button" class="pink" data-sim="' + esc(a.key) + '">Simulate</button></td>' +
+            '</tr>';
+        }).join('');
+
+        main.innerHTML = '<h2>Achievements</h2>' +
+          '<p class="muted">' + totals.catalog + ' in the catalog · ' + totals.awarded + ' awarded so far. ' +
+            'Definitions live in code (<code>achievementCatalog.ts</code>); this page is for inspecting them and testing the overlay.</p>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Simulate an unlock</h3>' +
+            '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Fires a fake unlock so you can position and validate the OBS overlay. Nothing is saved to the database.</p>' +
+            '<div class="rowline" style="gap:.6rem; align-items:center">' +
+              '<label class="muted">Show as</label>' +
+              '<input type="text" id="ach-user" maxlength="40" placeholder="(your display name)" style="flex:1" />' +
+              '<label class="muted" style="display:inline-flex; align-items:center; gap:.4rem; white-space:nowrap">' +
+                '<input type="checkbox" id="ach-announce" /> Also announce in chat</label>' +
+            '</div>' +
+            '<div class="toast" id="ach-toast"></div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><div class="row"><div><strong>Backfill from history</strong>' +
+            '<div class="muted" style="font-size:.82rem">Grant everything users have already earned. Silent and safe to re-run.</div></div>' +
+            '<button type="button" class="pink" id="ach-backfill">Run backfill</button></div></div>' +
+          '<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th></th><th>Achievement</th><th>Group</th><th>Tier</th><th style="text-align:right">Holders</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+        Array.prototype.forEach.call(document.querySelectorAll('[data-sim]'), function (b) {
+          b.onclick = function () {
+            var body = {
+              key: b.getAttribute('data-sim'),
+              user: document.getElementById('ach-user').value.trim(),
+              announce: document.getElementById('ach-announce').checked,
+            };
+            api('POST', '/api/admin/achievements/simulate', body)
+              .then(function (r) { toast('ach-toast', r.announced ? 'Sent to the overlay and chat.' : 'Sent to the overlay.', true); })
+              .catch(function (e) { toast('ach-toast', e.message, false); });
+          };
+        });
+        var bf = document.getElementById('ach-backfill');
+        bf.onclick = function () {
+          bf.disabled = true;
+          toast('ach-toast', 'Backfilling…', true);
+          api('POST', '/api/admin/achievements/backfill', {})
+            .then(function (r) { toast('ach-toast', 'Backfill complete: granted ' + r.granted + ' across ' + r.users + ' users.', true); renderAchievements(); })
+            .catch(function (e) { toast('ach-toast', e.message, false); bf.disabled = false; });
+        };
+      } catch (e) {
+        main.innerHTML = '<h2>Achievements</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
       }
     }
 

@@ -59,6 +59,17 @@ export function eventsPlugin(): Plugin {
         await log(type, userId, amount, meta);
       };
 
+      /**
+       * Re-check achievements AFTER the EventLog row above is written — the
+       * metrics read that row, and bus handlers run concurrently, so evaluating
+       * off the same event could race the write. Fire-and-forget; an anonymous
+       * cheer/gift has no id to attribute.
+       */
+      const evalFor = (userId: string, group: 'sub' | 'bits') => {
+        if (!userId) return;
+        void ctx.achievements.evaluate(userId, group).catch((err) => ctx.logger.error({ err }, 'achievements eval failed'));
+      };
+
       ctx.bus.on('live', async (e) => {
         await say(e.channel, 'live', {});
         await log('live', null, null);
@@ -67,21 +78,25 @@ export function eventsPlugin(): Plugin {
       ctx.bus.on('sub', async (e) => {
         await say(e.channel, 'sub', { user: e.user.displayName, tier: e.tier });
         await logFor('sub', e.user, null, { tier: e.tier });
+        evalFor(e.user.id, 'sub');
       });
 
       ctx.bus.on('resub', async (e) => {
         await say(e.channel, 'resub', { user: e.user.displayName, months: e.months, tier: e.tier });
         await logFor('resub', e.user, e.months, { tier: e.tier });
+        evalFor(e.user.id, 'sub');
       });
 
       ctx.bus.on('subgift', async (e) => {
         await say(e.channel, 'subgift', { gifter: e.gifter.displayName, count: e.count });
         await logFor('subgift', e.gifter, e.count); // gifter.id is '' when anonymous
+        evalFor(e.gifter.id, 'sub');
       });
 
       ctx.bus.on('bits', async (e) => {
         await say(e.channel, 'bits', { user: e.user.displayName, amount: e.amount });
         await logFor('bits', e.user, e.amount); // user.id is '' for anonymous cheers
+        evalFor(e.user.id, 'bits');
       });
 
       ctx.bus.on('raid', async (e) => {

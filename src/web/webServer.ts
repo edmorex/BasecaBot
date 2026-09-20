@@ -13,6 +13,8 @@ import type { TimerService } from '../services/timers.js';
 import type { FirstService } from '../services/first.js';
 import type { TextStringsService } from '../services/textStrings.js';
 import type { TtsService } from '../services/tts.js';
+import type { AchievementService } from '../services/achievements.js';
+import type { WsHub } from './wsHub.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -29,14 +31,15 @@ import { adminPage } from './pages/admin.js';
 import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
+import { achievementOverlayPage } from './pages/overlayAchievement.js';
 
-import { handleLogin, handleCallback, handleLogout, getMe, postDisplayName, postAlias } from './routes/authRoutes.js';
+import { handleLogin, handleCallback, handleLogout, getMe, getMyAchievements, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
 import { getLists, createList, updateList, deleteList, addListEntry, updateListEntry, deleteListEntry, exportLists, importLists } from './routes/listsRoutes.js';
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -79,6 +82,8 @@ export class WebServer {
     readonly first: FirstService,
     readonly text: TextStringsService,
     readonly tts: TtsService,
+    readonly achievements: AchievementService,
+    readonly ws: WsHub,
   ) {}
 
   start(): void {
@@ -140,6 +145,9 @@ export class WebServer {
         case '/overlays/chat-stats':
           // OBS chat-activity stats overlay. Public HTML; inert without ?token=.
           return this.html(res, chatStatsOverlayPage());
+        case '/overlays/achievement':
+          // OBS achievement-unlock pop. Public HTML; inert without ?token=.
+          return this.html(res, achievementOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':
@@ -148,6 +156,8 @@ export class WebServer {
           return handleLogout(this, res);
         case '/api/me':
           return getMe(this, req, res);
+        case '/api/me/achievements':
+          return getMyAchievements(this, req, res);
         case '/api/commands':
           return getCommands(this, res);
         case '/api/commands/export':
@@ -172,6 +182,8 @@ export class WebServer {
           return getAdminStrings(this, req, res);
         case '/api/admin/tts':
           return getAdminTts(this, req, res);
+        case '/api/admin/achievements':
+          return getAdminAchievements(this, req, res);
         case '/api/admin/tts/preview':
           return getAdminTtsPreview(this, req, res, url);
         case '/healthz':
@@ -245,6 +257,10 @@ export class WebServer {
           return postAdminTts(this, req, res);
         case '/api/admin/tts/say':
           return postAdminTtsSay(this, req, res);
+        case '/api/admin/achievements/simulate':
+          return postAdminAchievementSimulate(this, req, res);
+        case '/api/admin/achievements/backfill':
+          return postAdminAchievementBackfill(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }

@@ -24,6 +24,7 @@ describe('events plugin', () => {
     await text.init();
 
     const ctx = {
+      achievements: { evaluate: vi.fn(async () => []) },
       bus,
       chat: { say },
       text,

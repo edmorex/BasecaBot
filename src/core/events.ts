@@ -135,6 +135,25 @@ export interface WsMessageEvent extends BaseEvent {
   payload: unknown;
 }
 
+/**
+ * A user unlocked an achievement. Published by AchievementService so surfacing
+ * (chat announcement, on-stream overlay, future TTS) stays decoupled from the
+ * evaluation engine. Backfilled grants are NOT published.
+ */
+export interface AchievementUnlockedEvent extends BaseEvent {
+  type: 'achievementUnlocked';
+  userId: string;
+  displayName: string;
+  /** Resolved unlock key (may carry an occurrence suffix for repeatables). */
+  key: string;
+  name: string;
+  description: string;
+  emoji: string;
+  tier: string;
+  /** The metric value at unlock time. */
+  value: number;
+}
+
 export type BotEvent =
   | ChatEvent
   | CommandEvent
@@ -147,6 +166,7 @@ export type BotEvent =
   | LiveEvent
   | DonationEvent
   | RedemptionEvent
+  | AchievementUnlockedEvent
   | WsMessageEvent;
 
 export type BotEventType = BotEvent['type'];

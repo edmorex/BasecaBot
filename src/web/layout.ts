@@ -233,7 +233,6 @@ const SHARED_STYLE = /* css */ `
   .copy-btn.copied > svg { color: var(--green); }
   .actions-cell { display: flex; gap: 0.4rem; flex-wrap: nowrap; align-items: center; }
   .col-actions { min-width: 7.5rem; white-space: nowrap; }
-  .grid-perms { display: grid; gap: 0.5rem; }
   .row { display: flex; justify-content: space-between; align-items: center; padding: 0.55rem 0.8rem; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
   .yes { color: var(--green); font-weight: 700; }
   .no { color: var(--off); font-weight: 700; }

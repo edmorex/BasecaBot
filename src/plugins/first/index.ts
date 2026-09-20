@@ -150,6 +150,10 @@ export function firstPlugin(): Plugin {
           if (!result.repeat && result.place <= 10) {
             void broadcastCheckin(streamKey, result.place, result.timeSeconds, e.user);
           }
+          // Re-check !first achievements once the check-in is recorded.
+          if (!result.repeat) {
+            void ctx.achievements.evaluate(e.user.id, 'first').catch((err) => ctx.logger.error({ err }, 'achievements eval failed'));
+          }
         },
 
         subcommands: {

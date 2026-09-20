@@ -174,3 +174,77 @@ export async function simulateEvent(s: WebServer, req: IncomingMessage, res: Ser
   await s.bus.publish(event);
   s.json(res, 200, { ok: true, injected: event.type });
 }
+
+// ── Achievements ──────────────────────────────────────────────────────────────
+
+/** The catalog plus how many users hold each, for the admin management view. */
+export async function getAdminAchievements(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const holders = await s.achievements.holderCounts();
+  const achievements = s.achievements.catalog.map((d) => ({
+    key: d.key,
+    name: d.name,
+    description: d.description,
+    emoji: d.emoji,
+    tier: d.tier,
+    group: d.group,
+    target: d.target,
+    repeatable: !!d.keyFor,
+    holders: holders[d.key] ?? 0,
+  }));
+  s.json(res, 200, {
+    achievements,
+    totals: { catalog: achievements.length, awarded: Object.values(holders).reduce((n, c) => n + c, 0) },
+  });
+}
+
+/**
+ * Fire a FAKE unlock so the OBS overlay can be validated without waiting for a
+ * real one. Nothing is written to the database.
+ *
+ * `announce: false` (default) broadcasts straight to the overlay room — card only,
+ * no chat spam while you're positioning the source. `announce: true` publishes the
+ * real `achievementUnlocked` event instead, exercising the full path (overlay card
+ * AND the chat announcement) exactly as a genuine unlock would.
+ */
+export async function postAdminAchievementSimulate(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const session = s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const key = String(body.key ?? '');
+  const def = s.achievements.catalog.find((d) => d.key === key);
+  if (!def) throw new HttpError(400, `Unknown achievement "${key}".`);
+  const displayName = String(body.user ?? '').trim() || session.user.displayName;
+
+  if (body.announce) {
+    await s.bus.publish({
+      type: 'achievementUnlocked',
+      channel: s.config.twitch.channel,
+      ts: Date.now(),
+      userId: `simulated:${session.user.id}`,
+      displayName,
+      key: def.key,
+      name: def.name,
+      description: def.description,
+      emoji: def.emoji,
+      tier: def.tier,
+      value: def.target,
+    });
+  } else {
+    s.ws.broadcast('achievements', 'unlocked', {
+      user: displayName,
+      key: def.key,
+      emoji: def.emoji,
+      name: def.name,
+      description: def.description,
+      tier: def.tier,
+    });
+  }
+  s.json(res, 200, { ok: true, announced: !!body.announce });
+}
+
+/** Grant everything users' history already satisfies (silent, idempotent). */
+export async function postAdminAchievementBackfill(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const result = await s.achievements.backfillAll();
+  s.json(res, 200, { ok: true, ...result });
+}

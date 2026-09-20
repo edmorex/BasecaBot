@@ -89,6 +89,13 @@ export function quotesPlugin(): Plugin {
               const game = await ctx.stream.game();
               const quote = await svc.add({ user, text, game }, { id: e.user.id, displayName: e.user.displayName });
               await sayText(e.channel, 'added', { quote: formatQuote(quote) });
+              // Both sides can earn: the adder (Scribe) and the person quoted (Quotable).
+              const evalQuote = (id: string | null) => {
+                if (!id) return;
+                void ctx.achievements.evaluate(id, 'quote').catch((err) => ctx.logger.error({ err }, 'achievements eval failed'));
+              };
+              evalQuote(e.user.id);
+              if (quote.userId !== e.user.id) evalQuote(quote.userId);
             },
           },
           remove: {
