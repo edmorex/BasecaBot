@@ -107,7 +107,7 @@ async function collectBuiltins() {
     text: previewText, // real service — plugins register their editable strings here
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
-    floof: { getConfig: () => ({}), setSpawner: noop, randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
+    floof: { getConfig: () => ({}), setSpawner: noop, setWinTester: noop, randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
     points: {},
@@ -573,6 +573,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       return json(200, { ok: true, config: previewFloofConfig });
     }
     if (p === '/api/admin/floof/fire') return json(200, { ok: true });
+    if (p === '/api/admin/floof/test-win') return json(200, { ok: true });
     if (p === '/api/admin/floof/image/delete') {
       const n = String(body.name ?? '');
       const i = previewFloofImages.findIndex((x) => x.name === n);

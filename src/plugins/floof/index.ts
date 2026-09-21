@@ -83,6 +83,26 @@ export function floofPlugin(): Plugin {
     return null;
   };
 
+  /**
+   * Play the win animation without scoring it (admin test button). If no floof is
+   * on screen one is spawned first so there's something to pet; the round is then
+   * closed out silently — no DB write, no chat, no achievement.
+   */
+  const testWin = async (): Promise<string | null> => {
+    if (!round) {
+      const problem = await spawn(true);
+      if (problem) return problem;
+      await new Promise((r) => setTimeout(r, 1200)); // let the fade-in finish
+    }
+    if (round) {
+      clearTimeout(round.despawn);
+      round = null;
+    }
+    ctx.ws.broadcast(ROOM, 'pet', { user: 'Test' });
+    ctx.logger.info('floof: test win (not scored)');
+    return null;
+  };
+
   /** Scheduler heartbeat: spawn when due, enabled, and live. */
   const heartbeat = async () => {
     try {
@@ -197,6 +217,7 @@ export function floofPlugin(): Plugin {
       // Let the admin panel's "Fire now" button drive a spawn (bypasses the
       // enable switch and the live check, so the overlay can be tested anytime).
       ctx.floof.setSpawner(() => spawn(true));
+      ctx.floof.setWinTester(testWin);
       rearm(ctx.floof.getConfig());
       tick = setInterval(() => void heartbeat(), TICK_MS);
     },

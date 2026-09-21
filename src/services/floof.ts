@@ -115,6 +115,8 @@ export class FloofService {
   private config: FloofConfig = { ...FLOOF_DEFAULTS };
   /** Set by the floof plugin; lets the admin panel trigger a spawn on demand. */
   private spawner?: () => Promise<string | null>;
+  /** Set by the floof plugin; plays the win animation without scoring it. */
+  private winTester?: () => Promise<string | null>;
 
   constructor(
     private readonly storage: Storage,
@@ -152,6 +154,21 @@ export class FloofService {
   async requestSpawn(): Promise<string | null> {
     if (!this.spawner) return 'The floof game is not running.';
     return this.spawner();
+  }
+
+  /** Register the plugin's "play the win animation only" hook. */
+  setWinTester(fn: () => Promise<string | null>): void {
+    this.winTester = fn;
+  }
+
+  /**
+   * Play the win animation for testing. Deliberately scores NOTHING — no win is
+   * recorded, no chat announcement, no achievement — so the broadcaster can check
+   * the overlay without polluting the scoreboard.
+   */
+  async requestTestWin(): Promise<string | null> {
+    if (!this.winTester) return 'The floof game is not running.';
+    return this.winTester();
   }
 
   getConfig(): FloofConfig {

@@ -739,7 +739,9 @@ export function adminPage(): string {
           '<div class="card" style="margin:0 0 1rem"><div class="rowline" style="gap:.8rem; align-items:center">' +
             '<button type="button" class="pink" id="floof-save">Save settings</button>' +
             '<button type="button" class="pink" id="floof-fire">Fire a floof now</button>' +
-            '<span class="muted" style="font-size:.8rem">Firing works even when the game is disabled or the stream is offline.</span></div>' +
+            '<button type="button" class="pink" id="floof-testwin">Test win animation</button></div>' +
+            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">Both work even when the game is disabled or the stream is offline. ' +
+            '<strong>Test win</strong> plays the celebration without recording a win, so it never touches the scoreboard.</p>' +
             '<div class="toast" id="floof-toast"></div></div>' +
           '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Floof photos</h3>' +
             '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Square PNGs only (rendered at 128×128). Max ' + Math.floor((d.maxBytes || 0) / 1024 / 1024) + 'MB each.</p>' +
@@ -780,6 +782,11 @@ export function adminPage(): string {
         document.getElementById('floof-fire').onclick = function () {
           api('POST', '/api/admin/floof/fire', {})
             .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        document.getElementById('floof-testwin').onclick = function () {
+          api('POST', '/api/admin/floof/test-win', {})
+            .then(function () { toast('floof-toast', 'Playing the win animation (not scored).', true); })
             .catch(function (e) { toast('floof-toast', e.message, false); });
         };
         document.getElementById('floof-upload').onclick = function () {

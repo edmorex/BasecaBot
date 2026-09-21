@@ -29,23 +29,35 @@ export function floofOverlayPage(): string {
   #floof img{ width:128px; height:128px; display:block; border-radius:12px;
     filter:drop-shadow(0 4px 10px rgba(0,0,0,.55)); }
   #floof.in{ opacity:1; }
-  /* Pink bloom once pet, then the heart takes over. */
-  #floof.pet img{ animation:bloom 1s ease forwards; }
+  /* ── Win sequence: bloom -> burst ring -> a heart that lingers and pulses ── */
+  #floof.pet img{ animation:bloom 1.2s cubic-bezier(.2,.8,.3,1) forwards; }
   @keyframes bloom{
-    0%{ filter:drop-shadow(0 4px 10px rgba(0,0,0,.55)); }
-    45%{ filter:drop-shadow(0 0 26px #ff6ec7) drop-shadow(0 0 60px #ff6ec7) brightness(1.35); }
-    100%{ filter:drop-shadow(0 0 40px #ff6ec7) brightness(1.6); opacity:0; }
+    0%{ transform:scale(1); filter:drop-shadow(0 4px 10px rgba(0,0,0,.55)); }
+    28%{ transform:scale(1.2); filter:drop-shadow(0 0 30px #ff6ec7) drop-shadow(0 0 70px #ff6ec7) brightness(1.5); }
+    62%{ transform:scale(1.28); filter:drop-shadow(0 0 55px #ff8ad4) drop-shadow(0 0 120px #ff6ec7) brightness(2); opacity:1; }
+    100%{ transform:scale(1.5); filter:drop-shadow(0 0 70px #ff8ad4) brightness(2.4); opacity:0; }
   }
-  #heart{ position:absolute; width:128px; height:128px; left:0; top:0; opacity:0;
+  /* Expanding pink shockwave, for a bit of ceremony. */
+  #burst{ position:absolute; left:0; top:0; width:128px; height:128px; border-radius:50%;
+    border:6px solid #ff6ec7; opacity:0; pointer-events:none;
+    box-shadow:0 0 30px #ff6ec7, inset 0 0 30px #ff6ec7; }
+  #burst.go{ animation:burst 1.3s cubic-bezier(.15,.75,.3,1) forwards; }
+  @keyframes burst{
+    0%{ opacity:.95; transform:scale(.45); }
+    100%{ opacity:0; transform:scale(3.6); }
+  }
+  /* Positioned with left/top (NOT transform) so these keyframes can own transform. */
+  #heart{ position:absolute; left:0; top:0; width:128px; height:128px; opacity:0;
     display:flex; align-items:center; justify-content:center; font-size:86px; line-height:1;
-    filter:drop-shadow(0 0 18px #ff6ec7); pointer-events:none; }
-  #heart.go{ animation:heart 2.2s ease forwards; }
-  @keyframes heart{
-    0%{ opacity:0; transform:scale(.4); }
-    25%{ opacity:1; transform:scale(1.15); }
-    45%{ transform:scale(1); }
-    100%{ opacity:0; transform:scale(1.3) translateY(-46px); }
-  }
+    filter:drop-shadow(0 0 22px #ff6ec7) drop-shadow(0 0 48px #ff6ec7); pointer-events:none; }
+  /* Pop in, pulse for 5s, then drift away. */
+  #heart.go{ animation:
+      heartIn .6s cubic-bezier(.2,.9,.25,1.5) forwards,
+      heartPulse 1s ease-in-out .6s 5 both,
+      heartOut .9s ease 5.6s forwards; }
+  @keyframes heartIn{ 0%{ opacity:0; transform:scale(.3) rotate(-12deg); } 100%{ opacity:1; transform:scale(1.1) rotate(0); } }
+  @keyframes heartPulse{ 0%,100%{ opacity:1; transform:scale(1.04); } 50%{ opacity:1; transform:scale(1.3); } }
+  @keyframes heartOut{ 0%{ opacity:1; transform:scale(1.15); } 100%{ opacity:0; transform:scale(1.6) translateY(-70px); } }
   /* Speech bubble shown when the floof has gone unpet for a while. */
   #bubble{ position:absolute; left:0; top:0; opacity:0; transition:opacity .35s ease;
     background:#fff; color:#1a1220; font-weight:800; font-size:22px; white-space:nowrap;
@@ -57,6 +69,7 @@ export function floofOverlayPage(): string {
 </head>
 <body>
   <div id="floof"><img id="floof-img" alt="" /></div>
+  <div id="burst"></div>
   <div id="heart">💖</div>
   <div id="bubble"></div>
 <script>
@@ -74,7 +87,10 @@ export function floofOverlayPage(): string {
   var el = document.getElementById('floof');
   var img = document.getElementById('floof-img');
   var heart = document.getElementById('heart');
+  var burst = document.getElementById('burst');
   var bubble = document.getElementById('bubble');
+  var PET_MS = 7600;   // full win sequence before the stage is torn down
+  var lastTaunt = -1;  // so the bubble never shows the same line twice running
 
   var state = null;         // { x, y, vx, vy, pad } while a floof is on screen
   var raf = null, lastT = 0, idleTimer = null, bubbleTimer = null, paused = false;
@@ -84,6 +100,15 @@ export function floofOverlayPage(): string {
     if(bubbleTimer) clearTimeout(bubbleTimer); bubbleTimer = null;
   }
   function stopLoop(){ if(raf) cancelAnimationFrame(raf); raf = null; }
+
+  /** A random taunt that is never the same as the previous one. */
+  function pickTaunt(){
+    if(TAUNTS.length < 2) return TAUNTS[0] || '';
+    var i;
+    do { i = Math.floor(Math.random() * TAUNTS.length); } while(i === lastTaunt);
+    lastTaunt = i;
+    return TAUNTS[i];
+  }
 
   // Speed slider (1..10) -> pixels/second.
   function pxPerSec(speed){ var s = Math.max(1, Math.min(10, Number(speed) || 5)); return 30 + s * 26; }
@@ -125,7 +150,7 @@ export function floofOverlayPage(): string {
     idleTimer = setTimeout(function(){
       if(!state) return;
       paused = true;                                  // pause mid-drift to "speak"
-      bubble.textContent = TAUNTS[Math.floor(Math.random() * TAUNTS.length)];
+      bubble.textContent = pickTaunt();
       bubble.classList.add('show');
       bubbleTimer = setTimeout(function(){
         bubble.classList.remove('show');
@@ -138,9 +163,17 @@ export function floofOverlayPage(): string {
   function reset(){
     clearTimers(); stopLoop();
     state = null; paused = false; lastT = 0;
-    el.classList.remove('in','pet');
+    // Tear down with the fade DISABLED. The bloom keyframes end on opacity:0 for
+    // the <img>; dropping .pet snaps it back to opaque, and if #floof were still
+    // transitioning its own opacity the floof would visibly pop back for ~0.8s
+    // before disappearing. Killing the transition for this frame avoids that.
+    el.style.transition = 'none';
+    el.classList.remove('in', 'pet');
     bubble.classList.remove('show');
     heart.classList.remove('go');
+    burst.classList.remove('go');
+    void el.offsetWidth;        // flush the change while the transition is off
+    el.style.transition = '';   // restore it for the next spawn's fade-in
   }
 
   function spawn(d){
@@ -169,10 +202,16 @@ export function floofOverlayPage(): string {
     clearTimers();
     paused = true;                 // stop ping-ponging immediately
     bubble.classList.remove('show');
-    el.classList.add('pet');       // pink bloom, then the image fades out
-    heart.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px)';
-    setTimeout(function(){ heart.classList.add('go'); }, 450);
-    setTimeout(reset, 3000);
+
+    // Park the effects over the floof using left/top — the keyframes animate
+    // transform, so setting transform here would be overridden by them.
+    burst.style.left = state.x + 'px'; burst.style.top = state.y + 'px';
+    heart.style.left = state.x + 'px'; heart.style.top = state.y + 'px';
+
+    el.classList.add('pet');                                        // bloom
+    setTimeout(function(){ burst.classList.add('go'); }, 120);      // shockwave
+    setTimeout(function(){ heart.classList.add('go'); }, 700);      // heart: in, pulse 5s, out
+    setTimeout(reset, PET_MS);
   }
 
   function despawn(){

@@ -274,6 +274,18 @@ export async function postAdminFloofFire(s: WebServer, req: IncomingMessage, res
 }
 
 /**
+ * Play the win animation on the overlay WITHOUT scoring it — no win recorded, no
+ * chat announcement, no achievement — so the overlay can be checked without
+ * polluting the scoreboard.
+ */
+export async function postAdminFloofTestWin(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const problem = await s.floof.requestTestWin();
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+/**
  * Upload a floof PNG. The body is the RAW file (no multipart parsing needed:
  * `fetch(url, { body: file })`), with the filename in `?name=`. The service
  * validates it really is a PNG and really is square, from its own IHDR header.
