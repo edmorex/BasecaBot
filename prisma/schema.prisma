@@ -47,6 +47,7 @@ model User {
   firstStat     FirstStat?
   firstCheckins FirstCheckin[]
   achievements  UserAchievement[]
+  floofStat     FloofStat?
 }
 
 /// Cumulative all-time "!first" scoreboard for a user. Only top-10 finishes
@@ -324,4 +325,15 @@ model EventLog {
 
   @@index([type])
   @@index([createdAt])
+}
+
+/// "Pet the Floof" scoreboard: how many times a user was FIRST to `!pet` a floof.
+/// One aggregate row per player (same shape as FirstStat) so wins + ranking are a
+/// single cheap read, and the achievements engine can threshold on `wins`.
+model FloofStat {
+  userId    String    @id
+  wins      Int       @default(0)
+  lastWonAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -11,6 +11,7 @@ import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
+import { floofOverlayPage } from './pages/overlayFloof.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
 import { ACHIEVEMENTS } from '../services/achievementCatalog.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -106,6 +107,8 @@ async function collectBuiltins() {
     text: previewText, // real service — plugins register their editable strings here
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
+    floof: { getConfig: () => ({}), setSpawner: noop, randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
+    stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
     points: {},
     storage: { prisma: {} },
@@ -240,6 +243,16 @@ const previewTtsSpeakers = [
   { id: 2, name: 'Kathleen' },
 ];
 
+// Mock "Pet the Floof" state (exercises the admin panel's settings + gallery).
+const previewFloofConfig: Record<string, unknown> = {
+  enabled: true, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120,
+  speed: 5, padLeft: 0, padRight: 24, padTop: 0, padBottom: 12,
+};
+const previewFloofImages = [
+  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210 },
+  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044 },
+];
+
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
 const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
@@ -335,6 +348,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/overlays/tts') return html(ttsOverlayPage());
     if (p === '/overlays/chat-stats') return html(chatStatsOverlayPage());
     if (p === '/overlays/achievement') return html(achievementOverlayPage());
+    if (p === '/overlays/floof') return html(floofOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/me/achievements') {
@@ -370,9 +384,18 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         { id: 'tts', name: 'TTS — audio source', url: base + '/overlays/tts?token=preview-token' },
         { id: 'chat-stats', name: 'Chat activity — stats', url: base + '/overlays/chat-stats?token=preview-token' },
         { id: 'achievement', name: 'Achievement — unlock pop', url: base + '/overlays/achievement?token=preview-token' },
+        { id: 'floof', name: 'Pet the Floof — 1600×200, bottom-right', url: base + '/overlays/floof?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
+    if (p === '/api/admin/floof') {
+      return json(200, {
+        config: previewFloofConfig,
+        defaults: { enabled: false, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120, speed: 5, padLeft: 0, padRight: 0, padTop: 0, padBottom: 0 },
+        images: previewFloofImages,
+        maxBytes: 2 * 1024 * 1024,
+      });
+    }
     if (p === '/api/admin/achievements') {
       // Real catalog so the preview stays in sync; holders are faked.
       const achievements = ACHIEVEMENTS.map((d, i) => ({
@@ -544,6 +567,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       if ('muted' in body) previewTtsMuted = !!body.muted;
       if (body.voice && typeof body.voice === 'object') Object.assign(previewTtsVoice, body.voice);
       return json(200, { ok: true, muted: previewTtsMuted, voice: previewTtsVoice });
+    }
+    if (p === '/api/admin/floof') {
+      Object.assign(previewFloofConfig, (body.config ?? body) as Record<string, unknown>);
+      return json(200, { ok: true, config: previewFloofConfig });
+    }
+    if (p === '/api/admin/floof/fire') return json(200, { ok: true });
+    if (p === '/api/admin/floof/image/delete') {
+      const n = String(body.name ?? '');
+      const i = previewFloofImages.findIndex((x) => x.name === n);
+      if (i >= 0) previewFloofImages.splice(i, 1);
+      return json(200, { ok: true });
     }
     if (p === '/api/admin/achievements/simulate') {
       if (!String(body.key ?? '').trim()) return json(400, { error: 'Pick an achievement.' });

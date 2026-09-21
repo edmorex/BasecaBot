@@ -15,6 +15,7 @@ import type { TextStringsService } from '../services/textStrings.js';
 import type { TtsService } from '../services/tts.js';
 import type { AchievementService } from '../services/achievements.js';
 import type { WsHub } from './wsHub.js';
+import type { FloofService } from '../services/floof.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -32,6 +33,7 @@ import { firstOverlayPage } from './pages/overlayFirst.js';
 import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
+import { floofOverlayPage } from './pages/overlayFloof.js';
 
 import { handleLogin, handleCallback, handleLogout, getMe, getMyAchievements, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
@@ -39,11 +41,14 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofImage, postAdminFloofImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
+
+/** Subdirectories of public/assets that may be served (uploads live here). */
+const ASSET_SUBDIRS = new Set(['floofs']);
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -84,6 +89,7 @@ export class WebServer {
     readonly tts: TtsService,
     readonly achievements: AchievementService,
     readonly ws: WsHub,
+    readonly floof: FloofService,
   ) {}
 
   start(): void {
@@ -148,6 +154,9 @@ export class WebServer {
         case '/overlays/achievement':
           // OBS achievement-unlock pop. Public HTML; inert without ?token=.
           return this.html(res, achievementOverlayPage());
+        case '/overlays/floof':
+          // OBS "Pet the Floof" strip. Public HTML; inert without ?token=.
+          return this.html(res, floofOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':
@@ -184,6 +193,8 @@ export class WebServer {
           return getAdminTts(this, req, res);
         case '/api/admin/achievements':
           return getAdminAchievements(this, req, res);
+        case '/api/admin/floof':
+          return getAdminFloof(this, req, res);
         case '/api/admin/tts/preview':
           return getAdminTtsPreview(this, req, res, url);
         case '/healthz':
@@ -261,6 +272,14 @@ export class WebServer {
           return postAdminAchievementSimulate(this, req, res);
         case '/api/admin/achievements/backfill':
           return postAdminAchievementBackfill(this, req, res);
+        case '/api/admin/floof':
+          return postAdminFloof(this, req, res);
+        case '/api/admin/floof/fire':
+          return postAdminFloofFire(this, req, res);
+        case '/api/admin/floof/image':
+          return postAdminFloofImage(this, req, res, url);
+        case '/api/admin/floof/image/delete':
+          return postAdminFloofImageDelete(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }
@@ -428,13 +447,18 @@ export class WebServer {
   // ── Response helpers ──────────────────────────────────────────────────────────
 
   async serveAsset(res: ServerResponse, pathname: string): Promise<void> {
-    const name = pathname.slice('/assets/'.length);
-    if (!/^[a-zA-Z0-9._-]+$/.test(name)) return this.send(res, 404, 'text/plain', 'Not Found');
+    const rest = pathname.slice('/assets/'.length);
+    // Flat files, plus ONE allow-listed subdirectory (uploaded floof images).
+    // Each segment is charset-checked, so no traversal can slip through.
+    const segments = rest.split('/');
+    const sub = segments.length === 2 && ASSET_SUBDIRS.has(segments[0]!) ? segments[0]! : '';
+    const name = segments.length === 1 ? segments[0]! : sub ? segments[1]! : '';
+    if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) return this.send(res, 404, 'text/plain', 'Not Found');
     const ext = path.extname(name).toLowerCase();
     const type = ASSET_TYPES[ext];
     if (!type) return this.send(res, 404, 'text/plain', 'Not Found');
     try {
-      const data = await readFile(path.join(PUBLIC_DIR, 'assets', name));
+      const data = await readFile(path.join(PUBLIC_DIR, 'assets', sub, name));
       res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=3600' });
       res.end(data);
     } catch {

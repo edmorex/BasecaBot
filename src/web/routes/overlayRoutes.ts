@@ -31,6 +31,7 @@ export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: 
           { id: 'tts', name: 'TTS — audio source', url: `${base}/overlays/tts?token=${encodeURIComponent(token)}` },
           { id: 'chat-stats', name: 'Chat activity — stats', url: `${base}/overlays/chat-stats?token=${encodeURIComponent(token)}` },
           { id: 'achievement', name: 'Achievement — unlock pop', url: `${base}/overlays/achievement?token=${encodeURIComponent(token)}` },
+          { id: 'floof', name: 'Pet the Floof — 1600×200, bottom-right', url: `${base}/overlays/floof?token=${encodeURIComponent(token)}` },
         ]
       : [],
   });

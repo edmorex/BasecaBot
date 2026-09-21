@@ -3,8 +3,8 @@ import type { Storage } from './storage/index.js';
 type Db = Storage['prisma'];
 
 /** Which activity re-evaluates a group of achievements. */
-export type TriggerGroup = 'first' | 'quote' | 'sub' | 'bits' | 'daily';
-export const TRIGGER_GROUPS: TriggerGroup[] = ['first', 'quote', 'sub', 'bits', 'daily'];
+export type TriggerGroup = 'first' | 'quote' | 'sub' | 'bits' | 'daily' | 'floof';
+export const TRIGGER_GROUPS: TriggerGroup[] = ['first', 'quote', 'sub', 'bits', 'daily', 'floof'];
 
 export type Tier = 'bronze' | 'silver' | 'gold';
 
@@ -55,6 +55,10 @@ export const METRICS: Record<string, MetricFn> = {
   'bits.cheers': async (db, userId) => db.eventLog.count({ where: { userId, type: 'bits' } }),
   'bits.total': async (db, userId) =>
     (await db.eventLog.aggregate({ where: { userId, type: 'bits' }, _sum: { amount: true } }))._sum.amount ?? 0,
+
+  // ── Pet the Floof ─────────────────────────────────────────────────────────
+  'floof.wins': async (db, userId) =>
+    (await db.floofStat.findUnique({ where: { userId }, select: { wins: true } }))?.wins ?? 0,
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   'tenure.months': async (db, userId, now) =>
@@ -124,6 +128,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: 'bits.sparkler', name: 'Sparkler', description: 'Cheer 100 bits in total.', emoji: '🎆', tier: 'bronze', group: 'bits', metric: 'bits.total', target: 100 },
   { key: 'bits.fireworks', name: 'Fireworks', description: 'Cheer 1,000 bits in total.', emoji: '🎇', tier: 'silver', group: 'bits', metric: 'bits.total', target: 1000 },
   { key: 'bits.supernova', name: 'Supernova', description: 'Cheer 10,000 bits in total.', emoji: '🌟', tier: 'gold', group: 'bits', metric: 'bits.total', target: 10000 },
+
+  // ── Pet the Floof ─────────────────────────────────────────────────────────
+  { key: 'floof.friend1', name: 'Floof Friend I', description: 'Be the first to !pet a floof.', emoji: '🐾', tier: 'bronze', group: 'floof', metric: 'floof.wins', target: 1 },
+  { key: 'floof.friend2', name: 'Floof Friend II', description: 'Win Pet the Floof 10 times.', emoji: '🐱', tier: 'silver', group: 'floof', metric: 'floof.wins', target: 10 },
+  { key: 'floof.friend3', name: 'Floof Friend III', description: 'Win Pet the Floof 50 times.', emoji: '💖', tier: 'gold', group: 'floof', metric: 'floof.wins', target: 50 },
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   { key: 'tenure.foster1', name: 'Foster Fam I', description: 'Known to the bot for 6 months.', emoji: '🏡', tier: 'bronze', group: 'daily', metric: 'tenure.months', target: 6 },

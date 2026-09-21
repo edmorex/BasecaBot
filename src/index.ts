@@ -16,6 +16,7 @@ import { TextStringsService } from './services/textStrings.js';
 import { TtsService } from './services/tts.js';
 import { GuestChannelService } from './services/guestChannels.js';
 import { AchievementService } from './services/achievements.js';
+import { FloofService } from './services/floof.js';
 import { StreamService } from './services/stream.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
@@ -80,6 +81,8 @@ async function main(): Promise<void> {
   // guest traffic; plugins register their guest-capable features in init().
   const guests = new GuestChannelService(config, chat, text, scopedLogger('guests'));
   const achievements = new AchievementService(storage, bus, config, scopedLogger('achievements'));
+  const floof = new FloofService(storage, scopedLogger('floof'));
+  await floof.init(); // load persisted settings + ensure the image directory
   chatAdapter.setGuestPolicy(guests);
   commands.setGuestPolicy(guests);
 
@@ -102,7 +105,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text, tts, achievements, ws);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text, tts, achievements, ws, floof);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -121,6 +124,7 @@ async function main(): Promise<void> {
     tts,
     guests,
     achievements,
+    floof,
     stream,
     storage,
     ws,

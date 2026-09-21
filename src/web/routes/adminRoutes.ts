@@ -5,6 +5,7 @@ import type { WebServer } from '../webServer.js';
 import { HttpError, LEVEL_LABELS } from '../httpShared.js';
 import { AliasError } from '../../services/users.js';
 import type { VoiceParams } from '../../services/tts.js';
+import { FloofError, MAX_IMAGE_BYTES, type FloofConfig } from '../../services/floof.js';
 import { PermissionLevel } from '../../core/events.js';
 import { buildSimEvent, isSimEventType } from '../../services/eventSimulator.js';
 
@@ -247,4 +248,64 @@ export async function postAdminAchievementBackfill(s: WebServer, req: IncomingMe
   s.requireAdmin(req);
   const result = await s.achievements.backfillAll();
   s.json(res, 200, { ok: true, ...result });
+}
+
+// ── Pet the Floof ─────────────────────────────────────────────────────────────
+
+export async function getAdminFloof(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const [images] = await Promise.all([s.floof.listImages()]);
+  s.json(res, 200, { config: s.floof.getConfig(), defaults: s.floof.defaults, images, maxBytes: MAX_IMAGE_BYTES });
+}
+
+export async function postAdminFloof(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const config = await s.floof.setConfig((body.config ?? body) as Partial<FloofConfig>);
+  s.json(res, 200, { ok: true, config });
+}
+
+/** Spawn a floof right now — bypasses the enable switch AND the live check. */
+export async function postAdminFloofFire(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const problem = await s.floof.requestSpawn();
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+/**
+ * Upload a floof PNG. The body is the RAW file (no multipart parsing needed:
+ * `fetch(url, { body: file })`), with the filename in `?name=`. The service
+ * validates it really is a PNG and really is square, from its own IHDR header.
+ */
+export async function postAdminFloofImage(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  s.requireAdmin(req);
+  const name = url.searchParams.get('name') ?? 'floof.png';
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > MAX_IMAGE_BYTES) throw new HttpError(413, `Image is too large (max ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB).`);
+    chunks.push(buf);
+  }
+  try {
+    const image = await s.floof.saveImage(name, Buffer.concat(chunks));
+    s.json(res, 200, { ok: true, image });
+  } catch (e) {
+    if (e instanceof FloofError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+export async function postAdminFloofImageDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    await s.floof.deleteImage(String(body.name ?? ''));
+    s.json(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof FloofError) throw new HttpError(400, e.message);
+    throw e;
+  }
 }

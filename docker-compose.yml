@@ -32,6 +32,11 @@ services:
       # the host paths as-is. Comment this out to disable TTS. See
       # docs/text-to-speech.md.
       - /opt/piper:/opt/piper:ro
+      # "Pet the Floof" photos uploaded from the admin panel. public/ is baked
+      # into the image, so without this bind mount every upload would be wiped on
+      # `up --build`. Create it once on the host: mkdir -p /opt/floofs
+      # See docs/pet-the-floof.md.
+      - /opt/floofs:/app/public/assets/floofs
     expose:
       - '8080' # WebSocket hub — reached by the edge Caddy over the `edge` network
       - '8090' # HTTP server (dashboard + OAuth + API) — also via the edge Caddy

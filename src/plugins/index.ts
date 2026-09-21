@@ -8,6 +8,7 @@ import { basecaWheelPlugin } from './basecaWheel/index.js';
 import { guestsPlugin } from './guests/index.js';
 import { chatStatsPlugin } from './chatStats/index.js';
 import { achievementsPlugin } from './achievements/index.js';
+import { floofPlugin } from './floof/index.js';
 import { firstPlugin } from './first/index.js';
 import { timersPlugin } from './timers/index.js';
 
@@ -26,6 +27,7 @@ export const pluginRegistry: PluginFactory[] = [
   guestsPlugin,
   chatStatsPlugin,
   achievementsPlugin,
+  floofPlugin,
   firstPlugin,
   timersPlugin,
 ];

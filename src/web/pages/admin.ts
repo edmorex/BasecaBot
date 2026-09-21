@@ -102,6 +102,7 @@ export function adminPage(): string {
       { id: 'strings', label: 'Text Strings' },
       { id: 'tts', label: 'TTS' },
       { id: 'achievements', label: 'Achievements' },
+      { id: 'floof', label: 'Pet the Floof' },
     ];
     var section = 'users';
     var users = [];
@@ -389,6 +390,7 @@ export function adminPage(): string {
       else if (section === 'strings') renderStrings();
       else if (section === 'tts') renderTts();
       else if (section === 'achievements') renderAchievements();
+      else if (section === 'floof') renderFloof();
       else renderSim();
     }
 
@@ -677,6 +679,131 @@ export function adminPage(): string {
         };
       } catch (e) {
         main.innerHTML = '<h2>Achievements</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
+      }
+    }
+
+    // ── Pet the Floof: settings, manual trigger, and the image library ──────────
+    var FLOOF_NUM = [
+      { key: 'baseSeconds', label: 'Base timer', hint: 'seconds between floofs', min: 10, max: 86400, step: 10 },
+      { key: 'randomSeconds', label: 'Random extra', hint: 'up to this many more seconds', min: 0, max: 86400, step: 10 },
+      { key: 'despawnSeconds', label: 'Despawn after', hint: 'seconds before an un-pet floof gives up', min: 5, max: 3600, step: 5 }
+    ];
+    var FLOOF_PAD = [
+      { key: 'padLeft', label: 'Left' }, { key: 'padRight', label: 'Right' },
+      { key: 'padTop', label: 'Top' }, { key: 'padBottom', label: 'Bottom' }
+    ];
+
+    async function renderFloof() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Pet the Floof — timing, movement, and the floof photo library.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Pet the Floof</h2><p class="muted">Loading…</p>';
+      try {
+        var d = await api('GET', '/api/admin/floof');
+        var c = d.config || {};
+        var imgs = d.images || [];
+
+        var nums = FLOOF_NUM.map(function (f) {
+          return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
+            '<label style="flex:0 0 11rem">' + esc(f.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(f.hint) + ')</span></label>' +
+            '<input type="number" data-fcfg="' + f.key + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:9rem" /></div>';
+        }).join('');
+        var pads = FLOOF_PAD.map(function (f) {
+          return '<div style="display:flex; flex-direction:column; gap:.2rem">' +
+            '<label class="muted" style="font-size:.8rem">' + esc(f.label) + '</label>' +
+            '<input type="number" data-fcfg="' + f.key + '" min="0" max="800" step="1" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:100%" /></div>';
+        }).join('');
+        var gallery = imgs.length
+          ? imgs.map(function (im) {
+              return '<div class="floof-card">' +
+                '<img src="' + esc(im.url) + '" alt="' + esc(im.name) + '" />' +
+                '<div class="muted" style="font-size:.74rem; word-break:break-all">' + esc(im.name) + '</div>' +
+                '<button type="button" class="danger" data-fdel="' + esc(im.name) + '">Delete</button></div>';
+            }).join('')
+          : '<span class="muted">No floofs uploaded yet. Add a square PNG to get started.</span>';
+
+        main.innerHTML = '<h2>Pet the Floof</h2>' +
+          '<p class="muted">A floof drifts across the overlay and the first chatter to type <code>!pet</code> wins. Add the <strong>Pet the Floof</strong> overlay (1600×200, bottom-right) from the Overlays section.</p>' +
+          '<div class="card" style="margin:0 0 1rem"><div class="row"><div><strong>Enable the game</strong>' +
+            '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div>' +
+            '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Timing</h3>' + nums +
+            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">With the defaults a floof appears every 16–24 minutes.</p></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Movement</h3>' +
+            '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
+              '<label style="flex:0 0 11rem">Speed <span class="muted" style="font-size:.76rem">(1 slow – 10 fast)</span></label>' +
+              '<input type="range" data-fcfg="speed" min="1" max="10" step="1" value="' + (c.speed != null ? c.speed : 5) + '" style="flex:1; accent-color:var(--pink)">' +
+              '<span class="muted" id="floof-speed-val" style="flex:0 0 2em; text-align:right"></span></div>' +
+            '<h4 style="margin:.9rem 0 .3rem; font-size:.9rem">Edge padding <span class="muted" style="font-weight:400; font-size:.78rem">(pixels kept clear so the floof never clips an edge)</span></h4>' +
+            '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem">' + pads + '</div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><div class="rowline" style="gap:.8rem; align-items:center">' +
+            '<button type="button" class="pink" id="floof-save">Save settings</button>' +
+            '<button type="button" class="pink" id="floof-fire">Fire a floof now</button>' +
+            '<span class="muted" style="font-size:.8rem">Firing works even when the game is disabled or the stream is offline.</span></div>' +
+            '<div class="toast" id="floof-toast"></div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Floof photos</h3>' +
+            '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Square PNGs only (rendered at 128×128). Max ' + Math.floor((d.maxBytes || 0) / 1024 / 1024) + 'MB each.</p>' +
+            '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="floof-file" accept="image/png" />' +
+            '<button type="button" class="pink" id="floof-upload">Upload</button></div>' +
+            '<div class="floof-grid" style="margin-top:.9rem">' + gallery + '</div></div>';
+
+        // Inject the gallery styles once.
+        if (!document.getElementById('floof-css')) {
+          var st = document.createElement('style'); st.id = 'floof-css';
+          st.textContent = '.floof-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(8rem,1fr));gap:.7rem}'
+            + '.floof-card{display:flex;flex-direction:column;gap:.35rem;align-items:center;background:var(--bg);'
+            + 'border:1px solid var(--border);border-radius:10px;padding:.6rem}'
+            + '.floof-card img{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#0008}';
+          document.head.appendChild(st);
+        }
+
+        function showSpeed() {
+          var r = document.querySelector('[data-fcfg="speed"]');
+          document.getElementById('floof-speed-val').textContent = r ? r.value : '';
+        }
+        showSpeed();
+        var sp = document.querySelector('[data-fcfg="speed"]');
+        if (sp) sp.oninput = showSpeed;
+
+        function collect() {
+          var out = { enabled: document.getElementById('floof-enabled').checked };
+          Array.prototype.forEach.call(document.querySelectorAll('[data-fcfg]'), function (i) {
+            out[i.getAttribute('data-fcfg')] = Number(i.value);
+          });
+          return out;
+        }
+        document.getElementById('floof-save').onclick = function () {
+          api('POST', '/api/admin/floof', { config: collect() })
+            .then(function () { toast('floof-toast', 'Settings saved.', true); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        document.getElementById('floof-fire').onclick = function () {
+          api('POST', '/api/admin/floof/fire', {})
+            .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        document.getElementById('floof-upload').onclick = function () {
+          var inp = document.getElementById('floof-file');
+          var file = inp.files && inp.files[0];
+          if (!file) { toast('floof-toast', 'Choose a PNG first.', false); return; }
+          // Raw binary body — no multipart parsing needed on the server.
+          fetch('/api/admin/floof/image?name=' + encodeURIComponent(file.name), {
+            method: 'POST', credentials: 'same-origin', body: file
+          }).then(function (r) {
+            if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
+            return r.json();
+          }).then(function () { toast('floof-toast', 'Uploaded.', true); renderFloof(); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        Array.prototype.forEach.call(document.querySelectorAll('[data-fdel]'), function (b) {
+          b.onclick = function () {
+            api('POST', '/api/admin/floof/image/delete', { name: b.getAttribute('data-fdel') })
+              .then(function () { toast('floof-toast', 'Deleted.', true); renderFloof(); })
+              .catch(function (e) { toast('floof-toast', e.message, false); });
+          };
+        });
+      } catch (e) {
+        main.innerHTML = '<h2>Pet the Floof</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
       }
     }
 
