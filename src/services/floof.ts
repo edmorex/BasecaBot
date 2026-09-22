@@ -22,6 +22,12 @@ export interface FloofConfig {
   despawnSeconds: number;
   /** Animation speed, 1 (slow) … 10 (fast). */
   speed: number;
+  /** Boss battle: how many chatters must !pet to defeat it. */
+  bossPets: number;
+  /** Boss battle: percent chance a scheduled spawn is a boss instead. */
+  bossChance: number;
+  /** Boss battle: seconds before the boss escapes (usually longer than normal). */
+  bossDespawnSeconds: number;
   padLeft: number;
   padRight: number;
   padTop: number;
@@ -34,6 +40,9 @@ export const FLOOF_DEFAULTS: FloofConfig = {
   randomSeconds: 480, // + up to 8 min
   despawnSeconds: 120,
   speed: 5,
+  bossPets: 20,
+  bossChance: 10,
+  bossDespawnSeconds: 180,
   padLeft: 0,
   padRight: 0,
   padTop: 0,
@@ -46,6 +55,9 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
   randomSeconds: [0, 86400],
   despawnSeconds: [5, 3600],
   speed: [1, 10],
+  bossPets: [1, 500],
+  bossChance: [0, 100],
+  bossDespawnSeconds: [10, 3600],
   padLeft: [0, 800],
   padRight: [0, 800],
   padTop: [0, 200],
@@ -59,6 +71,9 @@ export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
   random: 'randomSeconds',
   despawn: 'despawnSeconds',
   speed: 'speed',
+  'boss-pets': 'bossPets',
+  'boss-chance': 'bossChance',
+  'boss-despawn': 'bossDespawnSeconds',
   'pad-left': 'padLeft',
   'pad-right': 'padRight',
   'pad-top': 'padTop',
@@ -69,7 +84,12 @@ export interface FloofImage {
   name: string;
   url: string;
   bytes: number;
+  /** True when this photo is reserved for Boss Floof battles. */
+  boss: boolean;
 }
+
+/** The taunts shipped out of the box; the admin panel can edit the list freely. */
+export const DEFAULT_TAUNTS = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
 
 export interface FloofStatView {
   wins: number;
@@ -113,10 +133,16 @@ export function safeImageName(raw: string): string {
  */
 export class FloofService {
   private config: FloofConfig = { ...FLOOF_DEFAULTS };
+  private taunts: string[] = [...DEFAULT_TAUNTS];
+  /** Image filenames flagged as Boss-only (stored as a Setting, not a directory,
+   *  so bosses share the one bind-mounted folder). */
+  private bossImages = new Set<string>();
   /** Set by the floof plugin; lets the admin panel trigger a spawn on demand. */
   private spawner?: () => Promise<string | null>;
-  /** Set by the floof plugin; plays the win animation without scoring it. */
-  private winTester?: () => Promise<string | null>;
+  /** Set by the floof plugin; stands in for a chatter's !pet without scoring it. */
+  private petSimulator?: () => Promise<string | null>;
+  /** Set by the floof plugin; spawns a Boss Floof battle on demand. */
+  private bossSpawner?: () => Promise<string | null>;
 
   constructor(
     private readonly storage: Storage,
@@ -130,8 +156,20 @@ export class FloofService {
   /** Load persisted settings and make sure the image directory exists. */
   async init(): Promise<void> {
     try {
-      const row = await this.db.setting.findUnique({ where: { key: 'floof.config' } });
-      if (row) this.config = this.clamp({ ...FLOOF_DEFAULTS, ...(safeJson(row.value) as Partial<FloofConfig>) });
+      const rows = await this.db.setting.findMany({
+        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.bossImages'] } },
+      });
+      for (const row of rows) {
+        if (row.key === 'floof.config') {
+          this.config = this.clamp({ ...FLOOF_DEFAULTS, ...(safeJson(row.value) as Partial<FloofConfig>) });
+        } else if (row.key === 'floof.taunts') {
+          const list = safeJson(row.value);
+          if (Array.isArray(list)) this.taunts = cleanTaunts(list as unknown[]);
+        } else if (row.key === 'floof.bossImages') {
+          const list = safeJson(row.value);
+          if (Array.isArray(list)) this.bossImages = new Set((list as unknown[]).map(String));
+        }
+      }
     } catch (err) {
       this.logger.warn({ err }, 'floof: could not load settings');
     }
@@ -156,19 +194,31 @@ export class FloofService {
     return this.spawner();
   }
 
-  /** Register the plugin's "play the win animation only" hook. */
-  setWinTester(fn: () => Promise<string | null>): void {
-    this.winTester = fn;
+  /** Register the plugin's boss-spawn hook. */
+  setBossSpawner(fn: () => Promise<string | null>): void {
+    this.bossSpawner = fn;
+  }
+
+  /** Start a Boss Floof battle now. Resolves to an error message, or null. */
+  async requestBossSpawn(): Promise<string | null> {
+    if (!this.bossSpawner) return 'The floof game is not running.';
+    return this.bossSpawner();
+  }
+
+  /** Register the plugin's simulated-`!pet` hook. */
+  setPetSimulator(fn: () => Promise<string | null>): void {
+    this.petSimulator = fn;
   }
 
   /**
-   * Play the win animation for testing. Deliberately scores NOTHING — no win is
-   * recorded, no chat announcement, no achievement — so the broadcaster can check
-   * the overlay without polluting the scoreboard.
+   * Stand in for a chatter typing `!pet`, for testing. Scores NOTHING — no win
+   * recorded, no chat announcement, no achievement — so the broadcaster can step
+   * through a boss battle or trigger the win animation without polluting the
+   * scoreboard.
    */
-  async requestTestWin(): Promise<string | null> {
-    if (!this.winTester) return 'The floof game is not running.';
-    return this.winTester();
+  async requestSimulatedPet(): Promise<string | null> {
+    if (!this.petSimulator) return 'The floof game is not running.';
+    return this.petSimulator();
   }
 
   getConfig(): FloofConfig {
@@ -182,12 +232,12 @@ export class FloofService {
   /** Merge + clamp a partial update, persist it, and return the new config. */
   async setConfig(partial: Partial<FloofConfig>): Promise<FloofConfig> {
     this.config = this.clamp({ ...this.config, ...partial });
-    await this.db.setting.upsert({
-      where: { key: 'floof.config' },
-      create: { key: 'floof.config', value: JSON.stringify(this.config) },
-      update: { value: JSON.stringify(this.config) },
-    });
+    await this.saveSetting('floof.config', JSON.stringify(this.config));
     return this.getConfig();
+  }
+
+  private async saveSetting(key: string, value: string): Promise<void> {
+    await this.db.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
   }
 
   private clamp(c: FloofConfig): FloofConfig {
@@ -202,6 +252,9 @@ export class FloofService {
       randomSeconds: n(c.randomSeconds, 'randomSeconds', FLOOF_DEFAULTS.randomSeconds),
       despawnSeconds: n(c.despawnSeconds, 'despawnSeconds', FLOOF_DEFAULTS.despawnSeconds),
       speed: n(c.speed, 'speed', FLOOF_DEFAULTS.speed),
+      bossPets: n(c.bossPets, 'bossPets', FLOOF_DEFAULTS.bossPets),
+      bossChance: n(c.bossChance, 'bossChance', FLOOF_DEFAULTS.bossChance),
+      bossDespawnSeconds: n(c.bossDespawnSeconds, 'bossDespawnSeconds', FLOOF_DEFAULTS.bossDespawnSeconds),
       padLeft: n(c.padLeft, 'padLeft', 0),
       padRight: n(c.padRight, 'padRight', 0),
       padTop: n(c.padTop, 'padTop', 0),
@@ -209,7 +262,46 @@ export class FloofService {
     };
   }
 
+  // ── Taunts ──────────────────────────────────────────────────────────────────
+
+  /** The speech-bubble lines the overlay picks from. Never empty. */
+  getTaunts(): string[] {
+    return this.taunts.length ? [...this.taunts] : [...DEFAULT_TAUNTS];
+  }
+
+  /** Replace the whole list (trimmed, de-duplicated, capped). */
+  async setTaunts(list: unknown[]): Promise<string[]> {
+    this.taunts = cleanTaunts(list);
+    await this.saveSetting('floof.taunts', JSON.stringify(this.taunts));
+    return this.getTaunts();
+  }
+
+  async addTaunt(text: string): Promise<string[]> {
+    const line = String(text ?? '').trim();
+    if (!line) throw new FloofError('Enter a taunt first.');
+    if (this.taunts.some((t) => t.toLowerCase() === line.toLowerCase())) throw new FloofError('That taunt is already in the list.');
+    return this.setTaunts([...this.taunts, line]);
+  }
+
+  async removeTaunt(text: string): Promise<string[]> {
+    const line = String(text ?? '').trim().toLowerCase();
+    return this.setTaunts(this.taunts.filter((t) => t.toLowerCase() !== line));
+  }
+
   // ── Image library ───────────────────────────────────────────────────────────
+
+  /** Whether an image is reserved for Boss Floof battles. */
+  isBossImage(name: string): boolean {
+    return this.bossImages.has(safeImageName(name));
+  }
+
+  /** Flag/unflag an image as boss-only. */
+  async setBossImage(name: string, boss: boolean): Promise<void> {
+    const key = safeImageName(name);
+    if (boss) this.bossImages.add(key);
+    else this.bossImages.delete(key);
+    await this.saveSetting('floof.bossImages', JSON.stringify([...this.bossImages]));
+  }
 
   /** Every PNG currently available to the game. */
   async listImages(): Promise<FloofImage[]> {
@@ -219,7 +311,7 @@ export class FloofService {
       for (const name of names.sort()) {
         try {
           const buf = await readFile(path.join(FLOOF_DIR, name));
-          out.push({ name, url: FLOOF_URL + name, bytes: buf.length });
+          out.push({ name, url: FLOOF_URL + name, bytes: buf.length, boss: this.bossImages.has(name) });
         } catch {
           // skip unreadable file
         }
@@ -230,10 +322,13 @@ export class FloofService {
     }
   }
 
-  /** One random image, or null when the library is empty. */
-  async randomImage(): Promise<FloofImage | null> {
-    const all = await this.listImages();
-    return all.length ? all[Math.floor(Math.random() * all.length)]! : null;
+  /**
+   * One random image from the requested pool — boss photos are kept separate from
+   * normal ones, so a boss battle never shows an ordinary floof (or vice versa).
+   */
+  async randomImage(boss = false): Promise<FloofImage | null> {
+    const pool = (await this.listImages()).filter((i) => i.boss === boss);
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)]! : null;
   }
 
   /**
@@ -251,7 +346,7 @@ export class FloofService {
     await mkdir(FLOOF_DIR, { recursive: true });
     await writeFile(path.join(FLOOF_DIR, name), buf);
     this.logger.info({ name, bytes: buf.length, size: size.width }, 'floof: image uploaded');
-    return { name, url: FLOOF_URL + name, bytes: buf.length };
+    return { name, url: FLOOF_URL + name, bytes: buf.length, boss: this.bossImages.has(name) };
   }
 
   /** Delete an image by name (path-traversal safe). */
@@ -259,6 +354,7 @@ export class FloofService {
     const name = safeImageName(rawName);
     try {
       await unlink(path.join(FLOOF_DIR, name));
+      if (this.bossImages.delete(name)) await this.saveSetting('floof.bossImages', JSON.stringify([...this.bossImages]));
       this.logger.info({ name }, 'floof: image deleted');
     } catch {
       throw new FloofError(`No image called "${name}".`);
@@ -275,6 +371,27 @@ export class FloofService {
       update: { wins: { increment: 1 }, lastWonAt: new Date() },
     });
     return row.wins;
+  }
+
+  /**
+   * Credit everyone who joined a winning boss battle. Returns how many rows were
+   * touched. Boss wins are counted separately from solo wins.
+   */
+  async recordBossWin(userIds: string[]): Promise<number> {
+    let n = 0;
+    for (const userId of userIds) {
+      try {
+        await this.db.floofStat.upsert({
+          where: { userId },
+          create: { userId, bossWins: 1, lastWonAt: new Date() },
+          update: { bossWins: { increment: 1 }, lastWonAt: new Date() },
+        });
+        n++;
+      } catch (err) {
+        this.logger.error({ err, userId }, 'floof: could not record boss win');
+      }
+    }
+    return n;
   }
 
   /** A player's wins plus their rank among all winners. */
@@ -299,6 +416,17 @@ export class FloofService {
 
 /** A user-facing problem (bad upload, missing image); safe to show in chat/UI. */
 export class FloofError extends Error {}
+
+/** Trim, drop blanks/dupes, and cap the taunt list to something sane. */
+function cleanTaunts(list: unknown[]): string[] {
+  const out: string[] = [];
+  for (const raw of list) {
+    const line = String(raw ?? '').trim().slice(0, 120);
+    if (line && !out.some((t) => t.toLowerCase() === line.toLowerCase())) out.push(line);
+    if (out.length >= 50) break;
+  }
+  return out;
+}
 
 function safeJson(s: string): unknown {
   try {

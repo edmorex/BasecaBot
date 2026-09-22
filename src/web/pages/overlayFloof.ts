@@ -74,6 +74,34 @@ export function floofOverlayPage(): string {
   /* ...and swaps to the bubble's right edge when it sits to the floof's LEFT. */
   #bubble.flip::after{ left:auto; right:-9px; border-right-color:transparent; border-left-color:#fff; }
   #bubble.show{ opacity:1; }
+
+  /* ── Boss battle ───────────────────────────────────────────────────────── */
+  /* Full-width flashing red alert that precedes a boss. */
+  #alert{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    text-align:center; font-weight:900; letter-spacing:.06em; color:#fff;
+    font-size:clamp(28px, 7vh, 72px); text-shadow:0 0 18px #f00, 0 3px 10px rgba(0,0,0,.9);
+    background:radial-gradient(ellipse at center, rgba(190,0,0,.55), rgba(120,0,0,0) 70%); }
+  #alert.go{ display:flex; animation:alertFlash .55s steps(1,end) infinite; }
+  @keyframes alertFlash{ 0%,49%{ opacity:1; } 50%,100%{ opacity:.25; } }
+  /* Boss floofs get an angry red aura to set them apart. */
+  #floof.boss img{ filter:drop-shadow(0 0 16px #ff2d2d) drop-shadow(0 0 40px #b00) saturate(1.3); }
+  /* Chat's progress against the boss, pinned under it. */
+  #hp{ position:absolute; left:0; top:0; width:128px; opacity:0; transition:opacity .3s ease;
+    font:800 15px system-ui,sans-serif; color:#fff; text-align:center;
+    text-shadow:0 2px 5px rgba(0,0,0,.9); }
+  #hp.show{ opacity:1; }
+  #hp .track{ height:9px; border-radius:5px; background:rgba(0,0,0,.6);
+    border:1px solid rgba(255,255,255,.35); overflow:hidden; margin-top:3px; }
+  /* Boss life: starts full and drains as chat lands hits. */
+  #hp .fill{ height:100%; width:100%; background:linear-gradient(90deg,#3fb950,#7ee787);
+    transition:width .3s ease, background .3s ease; }
+  /* Mocking line after the boss gets away. */
+  #escape{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    text-align:center; font-weight:900; color:#ff5a5a; font-size:clamp(24px, 6vh, 60px);
+    text-shadow:0 0 16px #900, 0 3px 10px rgba(0,0,0,.9); }
+  #escape.go{ display:flex; animation:escapeFade 3.2s ease forwards; }
+  @keyframes escapeFade{ 0%{ opacity:0; transform:scale(.9); } 18%{ opacity:1; transform:scale(1.04); }
+    70%{ opacity:1; } 100%{ opacity:0; transform:scale(1.02); } }
 </style>
 </head>
 <body>
@@ -82,6 +110,9 @@ export function floofOverlayPage(): string {
     <div id="burst"></div>
     <div id="heart">💖</div>
     <div id="bubble"></div>
+    <div id="hp"><span id="hp-text"></span><div class="track"><div class="fill" id="hp-fill"></div></div></div>
+    <div id="alert">A BOSS FLOOF APPROACHES!</div>
+    <div id="escape">FAILURE! BOSS FLOOF ESCAPED!</div>
   </div>
 <script>
 (function(){
@@ -90,6 +121,7 @@ export function floofOverlayPage(): string {
 
   // The source can be any size — read it from the viewport and re-read on resize.
   var W = 0, H = 0, SIZE = 128;
+  // Taunt lines are configured in the admin panel and arrive with each spawn.
   var TAUNTS = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
   var IDLE_MS = 10000;      // unpet time before a taunt
   var BUBBLE_MS = 2500;     // how long the bubble stays up
@@ -106,6 +138,12 @@ export function floofOverlayPage(): string {
   var lastTaunt = -1;  // so the bubble never shows the same line twice running
   var pad = { left: 0, right: 0, top: 0, bottom: 0 };
   var bubbleW = 0, bubbleH = 0, bubbleFlipped = null;
+  var isBoss = false;
+  var alertEl = document.getElementById('alert');
+  var escapeEl = document.getElementById('escape');
+  var hp = document.getElementById('hp');
+  var hpText = document.getElementById('hp-text');
+  var hpFill = document.getElementById('hp-fill');
 
   function syncSize(){
     W = document.documentElement.clientWidth || window.innerWidth || 0;
@@ -179,6 +217,7 @@ export function floofOverlayPage(): string {
     bx = Math.max(0, Math.min(W - bubbleW, bx));
     by = Math.max(0, Math.min(H - bubbleH, by));
     bubble.style.transform = 'translate(' + bx + 'px,' + by + 'px)';
+    if(isBoss) hp.style.transform = 'translate(' + state.x + 'px,' + (state.y + SIZE + 6) + 'px)';
   }
 
   function loop(t){
@@ -230,6 +269,11 @@ export function floofOverlayPage(): string {
     el.classList.remove('in', 'pet');
     bubble.classList.remove('show', 'flip');
     bubbleFlipped = null;
+    isBoss = false;
+    el.classList.remove('boss');
+    hp.classList.remove('show');
+    alertEl.classList.remove('go');
+    escapeEl.classList.remove('go');
     heart.classList.remove('go');
     burst.classList.remove('go');
     void el.offsetWidth;        // flush the change while the transition is off
@@ -241,6 +285,13 @@ export function floofOverlayPage(): string {
     syncSize();
     pad = (d && d.padding) || { left:0, right:0, top:0, bottom:0 };
     applyMask();
+    if(d && Array.isArray(d.taunts) && d.taunts.length) TAUNTS = d.taunts;
+    isBoss = !!(d && d.boss);
+    if(isBoss){
+      el.classList.add('boss');
+      setHp(Math.max(1, Number(d.needed) || 1), Math.max(1, Number(d.needed) || 1)); // starts at full life
+      hp.classList.add('show');
+    }
     var b = bounds();
     var speed = pxPerSec(d && d.speed);
     // Random start + a diagonal heading, so no two spawns look the same.
@@ -256,6 +307,30 @@ export function floofOverlayPage(): string {
     requestAnimationFrame(function(){ el.classList.add('in'); });   // fade in
     raf = requestAnimationFrame(loop);
     scheduleTaunt();
+  }
+
+  /** Draw the boss's REMAINING life; it drains toward zero as chat lands hits. */
+  function setHp(remaining, needed){
+    var pct = Math.max(0, Math.min(100, (remaining / needed) * 100));
+    hpText.textContent = remaining + ' / ' + needed;
+    hpFill.style.width = pct + '%';
+    // Healthy -> hurt -> nearly dead, like a game health bar.
+    hpFill.style.background = pct > 50 ? 'linear-gradient(90deg,#3fb950,#7ee787)'
+      : pct > 25 ? 'linear-gradient(90deg,#d2a106,#f0c000)'
+      : 'linear-gradient(90deg,#b00,#ff2d2d)';
+  }
+
+  /** Red flashing warning shown just before a boss lands. */
+  function bossAlert(d){
+    reset();
+    alertEl.classList.add('go');
+    var ms = ((d && Number(d.seconds)) || 4) * 1000;
+    setTimeout(function(){ alertEl.classList.remove('go'); }, ms);
+  }
+
+  function bossHit(d){
+    if(!isBoss || !state) return;
+    setHp(Math.max(0, Number(d && d.remaining) || 0), Math.max(1, Number(d && d.needed) || 1));
   }
 
   function pet(){
@@ -275,11 +350,19 @@ export function floofOverlayPage(): string {
     setTimeout(reset, PET_MS);
   }
 
-  function despawn(){
+  function despawn(d){
     if(!state) return;
+    var wasBoss = isBoss || !!(d && d.boss);
     clearTimers();
+    hp.classList.remove('show');
     el.classList.remove('in');     // just fade away
-    setTimeout(reset, 900);
+    if(wasBoss){
+      // Let it fade out first, then mock chat for letting it escape.
+      setTimeout(function(){ escapeEl.classList.add('go'); }, 900);
+      setTimeout(reset, 4300);
+    } else {
+      setTimeout(reset, 900);
+    }
   }
 
   function connect(){
@@ -292,7 +375,10 @@ export function floofOverlayPage(): string {
       if(!m) return;
       if(m.type==='spawn') spawn(m.payload);
       else if(m.type==='pet') pet();
-      else if(m.type==='despawn') despawn();
+      else if(m.type==='despawn') despawn(m.payload);
+      else if(m.type==='boss-alert') bossAlert(m.payload);
+      else if(m.type==='boss-hit') bossHit(m.payload);
+      else if(m.type==='boss-defeated') pet();
     }catch(_e){} };
     ws.onerror=function(){ try{ ws.close(); }catch(_e){} };
     ws.onclose=function(ev){ if(!ev || ev.code!==4001) setTimeout(connect,2500); };

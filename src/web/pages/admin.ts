@@ -688,6 +688,11 @@ export function adminPage(): string {
       { key: 'randomSeconds', label: 'Random extra', hint: 'up to this many more seconds', min: 0, max: 86400, step: 10 },
       { key: 'despawnSeconds', label: 'Despawn after', hint: 'seconds before an un-pet floof gives up', min: 5, max: 3600, step: 5 }
     ];
+    var FLOOF_BOSS = [
+      { key: 'bossPets', label: 'Pets to defeat', hint: 'how many chatters must !pet the boss', min: 1, max: 500, step: 1 },
+      { key: 'bossChance', label: 'Boss chance', hint: '% of spawns that are a boss', min: 0, max: 100, step: 1 },
+      { key: 'bossDespawnSeconds', label: 'Boss escapes after', hint: 'seconds before the boss gets away', min: 10, max: 3600, step: 5 }
+    ];
     var FLOOF_PAD = [
       { key: 'padLeft', label: 'Left' }, { key: 'padRight', label: 'Right' },
       { key: 'padTop', label: 'Top' }, { key: 'padBottom', label: 'Bottom' }
@@ -713,11 +718,24 @@ export function adminPage(): string {
             '<label class="muted" style="font-size:.8rem">' + esc(f.label) + '</label>' +
             '<input type="number" data-fcfg="' + f.key + '" min="0" max="800" step="1" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:100%" /></div>';
         }).join('');
+        var bossNums = FLOOF_BOSS.map(function (f) {
+          return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
+            '<label style="flex:0 0 11rem">' + esc(f.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(f.hint) + ')</span></label>' +
+            '<input type="number" data-fcfg="' + f.key + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:9rem" /></div>';
+        }).join('');
+        var taunts = (d.taunts || []);
+        var tauntRows = taunts.length
+          ? taunts.map(function (t) {
+              return '<span class="chip">' + esc(t) + ' <button title="remove" data-ftaunt="' + esc(t) + '">×</button></span>';
+            }).join('')
+          : '<span class="muted">No taunts yet — the floof will stay quiet.</span>';
         var gallery = imgs.length
           ? imgs.map(function (im) {
               return '<div class="floof-card">' +
                 '<img src="' + esc(im.url) + '" alt="' + esc(im.name) + '" />' +
                 '<div class="muted" style="font-size:.74rem; word-break:break-all">' + esc(im.name) + '</div>' +
+                '<label class="muted" style="display:inline-flex; align-items:center; gap:.3rem; font-size:.76rem">' +
+                  '<input type="checkbox" data-fboss="' + esc(im.name) + '"' + (im.boss ? ' checked' : '') + ' /> Boss only</label>' +
                 '<button type="button" class="danger" data-fdel="' + esc(im.name) + '">Delete</button></div>';
             }).join('')
           : '<span class="muted">No floofs uploaded yet. Add a square PNG to get started.</span>';
@@ -736,12 +754,22 @@ export function adminPage(): string {
               '<span class="muted" id="floof-speed-val" style="flex:0 0 2em; text-align:right"></span></div>' +
             '<h4 style="margin:.9rem 0 .3rem; font-size:.9rem">Edge padding <span class="muted" style="font-weight:400; font-size:.78rem">(pixels kept clear so the floof never clips an edge)</span></h4>' +
             '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem">' + pads + '</div></div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Boss Floof battles</h3>' +
+            '<p class="muted" style="font-size:.85rem; margin:0 0 .4rem">A boss needs the whole chat: every chatter can land one <code>!pet</code>, and it only goes down once enough of them join in. Boss photos are the ones ticked <strong>Boss only</strong> below.</p>' +
+            bossNums + '</div>' +
+          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Taunts</h3>' +
+            '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Shown in the speech bubble when a floof goes unpet. One is picked at random each time (never the same line twice in a row).</p>' +
+            '<div class="chips" id="floof-taunts">' + tauntRows + '</div>' +
+            '<div class="rowline" style="margin-top:.85rem"><input type="text" id="floof-taunt-new" maxlength="120" placeholder="add a taunt" style="flex:1" />' +
+            '<button type="button" class="pink" id="floof-taunt-add">Add</button></div></div>' +
           '<div class="card" style="margin:0 0 1rem"><div class="rowline" style="gap:.8rem; align-items:center">' +
             '<button type="button" class="pink" id="floof-save">Save settings</button>' +
             '<button type="button" class="pink" id="floof-fire">Fire a floof now</button>' +
-            '<button type="button" class="pink" id="floof-testwin">Test win animation</button></div>' +
-            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">Both work even when the game is disabled or the stream is offline. ' +
-            '<strong>Test win</strong> plays the celebration without recording a win, so it never touches the scoreboard.</p>' +
+            '<button type="button" class="pink" id="floof-boss">Fire a BOSS now</button>' +
+            '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
+            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">Firing works even when the game is disabled or the stream is offline. ' +
+            '<strong>Simulate !pet</strong> stands in for a chatter: click it once to play the normal win, or repeatedly to chip a boss\u2019s life down to a defeat. ' +
+            'It never records a win, so the scoreboard stays clean.</p>' +
             '<div class="toast" id="floof-toast"></div></div>' +
           '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Floof photos</h3>' +
             '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Square PNGs only (rendered at 128×128). Max ' + Math.floor((d.maxBytes || 0) / 1024 / 1024) + 'MB each.</p>' +
@@ -784,9 +812,34 @@ export function adminPage(): string {
             .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
             .catch(function (e) { toast('floof-toast', e.message, false); });
         };
-        document.getElementById('floof-testwin').onclick = function () {
-          api('POST', '/api/admin/floof/test-win', {})
-            .then(function () { toast('floof-toast', 'Playing the win animation (not scored).', true); })
+        document.getElementById('floof-boss').onclick = function () {
+          api('POST', '/api/admin/floof/boss', {})
+            .then(function () { toast('floof-toast', 'A BOSS FLOOF APPROACHES!', true); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        document.getElementById('floof-taunt-add').onclick = function () {
+          var inp = document.getElementById('floof-taunt-new');
+          api('POST', '/api/admin/floof/taunt', { text: inp.value })
+            .then(function () { inp.value = ''; toast('floof-toast', 'Taunt added.', true); renderFloof(); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        Array.prototype.forEach.call(document.querySelectorAll('[data-ftaunt]'), function (b) {
+          b.onclick = function () {
+            api('POST', '/api/admin/floof/taunt', { text: b.getAttribute('data-ftaunt'), remove: true })
+              .then(function () { toast('floof-toast', 'Taunt removed.', true); renderFloof(); })
+              .catch(function (e) { toast('floof-toast', e.message, false); });
+          };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-fboss]'), function (cb) {
+          cb.onchange = function () {
+            api('POST', '/api/admin/floof/image/boss', { name: cb.getAttribute('data-fboss'), boss: cb.checked })
+              .then(function () { toast('floof-toast', cb.checked ? 'Marked as a boss photo.' : 'Back to a normal floof.', true); })
+              .catch(function (e) { cb.checked = !cb.checked; toast('floof-toast', e.message, false); });
+          };
+        });
+        document.getElementById('floof-sim').onclick = function () {
+          api('POST', '/api/admin/floof/simulate-pet', {})
+            .then(function () { toast('floof-toast', 'Simulated a !pet (not scored).', true); })
             .catch(function (e) { toast('floof-toast', e.message, false); });
         };
         document.getElementById('floof-upload').onclick = function () {

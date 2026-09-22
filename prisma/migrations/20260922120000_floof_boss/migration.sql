@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "FloofStat" ADD COLUMN "bossWins" INTEGER NOT NULL DEFAULT 0;

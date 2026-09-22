@@ -48,14 +48,51 @@ of `0` on an edge leaves that edge unfeathered (the old behaviour).
 | Despawn after | `despawn` | 120s | An un-pet floof gives up and fades out |
 | Speed | `speed` | 5 | 1 (slow) – 10 (fast) |
 | Padding L/R/T/B | `pad-left`, `pad-right`, `pad-top`, `pad-bottom` | 0 | Pixels kept clear at each edge |
+| Pets to defeat | `boss-pets` | 20 | Chatters needed to bring down a Boss Floof |
+| Boss chance | `boss-chance` | 10 | % of scheduled spawns that are a boss |
+| Boss escapes after | `boss-despawn` | 180s | Bosses get longer than a normal floof |
 
 **Floofs only spawn while the stream is live** (and only when enabled). The
 **Fire a floof now** button bypasses *both*, so you can position and test the
 overlay off-stream.
 
+## Taunts
+
+The speech-bubble lines are edited in the admin panel — add or remove them
+freely. The overlay picks one at random every time a bubble appears (and never
+shows the same line twice in a row). If you delete them all, the floof simply
+stays quiet.
+
+## Boss Floof battles
+
+Some spawns are a **Boss Floof**: a group fight for the whole chat.
+
+1. A flashing red **"A BOSS FLOOF APPROACHES!"** alert plays for a few seconds,
+   and the bot warns chat.
+2. The boss arrives with an angry red aura and a **life bar** underneath, which
+   drains from green through yellow to red as chat wears it down.
+3. Chat attacks it with `!pet`. Each hit **drains the boss's life bar**; it goes
+   down when the bar empties (default **20** hits). A chatter can hit it more than
+   once, but only every **30 seconds** — so one person *can* solo a boss, but
+   realistically lands only a few blows before it escapes.
+4. On defeat, everyone who took part is credited and gets the **Defeat Boss
+   Floof** achievement.
+5. If chat runs out of time the boss fades and mocks them:
+   **"FAILURE! BOSS FLOOF ESCAPED!"**
+
+Bosses fire on a **percentage of scheduled spawns** (`boss-chance`, default 10%),
+or on demand with the **Fire a BOSS now** button. If no boss photos are marked,
+that spawn falls back to a normal floof.
+
+> **Note:** everyone who lands at least one hit is credited on a win, however
+> many hits they got in. Lower `boss-pets` if your chat is small.
+
 ## Floof photos
 
-Upload **square PNGs** in the admin panel (max 2 MB). The server validates both
+Upload **square PNGs** in the admin panel (max 2 MB). Tick **Boss only** on a
+photo to reserve it for Boss Floof battles — boss and normal pools are kept
+separate, so a boss never shows an ordinary floof (or vice versa). Both live in
+the same folder, so there is nothing extra to mount. The server validates both
 the PNG signature and squareness from the file's own header, so a non-square or
 non-PNG upload is rejected up front. Images live in `public/assets/floofs/`.
 
@@ -87,6 +124,18 @@ Only the *first* claim counts — the winner is locked in synchronously, so two
 `!pet`s in the same instant can't both win. The "no floof right now" reply is
 rate-limited per user so it can't be spammed.
 
+## Testing without touching the scoreboard
+
+**Fire a floof now** / **Fire a BOSS now** spawn on demand, ignoring the enable
+switch and the live check. **Simulate !pet** then stands in for a chatter:
+
+- against a normal floof, one click plays the win animation;
+- against a boss, each click lands one hit — click through to watch the life bar
+  drain and the defeat fire.
+
+None of it is scored: no wins recorded, no chat announcement, no achievements, and
+a simulated boss kill credits nobody.
+
 ## Achievements
 
 Wins are persisted per user, so the achievements engine thresholds on them
@@ -95,9 +144,11 @@ directly and the standard backfill picks them up:
 - 🐾 **Floof Friend I** — win once
 - 🐱 **Floof Friend II** — win 10 times
 - 💖 **Floof Friend III** — win 50 times
+- ⚔️ **Defeat Boss Floof** — take part in a winning Boss Floof battle
 
 ## Chat messages
 
 Every line the game says is editable under **Admin → Text Strings** (feature
-`floof`) — winner announcement, the idle reply, stats, and the setter
-confirmation. Blanking a string disables it.
+`floof`) — winner announcement, the idle reply, stats, the setter confirmation,
+and the three boss lines (incoming, defeated, escaped). Blanking a string
+disables it.

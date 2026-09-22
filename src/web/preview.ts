@@ -107,7 +107,7 @@ async function collectBuiltins() {
     text: previewText, // real service — plugins register their editable strings here
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
-    floof: { getConfig: () => ({}), setSpawner: noop, setWinTester: noop, randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
+    floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, setBossSpawner: noop, getTaunts: () => [], randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
     points: {},
@@ -247,11 +247,14 @@ const previewTtsSpeakers = [
 const previewFloofConfig: Record<string, unknown> = {
   enabled: true, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120,
   speed: 5, padLeft: 0, padRight: 24, padTop: 0, padBottom: 12,
+  bossPets: 20, bossChance: 10, bossDespawnSeconds: 180,
 };
 const previewFloofImages = [
-  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210 },
-  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044 },
+  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, boss: false },
+  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044, boss: false },
+  { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, boss: true },
 ];
+let previewFloofTaunts = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
 
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
@@ -384,7 +387,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         { id: 'tts', name: 'TTS — audio source', url: base + '/overlays/tts?token=preview-token' },
         { id: 'chat-stats', name: 'Chat activity — stats', url: base + '/overlays/chat-stats?token=preview-token' },
         { id: 'achievement', name: 'Achievement — unlock pop', url: base + '/overlays/achievement?token=preview-token' },
-        { id: 'floof', name: 'Pet the Floof — 1600×200, bottom-right', url: base + '/overlays/floof?token=preview-token' },
+        { id: 'floof', name: 'Pet the Floof', url: base + '/overlays/floof?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
@@ -393,6 +396,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         config: previewFloofConfig,
         defaults: { enabled: false, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120, speed: 5, padLeft: 0, padRight: 0, padTop: 0, padBottom: 0 },
         images: previewFloofImages,
+        taunts: previewFloofTaunts,
         maxBytes: 2 * 1024 * 1024,
       });
     }
@@ -573,7 +577,20 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       return json(200, { ok: true, config: previewFloofConfig });
     }
     if (p === '/api/admin/floof/fire') return json(200, { ok: true });
-    if (p === '/api/admin/floof/test-win') return json(200, { ok: true });
+    if (p === '/api/admin/floof/simulate-pet') return json(200, { ok: true });
+    if (p === '/api/admin/floof/boss') return json(200, { ok: true });
+    if (p === '/api/admin/floof/taunt') {
+      const text = String(body.text ?? '').trim();
+      if (body.remove) previewFloofTaunts = previewFloofTaunts.filter((t) => t.toLowerCase() !== text.toLowerCase());
+      else if (!text) return json(400, { error: 'Enter a taunt first.' });
+      else if (!previewFloofTaunts.some((t) => t.toLowerCase() === text.toLowerCase())) previewFloofTaunts.push(text);
+      return json(200, { ok: true, taunts: previewFloofTaunts });
+    }
+    if (p === '/api/admin/floof/image/boss') {
+      const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));
+      if (im) im.boss = !!body.boss;
+      return json(200, { ok: true });
+    }
     if (p === '/api/admin/floof/image/delete') {
       const n = String(body.name ?? '');
       const i = previewFloofImages.findIndex((x) => x.name === n);

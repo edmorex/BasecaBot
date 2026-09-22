@@ -333,6 +333,8 @@ model EventLog {
 model FloofStat {
   userId    String    @id
   wins      Int       @default(0)
+  /// Boss Floof battles this user took part in and that chat went on to win.
+  bossWins  Int       @default(0)
   lastWonAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

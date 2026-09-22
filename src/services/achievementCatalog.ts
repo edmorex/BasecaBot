@@ -59,6 +59,8 @@ export const METRICS: Record<string, MetricFn> = {
   // ── Pet the Floof ─────────────────────────────────────────────────────────
   'floof.wins': async (db, userId) =>
     (await db.floofStat.findUnique({ where: { userId }, select: { wins: true } }))?.wins ?? 0,
+  'floof.bossWins': async (db, userId) =>
+    (await db.floofStat.findUnique({ where: { userId }, select: { bossWins: true } }))?.bossWins ?? 0,
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   'tenure.months': async (db, userId, now) =>
@@ -133,6 +135,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: 'floof.friend1', name: 'Floof Friend I', description: 'Be the first to !pet a floof.', emoji: '🐾', tier: 'bronze', group: 'floof', metric: 'floof.wins', target: 1 },
   { key: 'floof.friend2', name: 'Floof Friend II', description: 'Win Pet the Floof 10 times.', emoji: '🐱', tier: 'silver', group: 'floof', metric: 'floof.wins', target: 10 },
   { key: 'floof.friend3', name: 'Floof Friend III', description: 'Win Pet the Floof 50 times.', emoji: '💖', tier: 'gold', group: 'floof', metric: 'floof.wins', target: 50 },
+  { key: 'floof.boss', name: 'Defeat Boss Floof', description: 'Help chat bring down a Boss Floof.', emoji: '⚔️', tier: 'silver', group: 'floof', metric: 'floof.bossWins', target: 1 },
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   { key: 'tenure.foster1', name: 'Foster Fam I', description: 'Known to the bot for 6 months.', emoji: '🏡', tier: 'bronze', group: 'daily', metric: 'tenure.months', target: 6 },

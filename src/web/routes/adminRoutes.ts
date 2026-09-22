@@ -254,8 +254,14 @@ export async function postAdminAchievementBackfill(s: WebServer, req: IncomingMe
 
 export async function getAdminFloof(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
-  const [images] = await Promise.all([s.floof.listImages()]);
-  s.json(res, 200, { config: s.floof.getConfig(), defaults: s.floof.defaults, images, maxBytes: MAX_IMAGE_BYTES });
+  const images = await s.floof.listImages();
+  s.json(res, 200, {
+    config: s.floof.getConfig(),
+    defaults: s.floof.defaults,
+    images,
+    taunts: s.floof.getTaunts(),
+    maxBytes: MAX_IMAGE_BYTES,
+  });
 }
 
 export async function postAdminFloof(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -273,14 +279,45 @@ export async function postAdminFloofFire(s: WebServer, req: IncomingMessage, res
   s.json(res, 200, { ok: true });
 }
 
-/**
- * Play the win animation on the overlay WITHOUT scoring it — no win recorded, no
- * chat announcement, no achievement — so the overlay can be checked without
- * polluting the scoreboard.
- */
-export async function postAdminFloofTestWin(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+/** Start a Boss Floof battle now (alert, then the boss). */
+export async function postAdminFloofBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
-  const problem = await s.floof.requestTestWin();
+  const problem = await s.floof.requestBossSpawn();
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+/** Add or remove a taunt line (the overlay picks one at random per bubble). */
+export async function postAdminFloofTaunt(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    const taunts = body.remove
+      ? await s.floof.removeTaunt(String(body.text ?? ''))
+      : await s.floof.addTaunt(String(body.text ?? ''));
+    s.json(res, 200, { ok: true, taunts });
+  } catch (e) {
+    if (e instanceof FloofError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** Flag an uploaded image as boss-only (or back to normal). */
+export async function postAdminFloofImageBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  await s.floof.setBossImage(String(body.name ?? ''), !!body.boss);
+  s.json(res, 200, { ok: true });
+}
+
+/**
+ * Stand in for a chatter's `!pet` WITHOUT scoring it — no win recorded, no chat
+ * announcement, no achievement. Click it repeatedly to walk a boss battle down to
+ * a defeat, or once to trigger the normal win animation.
+ */
+export async function postAdminFloofSimulatePet(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const problem = await s.floof.requestSimulatedPet();
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });
 }

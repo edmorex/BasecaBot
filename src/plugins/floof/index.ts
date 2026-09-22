@@ -11,14 +11,31 @@ const ROOM = 'floof';
 const IDLE_COOLDOWN_MS = 30_000;
 /** How often the scheduler re-checks when it's waiting (also re-checks live state). */
 const TICK_MS = 15_000;
+/** How long the red "A BOSS FLOOF APPROACHES!" alert plays before the boss lands. */
+const BOSS_ALERT_MS = 4000;
+/**
+ * Per-user cooldown between hits on a boss. Repeats ARE allowed — one determined
+ * chatter can in principle solo a boss — but only a few times before it escapes.
+ */
+const BOSS_PET_COOLDOWN_MS = 30_000;
 
 /** The currently-visible floof, if any. */
 interface Round {
   image: string;
   startedAt: number;
-  /** Set the moment someone claims it, so only the first !pet can win. */
+  /** Set the moment someone claims it, so only the first !pet can win (normal rounds). */
   claimedBy: string | null;
   despawn: ReturnType<typeof setTimeout>;
+  /** Boss battles need many chatters; normal rounds end on the first !pet. */
+  boss: boolean;
+  /** How many pets are needed to defeat the boss (its starting life). */
+  needed: number;
+  /** Pets landed so far; the boss dies when this reaches `needed`. */
+  hits: number;
+  /** Everyone who has landed at least one hit — all of them get the credit. */
+  participants: Map<string, string>; // userId -> displayName
+  /** Last hit per user, enforcing BOSS_PET_COOLDOWN_MS between their pets. */
+  lastPet: Map<string, number>;
 }
 
 /**
@@ -46,62 +63,98 @@ export function floofPlugin(): Plugin {
     nextAt = Date.now() + (cfg.baseSeconds + Math.floor(Math.random() * (cfg.randomSeconds + 1))) * 1000;
   };
 
-  /** End the current round without a winner. */
+  /** End the current round without a winner (the boss escapes). */
   const despawn = async () => {
     if (!round) return;
+    const wasBoss = round.boss;
     clearTimeout(round.despawn);
     round = null;
-    ctx.ws.broadcast(ROOM, 'despawn', {});
+    ctx.ws.broadcast(ROOM, 'despawn', { boss: wasBoss });
+    if (wasBoss) await sayText(ctx.config.twitch.channel, 'bossEscaped').catch(() => {});
     rearm(ctx.floof.getConfig());
   };
 
-  /** Put a floof on screen. `manual` bypasses the enabled + live checks. */
-  const spawn = async (manual: boolean): Promise<string | null> => {
+  /**
+   * Put a floof on screen. `manual` bypasses the enabled + live checks. A boss
+   * spawn first plays a red alert on the overlay, then reveals the boss — pets
+   * only count once it has actually landed.
+   */
+  const spawn = async (manual: boolean, boss = false): Promise<string | null> => {
     const cfg = ctx.floof.getConfig();
     if (round) return 'A floof is already on screen.';
     if (!manual) {
       if (!cfg.enabled) return 'The game is disabled.';
       if (!(await ctx.stream.isLive())) return 'The stream is not live.';
     }
-    const image = await ctx.floof.randomImage();
-    if (!image) return 'No floof images have been uploaded yet.';
+    const image = await ctx.floof.randomImage(boss);
+    if (!image) return boss ? 'No BOSS floof images have been uploaded yet.' : 'No floof images have been uploaded yet.';
 
+    if (boss) {
+      ctx.ws.broadcast(ROOM, 'boss-alert', { seconds: BOSS_ALERT_MS / 1000 });
+      await sayText(ctx.config.twitch.channel, 'bossIncoming');
+      await new Promise((r) => setTimeout(r, BOSS_ALERT_MS));
+      if (round) return 'A floof is already on screen.'; // raced while alerting
+    }
+
+    const needed = boss ? Math.max(1, cfg.bossPets) : 1;
+    const despawnSeconds = boss ? cfg.bossDespawnSeconds : cfg.despawnSeconds;
     round = {
       image: image.name,
       startedAt: Date.now(),
       claimedBy: null,
-      despawn: setTimeout(() => void despawn(), cfg.despawnSeconds * 1000),
+      despawn: setTimeout(() => void despawn(), despawnSeconds * 1000),
+      boss,
+      needed,
+      hits: 0,
+      participants: new Map(),
+      lastPet: new Map(),
     };
     ctx.ws.broadcast(ROOM, 'spawn', {
       url: image.url,
       speed: cfg.speed,
       padding: { left: cfg.padLeft, right: cfg.padRight, top: cfg.padTop, bottom: cfg.padBottom },
-      despawnSeconds: cfg.despawnSeconds,
+      despawnSeconds,
+      taunts: ctx.floof.getTaunts(),
+      boss,
+      needed,
     });
-    ctx.logger.info({ image: image.name, manual }, 'floof: spawned');
+    ctx.logger.info({ image: image.name, manual, boss, needed }, 'floof: spawned');
     rearm(cfg); // so the next one is scheduled from now even if this is missed
     return null;
   };
 
   /**
-   * Play the win animation without scoring it (admin test button). If no floof is
-   * on screen one is spawned first so there's something to pet; the round is then
-   * closed out silently — no DB write, no chat, no achievement.
+   * Stand in for a chatter's `!pet` (admin test button). Scores NOTHING — no DB
+   * write, no chat, no achievement — so a battle can be stepped through without
+   * polluting the scoreboard. Against a boss each click lands one hit, so
+   * clicking repeatedly walks its life bar down to a defeat; against a normal
+   * floof a single click plays the win animation.
    */
-  const testWin = async (): Promise<string | null> => {
-    if (!round) {
-      const problem = await spawn(true);
-      if (problem) return problem;
-      await new Promise((r) => setTimeout(r, 1200)); // let the fade-in finish
-    }
-    if (round) {
+  const simulatePet = async (): Promise<string | null> => {
+    if (!round) return 'There is no floof on screen — fire one first.';
+
+    if (round.boss) {
+      round.hits++;
+      const remaining = Math.max(0, round.needed - round.hits);
+      // Deliberately NOT added to `participants`, so a simulated kill credits nobody.
+      ctx.ws.broadcast(ROOM, 'boss-hit', { user: 'Test', remaining, needed: round.needed });
+      if (remaining > 0) return null;
       clearTimeout(round.despawn);
       round = null;
+      ctx.ws.broadcast(ROOM, 'boss-defeated', { count: 0 });
+      ctx.logger.info('floof: simulated boss defeat (not scored)');
+      return null;
     }
+
+    clearTimeout(round.despawn);
+    round = null;
     ctx.ws.broadcast(ROOM, 'pet', { user: 'Test' });
-    ctx.logger.info('floof: test win (not scored)');
+    ctx.logger.info('floof: simulated pet (not scored)');
     return null;
   };
+
+  /** Spawn a BOSS on demand (admin button) — alert, then the boss itself. */
+  const spawnBoss = async (): Promise<string | null> => spawn(true, true);
 
   /** Scheduler heartbeat: spawn when due, enabled, and live. */
   const heartbeat = async () => {
@@ -113,7 +166,10 @@ export function floofPlugin(): Plugin {
         rearm(cfg); // offline: push the window out rather than firing the moment we go live
         return;
       }
-      await spawn(false);
+      // Roll for a boss battle; falls back to a normal floof if no boss art exists.
+      const boss = Math.random() * 100 < cfg.bossChance;
+      const problem = await spawn(false, boss);
+      if (problem && boss) await spawn(false, false);
     } catch (err) {
       ctx.logger.error({ err }, 'floof: heartbeat failed');
     }
@@ -133,6 +189,9 @@ export function floofPlugin(): Plugin {
         { key: 'noStats', label: 'Stats — no wins', default: '{name} has not pet a floof yet.', placeholders: ['name'] },
         { key: 'unknownUser', label: 'Stats — unknown user', default: 'I don’t know a user called {user}.', placeholders: ['user'] },
         { key: 'setOk', label: 'Setting changed', default: 'Floof {variable} is now {value}.', placeholders: ['variable', 'value'] },
+        { key: 'bossIncoming', label: 'Boss — incoming alert', default: '🚨 A BOSS FLOOF APPROACHES! Everyone type !pet to bring it down!', placeholders: [] },
+        { key: 'bossDefeated', label: 'Boss — defeated', default: '⚔️ BOSS FLOOF DEFEATED by {count} chatters! {names}', placeholders: ['count', 'names'] },
+        { key: 'bossEscaped', label: 'Boss — escaped', default: '💀 FAILURE! BOSS FLOOF ESCAPED! Chat was not strong enough…', placeholders: [] },
       ];
       for (const s of strings) ctx.text.register({ feature: 'floof', ...s });
       sayText = ctx.text.sayer(ctx.chat, 'floof');
@@ -141,7 +200,7 @@ export function floofPlugin(): Plugin {
         description: 'Pet the Floof! When a floof appears on stream, be the first to type "!pet" to win. "!pet stats [user]" shows wins.',
         permission: PermissionLevel.Viewer,
 
-        // Bare "!pet" is a claim on the active floof.
+        // Bare "!pet" is a claim on the active floof (or a hit on the boss).
         onUnknown: async (e: CommandEvent) => {
           if (!round || round.claimedBy) {
             // Nothing to pet — rate-limited so it can't be spammed in chat.
@@ -151,6 +210,48 @@ export function floofPlugin(): Plugin {
             await sayText(e.channel, 'idle');
             return;
           }
+
+          // ── Boss battle: chip its life down; repeats allowed on a cooldown ──
+          if (round.boss) {
+            const now = Date.now();
+            if (now - (round.lastPet.get(e.user.id) ?? 0) < BOSS_PET_COOLDOWN_MS) return; // still catching their breath
+            round.lastPet.set(e.user.id, now);
+            round.participants.set(e.user.id, e.user.displayName);
+            round.hits++;
+            const remaining = Math.max(0, round.needed - round.hits);
+            ctx.ws.broadcast(ROOM, 'boss-hit', { user: e.user.displayName, remaining, needed: round.needed });
+            if (remaining > 0) {
+              await ctx.users.touch(e.user);
+              return; // keep chat quiet until it's actually down
+            }
+
+            // Defeated — credit everyone who joined in.
+            round.claimedBy = e.user.id; // lock so a straggler can't double-fire
+            clearTimeout(round.despawn);
+            const party = [...round.participants.entries()];
+            round = null;
+
+            for (const [id, displayName] of party) {
+              await ctx.users.touch({ id, login: displayName.toLowerCase(), displayName }).catch(() => {});
+            }
+            await ctx.floof.recordBossWin(party.map(([id]) => id));
+            ctx.ws.broadcast(ROOM, 'boss-defeated', { count: party.length });
+            ctx.logger.info({ participants: party.length }, 'floof: boss defeated');
+
+            const names = party.map(([, n]) => n);
+            await sayText(e.channel, 'bossDefeated', {
+              count: names.length,
+              names: names.slice(0, 15).join(', ') + (names.length > 15 ? ', …' : ''),
+            });
+            for (const [id] of party) {
+              void ctx.achievements
+                .evaluate(id, 'floof')
+                .catch((err) => ctx.logger.error({ err }, 'floof: achievements eval failed'));
+            }
+            return;
+          }
+
+          // ── Normal round: first !pet wins ─────────────────────────────────
           // Claim synchronously BEFORE any await, so two racing !pets can't both win.
           round.claimedBy = e.user.id;
           clearTimeout(round.despawn);
@@ -217,7 +318,8 @@ export function floofPlugin(): Plugin {
       // Let the admin panel's "Fire now" button drive a spawn (bypasses the
       // enable switch and the live check, so the overlay can be tested anytime).
       ctx.floof.setSpawner(() => spawn(true));
-      ctx.floof.setWinTester(testWin);
+      ctx.floof.setPetSimulator(simulatePet);
+      ctx.floof.setBossSpawner(spawnBoss);
       rearm(ctx.floof.getConfig());
       tick = setInterval(() => void heartbeat(), TICK_MS);
     },
