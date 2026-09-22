@@ -28,6 +28,12 @@ export interface FloofConfig {
   bossChance: number;
   /** Boss battle: seconds before the boss escapes (usually longer than normal). */
   bossDespawnSeconds: number;
+  /** Boss battle: seconds a chatter must wait between their own hits. */
+  bossCooldownSeconds: number;
+  /** Boss battle: movement speed at FULL health (fast and angry). */
+  bossSpeedStart: number;
+  /** Boss battle: movement speed at 1 life left (slow and calm). */
+  bossSpeedEnd: number;
   padLeft: number;
   padRight: number;
   padTop: number;
@@ -43,6 +49,9 @@ export const FLOOF_DEFAULTS: FloofConfig = {
   bossPets: 20,
   bossChance: 10,
   bossDespawnSeconds: 180,
+  bossCooldownSeconds: 30,
+  bossSpeedStart: 9,
+  bossSpeedEnd: 2,
   padLeft: 0,
   padRight: 0,
   padTop: 0,
@@ -58,6 +67,9 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
   bossPets: [1, 500],
   bossChance: [0, 100],
   bossDespawnSeconds: [10, 3600],
+  bossCooldownSeconds: [0, 600],
+  bossSpeedStart: [1, 10],
+  bossSpeedEnd: [1, 10],
   padLeft: [0, 800],
   padRight: [0, 800],
   padTop: [0, 200],
@@ -74,6 +86,9 @@ export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
   'boss-pets': 'bossPets',
   'boss-chance': 'bossChance',
   'boss-despawn': 'bossDespawnSeconds',
+  'boss-cooldown': 'bossCooldownSeconds',
+  'boss-speed-start': 'bossSpeedStart',
+  'boss-speed-end': 'bossSpeedEnd',
   'pad-left': 'padLeft',
   'pad-right': 'padRight',
   'pad-top': 'padTop',
@@ -255,6 +270,9 @@ export class FloofService {
       bossPets: n(c.bossPets, 'bossPets', FLOOF_DEFAULTS.bossPets),
       bossChance: n(c.bossChance, 'bossChance', FLOOF_DEFAULTS.bossChance),
       bossDespawnSeconds: n(c.bossDespawnSeconds, 'bossDespawnSeconds', FLOOF_DEFAULTS.bossDespawnSeconds),
+      bossCooldownSeconds: n(c.bossCooldownSeconds, 'bossCooldownSeconds', FLOOF_DEFAULTS.bossCooldownSeconds),
+      bossSpeedStart: n(c.bossSpeedStart, 'bossSpeedStart', FLOOF_DEFAULTS.bossSpeedStart),
+      bossSpeedEnd: n(c.bossSpeedEnd, 'bossSpeedEnd', FLOOF_DEFAULTS.bossSpeedEnd),
       padLeft: n(c.padLeft, 'padLeft', 0),
       padRight: n(c.padRight, 'padRight', 0),
       padTop: n(c.padTop, 'padTop', 0),

@@ -13,11 +13,9 @@ const IDLE_COOLDOWN_MS = 30_000;
 const TICK_MS = 15_000;
 /** How long the red "A BOSS FLOOF APPROACHES!" alert plays before the boss lands. */
 const BOSS_ALERT_MS = 4000;
-/**
- * Per-user cooldown between hits on a boss. Repeats ARE allowed — one determined
- * chatter can in principle solo a boss — but only a few times before it escapes.
- */
-const BOSS_PET_COOLDOWN_MS = 30_000;
+// The per-user cooldown between hits on a boss is configurable
+// (`bossCooldownSeconds`): repeats ARE allowed, so one determined chatter can in
+// principle solo a boss, but only lands a few blows before it escapes.
 
 /** The currently-visible floof, if any. */
 interface Round {
@@ -117,6 +115,10 @@ export function floofPlugin(): Plugin {
       taunts: ctx.floof.getTaunts(),
       boss,
       needed,
+      // Bosses start fast/angry at full health and calm down as chat wears them
+      // out; the overlay interpolates between these two as life drains.
+      speedStart: cfg.bossSpeedStart,
+      speedEnd: cfg.bossSpeedEnd,
     });
     ctx.logger.info({ image: image.name, manual, boss, needed }, 'floof: spawned');
     rearm(cfg); // so the next one is scheduled from now even if this is missed
@@ -214,7 +216,13 @@ export function floofPlugin(): Plugin {
           // ── Boss battle: chip its life down; repeats allowed on a cooldown ──
           if (round.boss) {
             const now = Date.now();
-            if (now - (round.lastPet.get(e.user.id) ?? 0) < BOSS_PET_COOLDOWN_MS) return; // still catching their breath
+            const cooldownMs = ctx.floof.getConfig().bossCooldownSeconds * 1000;
+            if (now - (round.lastPet.get(e.user.id) ?? 0) < cooldownMs) {
+              // Still catching their breath — tell the overlay so the audience can
+              // see which pets are landing and which are bouncing off.
+              ctx.ws.broadcast(ROOM, 'boss-miss', { user: e.user.displayName });
+              return;
+            }
             round.lastPet.set(e.user.id, now);
             round.participants.set(e.user.id, e.user.displayName);
             round.hits++;

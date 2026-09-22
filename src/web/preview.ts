@@ -248,6 +248,7 @@ const previewFloofConfig: Record<string, unknown> = {
   enabled: true, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120,
   speed: 5, padLeft: 0, padRight: 24, padTop: 0, padBottom: 12,
   bossPets: 20, bossChance: 10, bossDespawnSeconds: 180,
+  bossCooldownSeconds: 30, bossSpeedStart: 9, bossSpeedEnd: 2,
 };
 const previewFloofImages = [
   { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, boss: false },

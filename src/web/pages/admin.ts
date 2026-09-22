@@ -691,7 +691,10 @@ export function adminPage(): string {
     var FLOOF_BOSS = [
       { key: 'bossPets', label: 'Pets to defeat', hint: 'how many chatters must !pet the boss', min: 1, max: 500, step: 1 },
       { key: 'bossChance', label: 'Boss chance', hint: '% of spawns that are a boss', min: 0, max: 100, step: 1 },
-      { key: 'bossDespawnSeconds', label: 'Boss escapes after', hint: 'seconds before the boss gets away', min: 10, max: 3600, step: 5 }
+      { key: 'bossDespawnSeconds', label: 'Boss escapes after', hint: 'seconds before the boss gets away', min: 10, max: 3600, step: 5 },
+      { key: 'bossCooldownSeconds', label: 'Pet cooldown', hint: 'seconds a chatter waits between their own hits', min: 0, max: 600, step: 1 },
+      { key: 'bossSpeedStart', label: 'Speed at full health', hint: '1 slow - 10 fast; angry at the start', min: 1, max: 10, step: 1 },
+      { key: 'bossSpeedEnd', label: 'Speed at 1 life left', hint: '1 slow - 10 fast; calm at the end', min: 1, max: 10, step: 1 }
     ];
     var FLOOF_PAD = [
       { key: 'padLeft', label: 'Left' }, { key: 'padRight', label: 'Right' },
@@ -755,7 +758,7 @@ export function adminPage(): string {
             '<h4 style="margin:.9rem 0 .3rem; font-size:.9rem">Edge padding <span class="muted" style="font-weight:400; font-size:.78rem">(pixels kept clear so the floof never clips an edge)</span></h4>' +
             '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem">' + pads + '</div></div>' +
           '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Boss Floof battles</h3>' +
-            '<p class="muted" style="font-size:.85rem; margin:0 0 .4rem">A boss needs the whole chat: every chatter can land one <code>!pet</code>, and it only goes down once enough of them join in. Boss photos are the ones ticked <strong>Boss only</strong> below.</p>' +
+            '<p class="muted" style="font-size:.85rem; margin:0 0 .4rem">A boss needs the whole chat. Each <code>!pet</code> takes one point off its life; a chatter can hit again once their cooldown is up. It charges around while healthy and calms down as it weakens. Boss photos are the ones ticked <strong>Boss only</strong> below.</p>' +
             bossNums + '</div>' +
           '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Taunts</h3>' +
             '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Shown in the speech bubble when a floof goes unpet. One is picked at random each time (never the same line twice in a row).</p>' +

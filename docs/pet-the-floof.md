@@ -51,6 +51,9 @@ of `0` on an edge leaves that edge unfeathered (the old behaviour).
 | Pets to defeat | `boss-pets` | 20 | Chatters needed to bring down a Boss Floof |
 | Boss chance | `boss-chance` | 10 | % of scheduled spawns that are a boss |
 | Boss escapes after | `boss-despawn` | 180s | Bosses get longer than a normal floof |
+| Pet cooldown | `boss-cooldown` | 30s | How long a chatter waits between their own hits |
+| Speed at full health | `boss-speed-start` | 9 | Fast and angry when it arrives |
+| Speed at 1 life left | `boss-speed-end` | 2 | Slow and calm as it weakens |
 
 **Floofs only spawn while the stream is live** (and only when enabled). The
 **Fire a floof now** button bypasses *both*, so you can position and test the
@@ -73,11 +76,18 @@ Some spawns are a **Boss Floof**: a group fight for the whole chat.
    drains from green through yellow to red as chat wears it down.
 3. Chat attacks it with `!pet`. Each hit **drains the boss's life bar**; it goes
    down when the bar empties (default **20** hits). A chatter can hit it more than
-   once, but only every **30 seconds** — so one person *can* solo a boss, but
-   realistically lands only a few blows before it escapes.
-4. On defeat, everyone who took part is credited and gets the **Defeat Boss
+   once, but only once per **pet cooldown** (default 30s) — so one person *can*
+   solo a boss, but realistically lands only a few blows before it escapes.
+4. Every landed hit **shakes the bar and floats a red `-1`** off it. A `!pet` that
+   bounces off because the chatter is still on cooldown floats a grey **`MISS`**
+   instead, so the audience can see which pets are counting and which aren't.
+5. As its life drains the boss **calms down**: it charges around at
+   `boss-speed-start` on arrival and slows toward `boss-speed-end` with one life
+   left, while its aura cools **red → yellow → green** across the three thirds of
+   its health.
+6. On defeat, everyone who took part is credited and gets the **Defeat Boss
    Floof** achievement.
-5. If chat runs out of time the boss fades and mocks them:
+7. If chat runs out of time the boss fades and mocks them:
    **"FAILURE! BOSS FLOOF ESCAPED!"**
 
 Bosses fire on a **percentage of scheduled spawns** (`boss-chance`, default 10%),

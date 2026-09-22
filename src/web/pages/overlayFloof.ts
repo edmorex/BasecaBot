@@ -83,8 +83,10 @@ export function floofOverlayPage(): string {
     background:radial-gradient(ellipse at center, rgba(190,0,0,.55), rgba(120,0,0,0) 70%); }
   #alert.go{ display:flex; animation:alertFlash .55s steps(1,end) infinite; }
   @keyframes alertFlash{ 0%,49%{ opacity:1; } 50%,100%{ opacity:.25; } }
-  /* Boss floofs get an angry red aura to set them apart. */
-  #floof.boss img{ filter:drop-shadow(0 0 16px #ff2d2d) drop-shadow(0 0 40px #b00) saturate(1.3); }
+  /* Boss floofs get an aura that cools from red -> yellow -> green as their life
+     drains (the exact colour is set inline by setBossGlow). */
+  #floof.boss img{ filter:drop-shadow(0 0 16px #ff2d2d) drop-shadow(0 0 40px #b00) saturate(1.3);
+    transition:filter .45s ease; }
   /* Chat's progress against the boss, pinned under it. */
   #hp{ position:absolute; left:0; top:0; width:128px; opacity:0; transition:opacity .3s ease;
     font:800 15px system-ui,sans-serif; color:#fff; text-align:center;
@@ -95,6 +97,24 @@ export function floofOverlayPage(): string {
   /* Boss life: starts full and drains as chat lands hits. */
   #hp .fill{ height:100%; width:100%; background:linear-gradient(90deg,#3fb950,#7ee787);
     transition:width .3s ease, background .3s ease; }
+  /* Shake lives on an INNER element: #hp itself carries the positioning
+     transform, and an animation on it would fight that and snap the bar to 0,0. */
+  #hp-inner.shake{ animation:hpShake .34s ease; }
+  @keyframes hpShake{
+    0%,100%{ transform:translateX(0); }
+    15%{ transform:translateX(-5px); } 35%{ transform:translateX(4px); }
+    55%{ transform:translateX(-3px); } 75%{ transform:translateX(2px); }
+  }
+  /* Damage / miss numbers that float off the bar, like a game. */
+  .float{ position:absolute; font:900 24px system-ui,sans-serif; pointer-events:none;
+    text-shadow:0 2px 6px rgba(0,0,0,.95); animation:floatUp 1s ease-out forwards; }
+  .float.hit{ color:#ff3b3b; }
+  .float.miss{ color:#b9b9c2; font-size:19px; letter-spacing:.06em; }
+  @keyframes floatUp{
+    0%{ opacity:0; transform:translate(-50%, 6px) scale(.8); }
+    18%{ opacity:1; transform:translate(-50%, 0) scale(1.15); }
+    100%{ opacity:0; transform:translate(-50%, -38px) scale(1); }
+  }
   /* Mocking line after the boss gets away. */
   #escape{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     text-align:center; font-weight:900; color:#ff5a5a; font-size:clamp(24px, 6vh, 60px);
@@ -110,7 +130,7 @@ export function floofOverlayPage(): string {
     <div id="burst"></div>
     <div id="heart">💖</div>
     <div id="bubble"></div>
-    <div id="hp"><span id="hp-text"></span><div class="track"><div class="fill" id="hp-fill"></div></div></div>
+    <div id="hp"><div id="hp-inner"><span id="hp-text"></span><div class="track"><div class="fill" id="hp-fill"></div></div></div></div>
     <div id="alert">A BOSS FLOOF APPROACHES!</div>
     <div id="escape">FAILURE! BOSS FLOOF ESCAPED!</div>
   </div>
@@ -142,8 +162,10 @@ export function floofOverlayPage(): string {
   var alertEl = document.getElementById('alert');
   var escapeEl = document.getElementById('escape');
   var hp = document.getElementById('hp');
+  var hpInner = document.getElementById('hp-inner');
   var hpText = document.getElementById('hp-text');
   var hpFill = document.getElementById('hp-fill');
+  var bossNeeded = 1, bossSpeedStart = 9, bossSpeedEnd = 2;
 
   function syncSize(){
     W = document.documentElement.clientWidth || window.innerWidth || 0;
@@ -271,6 +293,9 @@ export function floofOverlayPage(): string {
     bubbleFlipped = null;
     isBoss = false;
     el.classList.remove('boss');
+    img.style.filter = '';                // drop the inline boss aura
+    hpInner.classList.remove('shake');
+    Array.prototype.forEach.call(stage.querySelectorAll('.float'), function(f){ f.remove(); });
     hp.classList.remove('show');
     alertEl.classList.remove('go');
     escapeEl.classList.remove('go');
@@ -289,7 +314,11 @@ export function floofOverlayPage(): string {
     isBoss = !!(d && d.boss);
     if(isBoss){
       el.classList.add('boss');
-      setHp(Math.max(1, Number(d.needed) || 1), Math.max(1, Number(d.needed) || 1)); // starts at full life
+      bossNeeded = Math.max(1, Number(d.needed) || 1);
+      bossSpeedStart = Number(d.speedStart) || 9;
+      bossSpeedEnd = Number(d.speedEnd) || 2;
+      setHp(bossNeeded, bossNeeded);            // starts at full life
+      setBossGlow(bossNeeded, bossNeeded);      // ...and full anger
       hp.classList.add('show');
     }
     var b = bounds();
@@ -305,8 +334,56 @@ export function floofOverlayPage(): string {
     img.src = d.url;
     draw();
     requestAnimationFrame(function(){ el.classList.add('in'); });   // fade in
+    if(isBoss) applyBossSpeed(bossNeeded);   // start fast and angry
     raf = requestAnimationFrame(loop);
     scheduleTaunt();
+  }
+
+  /** Rescale the current heading to a new pixels-per-second speed. */
+  function setSpeed(px){
+    if(!state) return;
+    var cur = Math.sqrt(state.vx * state.vx + state.vy * state.vy) || 1;
+    var k = px / cur;
+    state.vx *= k; state.vy *= k;
+  }
+
+  /**
+   * Bosses charge about at full health and calm right down as chat wears them
+   * out: speed is interpolated from speedStart (full life) to speedEnd (1 left).
+   */
+  function applyBossSpeed(remaining){
+    if(bossNeeded <= 1) return setSpeed(pxPerSec(bossSpeedEnd));
+    var t = (bossNeeded - remaining) / (bossNeeded - 1);
+    t = Math.max(0, Math.min(1, t));
+    setSpeed(pxPerSec(bossSpeedStart + (bossSpeedEnd - bossSpeedStart) * t));
+  }
+
+  /** Aura cools red -> yellow -> green across the three thirds of its life. */
+  function setBossGlow(remaining, needed){
+    var r = needed > 0 ? remaining / needed : 0;
+    var c = r > 2 / 3 ? ['#ff2d2d', '#b00000']
+          : r > 1 / 3 ? ['#ffd24a', '#c98a00']
+                      : ['#3fb950', '#1f7a33'];
+    img.style.filter = 'drop-shadow(0 0 16px ' + c[0] + ') drop-shadow(0 0 40px ' + c[1] + ') saturate(1.3)';
+  }
+
+  /** Float a damage number (or MISS) off the health bar. */
+  function floatText(text, cls){
+    if(!state) return;
+    if(stage.querySelectorAll('.float').length >= 6) return; // don't let spam flood the screen
+    var d = document.createElement('div');
+    d.className = 'float ' + cls;
+    d.textContent = text;
+    d.style.left = (state.x + SIZE / 2) + 'px';
+    d.style.top = (state.y + SIZE + 2) + 'px';
+    stage.appendChild(d);
+    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 1100);
+  }
+
+  function shakeHp(){
+    hpInner.classList.remove('shake');
+    void hpInner.offsetWidth;          // restart the animation even on rapid hits
+    hpInner.classList.add('shake');
   }
 
   /** Draw the boss's REMAINING life; it drains toward zero as chat lands hits. */
@@ -330,7 +407,20 @@ export function floofOverlayPage(): string {
 
   function bossHit(d){
     if(!isBoss || !state) return;
-    setHp(Math.max(0, Number(d && d.remaining) || 0), Math.max(1, Number(d && d.needed) || 1));
+    var remaining = Math.max(0, Number(d && d.remaining) || 0);
+    var needed = Math.max(1, Number(d && d.needed) || bossNeeded);
+    bossNeeded = needed;
+    setHp(remaining, needed);
+    setBossGlow(remaining, needed);
+    applyBossSpeed(remaining);
+    shakeHp();
+    floatText('-1', 'hit');
+  }
+
+  /** A pet that bounced off because the chatter is still on cooldown. */
+  function bossMiss(){
+    if(!isBoss || !state) return;
+    floatText('MISS', 'miss');
   }
 
   function pet(){
@@ -378,6 +468,7 @@ export function floofOverlayPage(): string {
       else if(m.type==='despawn') despawn(m.payload);
       else if(m.type==='boss-alert') bossAlert(m.payload);
       else if(m.type==='boss-hit') bossHit(m.payload);
+      else if(m.type==='boss-miss') bossMiss();
       else if(m.type==='boss-defeated') pet();
     }catch(_e){} };
     ws.onerror=function(){ try{ ws.close(); }catch(_e){} };
