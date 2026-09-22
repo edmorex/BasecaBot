@@ -16,12 +16,27 @@ the first chatter to type **`!pet`** wins. Wins are tracked, ranked, and feed th
 
 Add **Pet the Floof** from **Admin → Overlays** as a Browser Source:
 
-- **Size: 1600 × 200**
-- Position it flush with the **bottom-right** corner of your canvas.
+- **Suggested size: 1600 × 200**, positioned flush with the **bottom-right** corner.
+- The overlay **adapts to whatever size you set** — it reads the Browser Source's
+  own dimensions and re-reads them if you resize it, so you can give it a taller
+  or full-screen area later without changing anything.
 
-The floof is drawn at 128×128 and ping-pongs inside the strip. If it clips
-something at the edges, use the four **padding** settings to inset its travel area
-rather than resizing the source.
+The floof is drawn at 128×128 and ping-pongs inside whatever area it's given.
+
+### Padding does two jobs
+
+The four **padding** values (in pixels, per edge) define an inset "safe area":
+
+1. **A hard boundary** the floof bounces off, so it never drifts into an edge.
+2. **A feather band.** The win effects — the bloom, the shockwave ring and the
+   heart — expand well past the floof's own 128px box and would otherwise be
+   sliced off by the edge of the source. Everything is drawn through a mask that
+   is fully opaque inside the safe area and ramps to transparent at the real
+   render border, so anything crossing the padding line **fades out smoothly
+   instead of hard-clipping** in the final composite.
+
+So set padding to roughly how far you want the glow to be able to bleed. Padding
+of `0` on an edge leaves that edge unfeathered (the old behaviour).
 
 ## Settings (Admin → Pet the Floof)
 

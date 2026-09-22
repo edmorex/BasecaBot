@@ -1,15 +1,18 @@
 /**
  * OBS browser-source overlay for "Pet the Floof".
  *
- * A standalone, transparent 1600×200 strip meant to sit flush with the BOTTOM-RIGHT
- * corner of the canvas. It reads a read-only `?token=` and subscribes to the
- * `floof` WebSocket-hub room:
+ * A standalone, transparent strip that ADAPTS to whatever size the Browser Source
+ * is set to (1600×200 is just the suggested layout). It reads a read-only
+ * `?token=` and subscribes to the `floof` WebSocket-hub room:
  *   spawn   -> fade a floof in and start it ping-ponging + rocking
  *   pet     -> stop, bloom pink, resolve into a heart, fade out
  *   despawn -> nobody pet it in time; just fade out
  *
- * Padding values (set in the admin panel) inset the travel area so the floof never
- * clips the edges of whatever the overlay is butted up against.
+ * Padding values (set in the admin panel) do two things: they inset the travel
+ * area the floof bounces inside, AND they define a feather band. Everything is
+ * drawn through a mask that is fully opaque inside the padded area and ramps to
+ * transparent at the real render edge — so the win effects (which bloom well past
+ * the floof's own box) fade out instead of hard-clipping in the final composite.
  *
  * Self-contained (inline CSS/JS, no bundler); because this string is a template
  * literal, the embedded script uses plain concatenation and avoids `${` / backticks.
@@ -22,8 +25,11 @@ export function floofOverlayPage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Pet the Floof — Overlay</title>
 <style>
-  html,body{ margin:0; width:1600px; height:200px; background:transparent; overflow:hidden;
+  html,body{ margin:0; width:100%; height:100%; background:transparent; overflow:hidden;
     font-family:system-ui,'Segoe UI',sans-serif; }
+  /* Everything renders inside this stage so one mask can feather the padded
+     edges. The mask itself is built in JS from the current padding values. */
+  #stage{ position:fixed; inset:0; }
   #floof{ position:absolute; width:128px; height:128px; left:0; top:0; opacity:0;
     transition:opacity .8s ease; will-change:transform; }
   #floof img{ width:128px; height:128px; display:block; border-radius:12px;
@@ -62,28 +68,35 @@ export function floofOverlayPage(): string {
   #bubble{ position:absolute; left:0; top:0; opacity:0; transition:opacity .35s ease;
     background:#fff; color:#1a1220; font-weight:800; font-size:22px; white-space:nowrap;
     padding:10px 16px; border-radius:14px; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+  /* Tail points RIGHT at the floof by default (bubble sits to its right). */
   #bubble::after{ content:''; position:absolute; left:-9px; top:50%; margin-top:-8px;
     border:8px solid transparent; border-right-color:#fff; }
+  /* ...and swaps to the bubble's right edge when it sits to the floof's LEFT. */
+  #bubble.flip::after{ left:auto; right:-9px; border-right-color:transparent; border-left-color:#fff; }
   #bubble.show{ opacity:1; }
 </style>
 </head>
 <body>
-  <div id="floof"><img id="floof-img" alt="" /></div>
-  <div id="burst"></div>
-  <div id="heart">💖</div>
-  <div id="bubble"></div>
+  <div id="stage">
+    <div id="floof"><img id="floof-img" alt="" /></div>
+    <div id="burst"></div>
+    <div id="heart">💖</div>
+    <div id="bubble"></div>
+  </div>
 <script>
 (function(){
   var qs = new URLSearchParams(location.search);
   var token = qs.get('token') || '';
 
-  var W = 1600, H = 200, SIZE = 128;
+  // The source can be any size — read it from the viewport and re-read on resize.
+  var W = 0, H = 0, SIZE = 128;
   var TAUNTS = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
   var IDLE_MS = 10000;      // unpet time before a taunt
   var BUBBLE_MS = 2500;     // how long the bubble stays up
   var ROCK_DEG = 9;         // happy wiggle amplitude
   var ROCK_HZ = 1.6;
 
+  var stage = document.getElementById('stage');
   var el = document.getElementById('floof');
   var img = document.getElementById('floof-img');
   var heart = document.getElementById('heart');
@@ -91,6 +104,30 @@ export function floofOverlayPage(): string {
   var bubble = document.getElementById('bubble');
   var PET_MS = 7600;   // full win sequence before the stage is torn down
   var lastTaunt = -1;  // so the bubble never shows the same line twice running
+  var pad = { left: 0, right: 0, top: 0, bottom: 0 };
+  var bubbleW = 0, bubbleH = 0, bubbleFlipped = null;
+
+  function syncSize(){
+    W = document.documentElement.clientWidth || window.innerWidth || 0;
+    H = document.documentElement.clientHeight || window.innerHeight || 0;
+  }
+
+  /**
+   * Feather the padded edges. The mask is fully opaque across the padded (safe)
+   * area and ramps to transparent at the real render border, so any part of the
+   * win animation that spills past the padding fades out rather than being cut
+   * off by the edge of the source. Padding of 0 leaves that side unfeathered.
+   */
+  function applyMask(){
+    var h = 'linear-gradient(to right, transparent 0px, #000 ' + pad.left + 'px, #000 calc(100% - ' + pad.right + 'px), transparent 100%)';
+    var v = 'linear-gradient(to bottom, transparent 0px, #000 ' + pad.top + 'px, #000 calc(100% - ' + pad.bottom + 'px), transparent 100%)';
+    var img = h + ', ' + v;
+    stage.style.webkitMaskImage = img;
+    stage.style.maskImage = img;
+    // Intersect the two so corners feather on both axes.
+    stage.style.webkitMaskComposite = 'source-in';
+    stage.style.maskComposite = 'intersect';
+  }
 
   var state = null;         // { x, y, vx, vy, pad } while a floof is on screen
   var raf = null, lastT = 0, idleTimer = null, bubbleTimer = null, paused = false;
@@ -113,18 +150,35 @@ export function floofOverlayPage(): string {
   // Speed slider (1..10) -> pixels/second.
   function pxPerSec(speed){ var s = Math.max(1, Math.min(10, Number(speed) || 5)); return 30 + s * 26; }
 
-  function bounds(pad){
-    return {
+  function bounds(){
+    var b = {
       minX: pad.left, maxX: W - SIZE - pad.right,
       minY: pad.top,  maxY: H - SIZE - pad.bottom
     };
+    // If the source is smaller than the sprite + padding, pin rather than jitter.
+    if(b.maxX < b.minX) b.maxX = b.minX = Math.max(0, (W - SIZE) / 2);
+    if(b.maxY < b.minY) b.maxY = b.minY = Math.max(0, (H - SIZE) / 2);
+    return b;
   }
 
   function draw(){
     var rock = paused ? 0 : Math.sin(performance.now() / 1000 * Math.PI * 2 * ROCK_HZ) * ROCK_DEG;
     el.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px) rotate(' + rock.toFixed(2) + 'deg)';
-    // Keep the bubble pinned to the floof's right shoulder.
-    bubble.style.transform = 'translate(' + (state.x + SIZE + 14) + 'px,' + (state.y + SIZE / 2 - 22) + 'px)';
+
+    // Put the bubble on the side with room: floof in the right half -> bubble to
+    // its LEFT, and vice versa, so the bubble is never pushed off the edge. The
+    // tail swaps sides with it (.flip).
+    var onRight = (state.x + SIZE / 2) > (W / 2);
+    if(onRight !== bubbleFlipped){
+      bubbleFlipped = onRight;
+      bubble.classList.toggle('flip', onRight);
+    }
+    var bx = onRight ? (state.x - 14 - bubbleW) : (state.x + SIZE + 14);
+    var by = state.y + SIZE / 2 - bubbleH / 2;
+    // Belt and braces: never let it leave the rendered area.
+    bx = Math.max(0, Math.min(W - bubbleW, bx));
+    by = Math.max(0, Math.min(H - bubbleH, by));
+    bubble.style.transform = 'translate(' + bx + 'px,' + by + 'px)';
   }
 
   function loop(t){
@@ -132,7 +186,7 @@ export function floofOverlayPage(): string {
     var dt = lastT ? Math.min(0.05, (t - lastT) / 1000) : 0;
     lastT = t;
     if(!paused){
-      var b = bounds(state.pad);
+      var b = bounds();
       state.x += state.vx * dt;
       state.y += state.vy * dt;
       // Ping-pong off the padded edges.
@@ -151,6 +205,11 @@ export function floofOverlayPage(): string {
       if(!state) return;
       paused = true;                                  // pause mid-drift to "speak"
       bubble.textContent = pickTaunt();
+      // Measure once now the text is set; draw() reuses it instead of forcing a
+      // layout every frame.
+      bubbleW = bubble.offsetWidth;
+      bubbleH = bubble.offsetHeight;
+      draw();                       // reposition before it becomes visible
       bubble.classList.add('show');
       bubbleTimer = setTimeout(function(){
         bubble.classList.remove('show');
@@ -169,7 +228,8 @@ export function floofOverlayPage(): string {
     // before disappearing. Killing the transition for this frame avoids that.
     el.style.transition = 'none';
     el.classList.remove('in', 'pet');
-    bubble.classList.remove('show');
+    bubble.classList.remove('show', 'flip');
+    bubbleFlipped = null;
     heart.classList.remove('go');
     burst.classList.remove('go');
     void el.offsetWidth;        // flush the change while the transition is off
@@ -178,8 +238,10 @@ export function floofOverlayPage(): string {
 
   function spawn(d){
     reset();
-    var pad = (d && d.padding) || { left:0, right:0, top:0, bottom:0 };
-    var b = bounds(pad);
+    syncSize();
+    pad = (d && d.padding) || { left:0, right:0, top:0, bottom:0 };
+    applyMask();
+    var b = bounds();
     var speed = pxPerSec(d && d.speed);
     // Random start + a diagonal heading, so no two spawns look the same.
     var ang = (Math.random() * 0.6 + 0.2) * Math.PI * (Math.random() < 0.5 ? 1 : -1);
@@ -187,8 +249,7 @@ export function floofOverlayPage(): string {
       x: b.minX + Math.random() * Math.max(1, b.maxX - b.minX),
       y: b.minY + Math.random() * Math.max(1, b.maxY - b.minY),
       vx: Math.cos(ang) * speed * (Math.random() < 0.5 ? 1 : -1),
-      vy: Math.sin(ang) * speed * 0.45,
-      pad: pad
+      vy: Math.sin(ang) * speed * 0.45
     };
     img.src = d.url;
     draw();
@@ -237,6 +298,21 @@ export function floofOverlayPage(): string {
     ws.onclose=function(ev){ if(!ev || ev.code!==4001) setTimeout(connect,2500); };
   }
 
+  // OBS can resize the Browser Source at any time: re-read the viewport, rebuild
+  // the mask, and pull the floof back inside the new bounds.
+  window.addEventListener('resize', function(){
+    syncSize();
+    applyMask();
+    if(state){
+      var b = bounds();
+      state.x = Math.max(b.minX, Math.min(b.maxX, state.x));
+      state.y = Math.max(b.minY, Math.min(b.maxY, state.y));
+      draw();
+    }
+  });
+
+  syncSize();
+  applyMask();
   if(!token) return;
   connect();
 })();
