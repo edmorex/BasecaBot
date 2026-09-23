@@ -932,7 +932,9 @@ export function adminPage(): string {
               '<div class="boss-meta"><div class="boss-name">' + esc(b.name) + (b.enabled ? '' : ' <span class="muted">(disabled)</span>') + '</div>' +
               '<div class="muted" style="font-size:.8rem">' + b.hp + ' HP · ' + hurt + ' weakness' + (hurt === 1 ? '' : 'es') +
               ' · ' + b.size + 'px · escapes in ' + b.escapeSeconds + 's</div></div>' +
-              '<button type="button" class="pink" data-bedit="' + b.id + '">Edit</button></div>';
+              '<div class="rowline" style="gap:.4rem; flex-wrap:nowrap">' +
+              '<button type="button" class="pink" data-bedit="' + b.id + '">Edit</button>' +
+              '<button type="button" class="pink" data-bclone="' + b.id + '">Clone</button></div></div>';
           }).join('')
         : '<span class="muted">No bosses yet. Create one to get started.</span>';
 
@@ -1062,6 +1064,19 @@ export function adminPage(): string {
           // Clone so an abandoned edit never mutates the cached roster.
           bossEditing = JSON.parse(JSON.stringify(found));
           renderBossEditor();
+        };
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bclone]'), function (b) {
+        b.onclick = function () {
+          api('POST', '/api/admin/boss/clone', { id: Number(b.getAttribute('data-bclone')) })
+            .then(function (d) {
+              // Drop straight into the copy so only the differences need typing.
+              bossEditing = d.boss;
+              renderBoss();
+              bossToast('Cloned — left out of the random pool until you enable it.', true);
+            })
+            .catch(function (e) { bossToast(e.message, false); });
         };
       });
 

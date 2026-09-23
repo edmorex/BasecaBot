@@ -384,6 +384,37 @@ export class BossBattleService {
     return this.view(row);
   }
 
+  /**
+   * Duplicate a boss so a near-identical one can be made by tweaking a few
+   * fields. The copy is created **disabled**: an enabled duplicate would join
+   * the random pool the instant it was made, and a half-finished clone showing
+   * up mid-stream is the one outcome nobody wants. Tick "Include in the random
+   * pool" once it is ready.
+   */
+  async cloneBoss(id: number): Promise<BossView> {
+    const src = await this.getBoss(id);
+    if (!src) throw new BossError('That boss no longer exists.');
+    // Spreading the parsed view and going back through createBoss means every
+    // field copies across and is re-validated on the way in — and a column added
+    // to Boss later is carried over without touching this method. `id` and
+    // `imageUrl` are not inputs, so sanitize simply ignores them.
+    const clone = await this.createBoss({ ...src, name: await this.copyName(src.name), enabled: false });
+    this.logger.info({ from: id, to: clone.id }, 'boss: cloned');
+    return clone;
+  }
+
+  /** "Moth" -> "Moth (copy)" -> "Moth (copy 2)" …, kept inside the name cap. */
+  private async copyName(original: string): Promise<string> {
+    const taken = new Set((await this.db.boss.findMany({ select: { name: true } })).map((b) => b.name));
+    for (let n = 1; n <= 50; n++) {
+      const suffix = n === 1 ? ' (copy)' : ` (copy ${n})`;
+      const candidate = original.slice(0, 60 - suffix.length) + suffix;
+      if (!taken.has(candidate)) return candidate;
+    }
+    // Absurd number of copies; fall back to something guaranteed unique.
+    return `${original.slice(0, 44)} (copy ${Date.now() % 100000})`;
+  }
+
   async deleteBoss(id: number): Promise<void> {
     try {
       await this.db.boss.delete({ where: { id } });

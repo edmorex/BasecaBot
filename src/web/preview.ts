@@ -653,6 +653,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       else previewBosses.push(row);
       return json(200, { ok: true, boss: row });
     }
+    if (p === '/api/admin/boss/clone') {
+      if (!Number(body.id)) return json(400, { error: 'Which boss?' });
+      const src = previewBosses.find((b) => b.id === Number(body.id));
+      if (!src) return json(400, { error: 'That boss no longer exists.' });
+      const taken = new Set(previewBosses.map((b) => b.name));
+      let name = src.name + ' (copy)';
+      for (let n = 2; taken.has(name); n++) name = src.name + ' (copy ' + n + ')';
+      const row = { ...src, id: previewBosses.length + 1, name, enabled: false };
+      previewBosses.push(row);
+      return json(200, { ok: true, boss: row });
+    }
     if (p === '/api/admin/boss/delete') {
       const i = previewBosses.findIndex((b) => b.id === Number(body.id));
       if (i >= 0) previewBosses.splice(i, 1);

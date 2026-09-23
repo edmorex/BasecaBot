@@ -450,6 +450,20 @@ export async function postAdminBossSave(s: WebServer, req: IncomingMessage, res:
   }
 }
 
+/** Duplicate a boss (created disabled) and hand it back for editing. */
+export async function postAdminBossClone(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const id = bossIdOf(body.id);
+  if (!id) throw new HttpError(400, 'Which boss?');
+  try {
+    s.json(res, 200, { ok: true, boss: await s.boss.cloneBoss(id) });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
 export async function postAdminBossDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const body = await s.readJson(req);

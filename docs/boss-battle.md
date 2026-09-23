@@ -142,11 +142,24 @@ effects up to **2MB**, music up to **8MB**.
 works fine without it. Replacing a sound takes effect on the **next battle** —
 no need to refresh the Browser Source.
 
+The **red alert klaxon**, **terminal typing** and **battle music** all loop for as
+long as their phase lasts, so short clips are fine — a one-second typing blip will
+simply repeat until the dossier clears. The rest are one-shots.
+
 ---
 
 ## Building a boss
 
-**Create New Boss** opens the editor.
+**Create New Boss** opens the editor. **Clone** next to an existing boss copies it
+and drops you straight into the copy, so a variant only needs its differences
+typed in.
+
+> A clone is created **outside the random pool** (`Include in the random pool`
+> unticked). An enabled duplicate would join the rotation the moment it was made,
+> and a half-finished boss turning up mid-stream is the one thing worth guarding
+> against. Tick the box when it's ready.
+
+Repeated clones are numbered — `Dread Moth (copy)`, `(copy 2)`, and so on.
 
 | Field | Notes |
 |---|---|

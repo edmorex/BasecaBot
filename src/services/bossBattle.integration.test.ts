@@ -116,6 +116,49 @@ run('BossBattleService (integration)', () => {
     await expect(svc.pickBoss(999999)).rejects.toThrow(/no longer exists/i);
   });
 
+  it('clones every field of a boss', async () => {
+    const src = await make({
+      description: 'It eats sweaters.', image: 'moth.png', hp: 42,
+      emotesPublic: ['Kappa'], emotesPrivate: ['LUL'], emotesHeal: ['HeyGuys'],
+      tauntOpening: 'hello', tauntBattle: ['a', 'b'], tauntDeath: 'urk', tauntEscape: 'bye',
+      escapeSeconds: 240, size: 512, speedFull: 4, speedNearDeath: 8, styles: ['darting', 'spin'],
+    });
+    const clone = await svc.cloneBoss(src.id);
+    expect(clone.id).not.toBe(src.id);
+    // Everything except the name, the id and the enabled flag is identical.
+    expect({ ...clone, id: 0, name: '', enabled: true }).toEqual({ ...src, id: 0, name: '', enabled: true });
+  });
+
+  it('leaves a clone out of the random pool so it cannot spawn half-finished', async () => {
+    const src = await make({ image: 'moth.png', enabled: true });
+    const clone = await svc.cloneBoss(src.id);
+    expect(clone.enabled).toBe(false);
+    // Only the original is ever drawn.
+    for (let i = 0; i < 12; i++) expect((await svc.randomBoss())?.id).toBe(src.id);
+  });
+
+  it('numbers repeated clones instead of colliding', async () => {
+    const src = await make({ image: 'moth.png' });
+    expect((await svc.cloneBoss(src.id)).name).toBe('Dread Moth (copy)');
+    expect((await svc.cloneBoss(src.id)).name).toBe('Dread Moth (copy 2)');
+    expect((await svc.cloneBoss(src.id)).name).toBe('Dread Moth (copy 3)');
+    // Cloning a clone chains off its own name rather than the original's.
+    const second = (await svc.listBosses()).find((b) => b.name === 'Dread Moth (copy 2)')!;
+    expect((await svc.cloneBoss(second.id)).name).toBe('Dread Moth (copy 2) (copy)');
+  });
+
+  it('keeps a cloned name inside the 60-character cap', async () => {
+    const long = 'B'.repeat(60);
+    const src = await svc.createBoss({ name: long });
+    const clone = await svc.cloneBoss(src.id);
+    expect(clone.name.length).toBeLessThanOrEqual(60);
+    expect(clone.name.endsWith(' (copy)')).toBe(true);
+  });
+
+  it('refuses to clone a boss that is gone', async () => {
+    await expect(svc.cloneBoss(999999)).rejects.toBeInstanceOf(BossError);
+  });
+
   it('deletes a boss', async () => {
     const boss = await make();
     await svc.deleteBoss(boss.id);

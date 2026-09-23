@@ -43,7 +43,7 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofBoss, postAdminFloofTaunt, postAdminFloofImageBoss, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofBoss, postAdminFloofTaunt, postAdminFloofImageBoss, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -312,6 +312,8 @@ export class WebServer {
           return postAdminBossSimAction(this, req, res);
         case '/api/admin/boss/save':
           return postAdminBossSave(this, req, res);
+        case '/api/admin/boss/clone':
+          return postAdminBossClone(this, req, res);
         case '/api/admin/boss/delete':
           return postAdminBossDelete(this, req, res);
         case '/api/admin/boss/image':

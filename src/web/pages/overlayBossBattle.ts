@@ -356,11 +356,14 @@ export function bossBattleOverlayPage(): string {
     // Budget the typing so it always finishes with time left to read.
     var chars = name.length + desc.length || 1;
     var per = Math.max(12, Math.min(45, (hold * 0.62) / chars));
+    // Loops for the WHOLE dossier phase, not just while text is still arriving:
+    // the typing budget is capped per character, so a short dossier finishes well
+    // before the hold does and the clip would otherwise cut out mid-screen.
+    // Stopped in onSpawn (or by reset), when the dossier actually leaves.
     playLoop('intel', volSfx * 0.6);
 
     typeInto(nameEl, name, per, function(){
       typeInto(descEl, desc, per, function(){
-        stopLoop('intel');
         renderVulns(vulnEl, d);
       });
     });
@@ -402,6 +405,7 @@ export function bossBattleOverlayPage(): string {
 
   // ── Spawn + the fight ─────────────────────────────────────────────────────
   function onSpawn(d){
+    stopLoop('intel');
     hide(elIntel);
     var cfg = (d && d.config) || {};
     var size = Number(d && d.size) || 256;
