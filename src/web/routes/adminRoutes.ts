@@ -6,6 +6,17 @@ import { HttpError, LEVEL_LABELS } from '../httpShared.js';
 import { AliasError } from '../../services/users.js';
 import type { VoiceParams } from '../../services/tts.js';
 import { FloofError, MAX_IMAGE_BYTES, type FloofConfig } from '../../services/floof.js';
+import {
+  BossError,
+  BOSS_RANGES,
+  SIZES,
+  STYLES,
+  MAX_IMAGE_BYTES as MAX_BOSS_IMAGE_BYTES,
+  MAX_SFX_BYTES,
+  MAX_BGM_BYTES,
+  type BossConfig,
+  type BossInput,
+} from '../../services/bossBattle.js';
 import { PermissionLevel } from '../../core/events.js';
 import { buildSimEvent, isSimEventType } from '../../services/eventSimulator.js';
 
@@ -357,4 +368,169 @@ export async function postAdminFloofImageDelete(s: WebServer, req: IncomingMessa
     if (e instanceof FloofError) throw new HttpError(400, e.message);
     throw e;
   }
+}
+
+// ── Boss Battle ───────────────────────────────────────────────────────────────
+
+export async function getAdminBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const [bosses, images, sounds] = await Promise.all([s.boss.listBosses(), s.boss.listImages(), s.boss.listSounds()]);
+  s.json(res, 200, {
+    config: s.boss.getConfig(),
+    defaults: s.boss.defaults,
+    ranges: BOSS_RANGES,
+    bosses,
+    images,
+    sounds,
+    sizes: SIZES,
+    styles: STYLES,
+    maxImageBytes: MAX_BOSS_IMAGE_BYTES,
+    maxSfxBytes: MAX_SFX_BYTES,
+    maxBgmBytes: MAX_BGM_BYTES,
+  });
+}
+
+export async function postAdminBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const config = await s.boss.setConfig((body.config ?? body) as Partial<BossConfig>);
+  s.json(res, 200, { ok: true, config });
+}
+
+/** Queue a real battle behind its countdown. Bypasses the enable switch. */
+export async function postAdminBossStart(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const problem = await s.boss.requestStart(bossIdOf(body.bossId), Number(body.delaySeconds ?? 0));
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+export async function postAdminBossCancel(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const problem = await s.boss.requestCancel();
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+/**
+ * Spawn a MOCK battle: the full presentation, but nothing is recorded and no
+ * achievements fire, so the overlay can be tuned without polluting the database.
+ */
+export async function postAdminBossSimSpawn(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const problem = await s.boss.requestSimSpawn(bossIdOf(body.bossId));
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+/** Stand in for a chatter hitting, missing or healing during a mock battle. */
+export async function postAdminBossSimAction(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const action = String(body.action ?? '');
+  if (action !== 'hit' && action !== 'miss' && action !== 'heal') throw new HttpError(400, 'Unknown simulate action.');
+  const problem = await s.boss.requestSimAction(action);
+  if (problem) throw new HttpError(409, problem);
+  s.json(res, 200, { ok: true });
+}
+
+export async function postAdminBossSave(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const input = (body.boss ?? {}) as BossInput;
+  try {
+    const id = bossIdOf(body.id);
+    const boss = id ? await s.boss.updateBoss(id, input) : await s.boss.createBoss(input);
+    s.json(res, 200, { ok: true, boss });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+export async function postAdminBossDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const id = bossIdOf(body.id);
+  if (!id) throw new HttpError(400, 'Which boss?');
+  try {
+    await s.boss.deleteBoss(id);
+    s.json(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** Upload boss art. Raw binary body + `?name=`, same as the floof uploader. */
+export async function postAdminBossImage(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  s.requireAdmin(req);
+  const name = url.searchParams.get('name') ?? 'boss.png';
+  const buf = await readRawBody(req, MAX_BOSS_IMAGE_BYTES, 'Image');
+  try {
+    s.json(res, 200, { ok: true, image: await s.boss.saveImage(name, buf) });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+export async function postAdminBossImageDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    await s.boss.deleteImage(String(body.name ?? ''));
+    s.json(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** Upload one sound slot. Raw binary body + `?slot=` and `?name=`. */
+export async function postAdminBossSound(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  s.requireAdmin(req);
+  const slot = url.searchParams.get('slot') ?? '';
+  const name = url.searchParams.get('name') ?? 'sound.mp3';
+  // BGM gets the larger budget; the service re-checks against the exact slot.
+  const buf = await readRawBody(req, MAX_BGM_BYTES, 'Sound');
+  try {
+    s.json(res, 200, { ok: true, sound: await s.boss.saveSound(slot, name, buf) });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+export async function postAdminBossSoundDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    await s.boss.clearSound(String(body.slot ?? ''));
+    s.json(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof BossError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+/** A positive integer id, or null for "no id" / "random". */
+function bossIdOf(raw: unknown): number | null {
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Collect a raw binary upload body, failing fast once it exceeds `limit`. */
+async function readRawBody(req: IncomingMessage, limit: number, what: string): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > limit) throw new HttpError(413, `${what} is too large (max ${Math.floor(limit / 1024 / 1024)}MB).`);
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
 }

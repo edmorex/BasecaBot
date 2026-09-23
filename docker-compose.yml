@@ -37,6 +37,10 @@ services:
       # `up --build`. Create it once on the host: mkdir -p /opt/floofs
       # See docs/pet-the-floof.md.
       - /opt/floofs:/app/public/assets/floofs
+      # Boss Battle art + sound uploads, for the same reason. Create it once on
+      # the host: mkdir -p /opt/boss
+      # See docs/boss-battle.md.
+      - /opt/boss:/app/public/assets/boss
     expose:
       - '8080' # WebSocket hub — reached by the edge Caddy over the `edge` network
       - '8090' # HTTP server (dashboard + OAuth + API) — also via the edge Caddy

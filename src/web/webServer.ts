@@ -16,6 +16,7 @@ import type { TtsService } from '../services/tts.js';
 import type { AchievementService } from '../services/achievements.js';
 import type { WsHub } from './wsHub.js';
 import type { FloofService } from '../services/floof.js';
+import type { BossBattleService } from '../services/bossBattle.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -34,6 +35,7 @@ import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
+import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
 
 import { handleLogin, handleCallback, handleLogout, getMe, getMyAchievements, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
@@ -41,14 +43,14 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofBoss, postAdminFloofTaunt, postAdminFloofImageBoss, postAdminFloofImage, postAdminFloofImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofBoss, postAdminFloofTaunt, postAdminFloofImageBoss, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
 
 /** Subdirectories of public/assets that may be served (uploads live here). */
-const ASSET_SUBDIRS = new Set(['floofs']);
+const ASSET_SUBDIRS = new Set(['floofs', 'boss']);
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -58,6 +60,10 @@ const ASSET_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.css': 'text/css',
   '.js': 'text/javascript',
+  // Boss Battle sound effects + BGM (uploaded from the admin panel).
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav',
 };
 
 /**
@@ -90,6 +96,7 @@ export class WebServer {
     readonly achievements: AchievementService,
     readonly ws: WsHub,
     readonly floof: FloofService,
+    readonly boss: BossBattleService,
   ) {}
 
   start(): void {
@@ -157,6 +164,9 @@ export class WebServer {
         case '/overlays/floof':
           // OBS "Pet the Floof" strip. Public HTML; inert without ?token=.
           return this.html(res, floofOverlayPage());
+        case '/overlays/boss-battle':
+          // OBS Boss Battle raid (1920x1080). Public HTML; inert without ?token=.
+          return this.html(res, bossBattleOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':
@@ -195,6 +205,8 @@ export class WebServer {
           return getAdminAchievements(this, req, res);
         case '/api/admin/floof':
           return getAdminFloof(this, req, res);
+        case '/api/admin/boss':
+          return getAdminBoss(this, req, res);
         case '/api/admin/tts/preview':
           return getAdminTtsPreview(this, req, res, url);
         case '/healthz':
@@ -288,6 +300,28 @@ export class WebServer {
           return postAdminFloofImage(this, req, res, url);
         case '/api/admin/floof/image/delete':
           return postAdminFloofImageDelete(this, req, res);
+        case '/api/admin/boss':
+          return postAdminBoss(this, req, res);
+        case '/api/admin/boss/start':
+          return postAdminBossStart(this, req, res);
+        case '/api/admin/boss/cancel':
+          return postAdminBossCancel(this, req, res);
+        case '/api/admin/boss/sim/spawn':
+          return postAdminBossSimSpawn(this, req, res);
+        case '/api/admin/boss/sim/action':
+          return postAdminBossSimAction(this, req, res);
+        case '/api/admin/boss/save':
+          return postAdminBossSave(this, req, res);
+        case '/api/admin/boss/delete':
+          return postAdminBossDelete(this, req, res);
+        case '/api/admin/boss/image':
+          return postAdminBossImage(this, req, res, url);
+        case '/api/admin/boss/image/delete':
+          return postAdminBossImageDelete(this, req, res);
+        case '/api/admin/boss/sound':
+          return postAdminBossSound(this, req, res, url);
+        case '/api/admin/boss/sound/delete':
+          return postAdminBossSoundDelete(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }

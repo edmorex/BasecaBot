@@ -103,6 +103,7 @@ export function adminPage(): string {
       { id: 'tts', label: 'TTS' },
       { id: 'achievements', label: 'Achievements' },
       { id: 'floof', label: 'Pet the Floof' },
+      { id: 'boss', label: 'Boss Battle' },
     ];
     var section = 'users';
     var users = [];
@@ -391,6 +392,7 @@ export function adminPage(): string {
       else if (section === 'tts') renderTts();
       else if (section === 'achievements') renderAchievements();
       else if (section === 'floof') renderFloof();
+      else if (section === 'boss') renderBoss();
       else renderSim();
     }
 
@@ -868,6 +870,415 @@ export function adminPage(): string {
       } catch (e) {
         main.innerHTML = '<h2>Pet the Floof</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
       }
+    }
+
+
+    // ── Boss Battle: settings, triggers, the sound library and the boss roster ──
+    var BOSS_ANIM = [
+      { key: 'alertSeconds', label: 'Red alert holds', hint: 'seconds of klaxon before the dossier', min: 1, max: 15, step: 1 },
+      { key: 'intelSeconds', label: 'Dossier holds', hint: 'seconds the boss intel screen stays up', min: 1, max: 30, step: 1 },
+      { key: 'tauntEverySeconds', label: 'Taunt every', hint: 'seconds of movement between taunts', min: 3, max: 120, step: 1 },
+      { key: 'tauntHoldSeconds', label: 'Taunt holds', hint: 'seconds the boss stops to speak', min: 1, max: 15, step: 1 },
+      { key: 'dartSeconds', label: 'Dart leg', hint: 'seconds per zig-zag leg', min: 0.2, max: 3, step: 0.1 },
+      { key: 'spinRadius', label: 'Spin radius', hint: 'pixels across the circular path', min: 40, max: 600, step: 10 },
+      { key: 'spinSeconds', label: 'Spin lap', hint: 'seconds for one full circle', min: 2, max: 30, step: 1 },
+      { key: 'crowdMax', label: 'Max fighters shown', hint: 'avatars drawn along the bottom', min: 1, max: 200, step: 1 }
+    ];
+    var bossData = null;
+    var bossEditing = null;   // the boss being edited, or null when the roster is showing
+
+    function bossToast(msg, ok) { toast('boss-toast', msg, ok); }
+
+    /** A <select> of every boss, defaulting to a random pick. */
+    function bossPicker(id) {
+      var opts = ['<option value="">Random</option>'];
+      (bossData.bosses || []).forEach(function (b) {
+        opts.push('<option value="' + b.id + '">' + esc(b.name) + (b.enabled ? '' : ' (disabled)') + '</option>');
+      });
+      return '<select id="' + id + '">' + opts.join('') + '</select>';
+    }
+
+    function pickedBoss(id) {
+      var v = document.getElementById(id).value;
+      return v ? Number(v) : null;
+    }
+
+    function numField(f, cfg) {
+      return '<label class="field"><span>' + esc(f.label) + '</span>' +
+        '<input type="number" id="boss-' + f.key + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+        '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
+    }
+
+    async function renderBoss() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Boss Battle — chat fights a boss with emotes.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Boss Battle</h2><p class="muted">Loading…</p>';
+      try {
+        bossData = await api('GET', '/api/admin/boss');
+      } catch (e) {
+        main.innerHTML = '<h2>Boss Battle</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
+        return;
+      }
+      if (bossEditing) return renderBossEditor();
+
+      var c = bossData.config;
+      var roster = (bossData.bosses || []).length
+        ? bossData.bosses.map(function (b) {
+            var hurt = (b.emotesPublic || []).length + (b.emotesPrivate || []).length;
+            return '<div class="boss-card">' +
+              (b.imageUrl ? '<img src="' + esc(b.imageUrl) + '" alt="" />' : '<div class="noart">no art</div>') +
+              '<div class="boss-meta"><div class="boss-name">' + esc(b.name) + (b.enabled ? '' : ' <span class="muted">(disabled)</span>') + '</div>' +
+              '<div class="muted" style="font-size:.8rem">' + b.hp + ' HP · ' + hurt + ' weakness' + (hurt === 1 ? '' : 'es') +
+              ' · ' + b.size + 'px · escapes in ' + b.escapeSeconds + 's</div></div>' +
+              '<button type="button" class="pink" data-bedit="' + b.id + '">Edit</button></div>';
+          }).join('')
+        : '<span class="muted">No bosses yet. Create one to get started.</span>';
+
+      var soundRows = (bossData.sounds || []).map(function (s) {
+        return '<div class="snd-row"><div><strong>' + esc(s.label) + '</strong>' +
+          '<div class="muted" style="font-size:.78rem">' + esc(s.hint) + (s.file ? ' · ' + esc(s.file) + ' (' + Math.round(s.bytes / 1024) + ' KB)' : ' · empty') + '</div></div>' +
+          '<div class="rowline" style="gap:.4rem; flex-wrap:nowrap">' +
+          (s.url ? '<button type="button" class="pink" data-bplay="' + esc(s.url) + '">Play</button>' : '') +
+          '<input type="file" accept="audio/mpeg,audio/ogg,audio/wav,.mp3,.ogg,.wav" data-bsnd="' + esc(s.slot) + '" />' +
+          (s.file ? '<button type="button" class="pink" data-bsnddel="' + esc(s.slot) + '">Clear</button>' : '') +
+          '</div></div>';
+      }).join('');
+
+      main.innerHTML = '<h2>Boss Battle</h2>' +
+        '<p class="muted">Chat fights a boss by spamming the emotes it is weak to. Add the <strong>Boss Battle</strong> overlay from the Overlays section as a full-screen Browser Source, and tick <em>Control audio via OBS</em> so the sound reaches your stream.</p>' +
+
+        '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
+          '<div><strong>Game enabled</strong>' +
+          '<div class="muted" style="font-size:.82rem">The buttons below always work; this switch gates any automatic trigger.</div></div>' +
+          '<label class="switch"><input type="checkbox" id="boss-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Start a battle</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">Hit start before you step away — the boss arrives after the delay.</p>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap">' + bossPicker('boss-pick') +
+          '<label class="rowline" style="gap:.5rem; align-items:center; flex:1; min-width:16rem"><span class="muted">Delay</span>' +
+          '<input type="range" id="boss-delay" min="0" max="120" step="1" value="' + c.startDelaySeconds + '" style="flex:1" />' +
+          '<span class="muted" id="boss-delay-val" style="flex:0 0 3.4em; text-align:right"></span></label></div>' +
+          '<div class="rowline" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap">' +
+          '<button type="button" class="pink" id="boss-start">Start Boss Battle</button>' +
+          '<button type="button" class="pink" id="boss-cancel">Cancel</button></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Simulate</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">Runs the whole presentation but records nothing — no scoreboard, no achievements, no chat messages.</p>' +
+          '<div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
+          '<button type="button" class="pink" id="boss-sim-spawn">Spawn</button>' +
+          '<button type="button" class="pink" id="boss-sim-hit">Hit</button>' +
+          '<button type="button" class="pink" id="boss-sim-miss">Miss</button>' +
+          '<button type="button" class="pink" id="boss-sim-heal">Heal</button></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Combat</h3>' +
+          '<label class="rowline" style="gap:.6rem; align-items:center"><span style="flex:0 0 11rem">Emote cooldown</span>' +
+          '<input type="range" id="boss-cooldownSeconds" min="0" max="600" step="1" value="' + c.cooldownSeconds + '" style="flex:1" />' +
+          '<span class="muted" id="boss-cooldownSeconds-val" style="flex:0 0 3.4em; text-align:right"></span></label>' +
+          '<p class="muted" style="font-size:.8rem; margin:.4rem 0 0">How long a chatter waits before their emotes land again. Everything they send while cooling down shows as a MISS — healers are held to the same clock.</p></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Animation &amp; presentation</h3>' +
+          '<div class="grid-fields">' + BOSS_ANIM.map(function (f) { return numField(f, c); }).join('') + '</div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Volume</h3>' +
+          '<label class="rowline" style="gap:.6rem; align-items:center"><span style="flex:0 0 11rem">Sound effects</span>' +
+          '<input type="range" id="boss-volumeSfx" min="0" max="100" step="1" value="' + c.volumeSfx + '" style="flex:1" />' +
+          '<span class="muted" id="boss-volumeSfx-val" style="flex:0 0 3.4em; text-align:right"></span></label>' +
+          '<label class="rowline" style="gap:.6rem; align-items:center; margin-top:.5rem"><span style="flex:0 0 11rem">Battle music</span>' +
+          '<input type="range" id="boss-volumeBgm" min="0" max="100" step="1" value="' + c.volumeBgm + '" style="flex:1" />' +
+          '<span class="muted" id="boss-volumeBgm-val" style="flex:0 0 3.4em; text-align:right"></span></label></div>' +
+
+        '<div class="rowline" style="gap:.6rem; margin:.2rem 0 1rem; flex-wrap:wrap">' +
+          '<button type="button" class="pink" id="boss-save">Save settings</button></div>' +
+        '<div class="toast" id="boss-toast"></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Sounds</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">MP3, OGG or WAV. Effects up to ' + Math.floor(bossData.maxSfxBytes / 1048576) + 'MB, music up to ' + Math.floor(bossData.maxBgmBytes / 1048576) + 'MB. An empty slot simply plays nothing.</p>' +
+          soundRows + '</div>' +
+
+        '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center; margin:0 0 .7rem">' +
+          '<h3 style="margin:0">Bosses</h3><button type="button" class="pink" id="boss-new">Create New Boss</button></div>' +
+          '<div class="boss-list">' + roster + '</div></div>';
+
+      injectBossCss();
+
+      // Live value read-outs on the sliders.
+      ['boss-delay', 'boss-cooldownSeconds', 'boss-volumeSfx', 'boss-volumeBgm'].forEach(function (id) {
+        var r = document.getElementById(id);
+        var out = document.getElementById(id + '-val');
+        var unit = id === 'boss-volumeSfx' || id === 'boss-volumeBgm' ? '%' : 's';
+        var sync = function () { out.textContent = r.value + unit; };
+        r.oninput = sync;
+        sync();
+      });
+
+      document.getElementById('boss-save').onclick = function () {
+        var out = { enabled: document.getElementById('boss-enabled').checked,
+          cooldownSeconds: Number(document.getElementById('boss-cooldownSeconds').value),
+          startDelaySeconds: Number(document.getElementById('boss-delay').value),
+          volumeSfx: Number(document.getElementById('boss-volumeSfx').value),
+          volumeBgm: Number(document.getElementById('boss-volumeBgm').value) };
+        BOSS_ANIM.forEach(function (f) { out[f.key] = Number(document.getElementById('boss-' + f.key).value); });
+        api('POST', '/api/admin/boss', { config: out })
+          .then(function () { bossToast('Settings saved.', true); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+
+      document.getElementById('boss-start').onclick = function () {
+        api('POST', '/api/admin/boss/start', { bossId: pickedBoss('boss-pick'), delaySeconds: Number(document.getElementById('boss-delay').value) })
+          .then(function () { bossToast('Battle queued.', true); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+      document.getElementById('boss-cancel').onclick = function () {
+        api('POST', '/api/admin/boss/cancel', {})
+          .then(function () { bossToast('Cancelled.', true); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+      document.getElementById('boss-sim-spawn').onclick = function () {
+        api('POST', '/api/admin/boss/sim/spawn', { bossId: pickedBoss('boss-pick') })
+          .then(function () { bossToast('Mock battle incoming (nothing is recorded).', true); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+      ['hit', 'miss', 'heal'].forEach(function (action) {
+        document.getElementById('boss-sim-' + action).onclick = function () {
+          api('POST', '/api/admin/boss/sim/action', { action: action })
+            .then(function () { bossToast('Simulated a ' + action + '.', true); })
+            .catch(function (e) { bossToast(e.message, false); });
+        };
+      });
+
+      document.getElementById('boss-new').onclick = function () {
+        bossEditing = { id: 0, name: '', description: '', image: '', hp: 20, emotesPublic: [], emotesPrivate: [],
+          emotesHeal: [], tauntOpening: '', tauntBattle: [], tauntDeath: '', tauntEscape: '', escapeSeconds: 180,
+          size: 256, speedFull: 9, speedNearDeath: 2, styles: ['pingpong'], enabled: true };
+        renderBossEditor();
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bedit]'), function (b) {
+        b.onclick = function () {
+          var id = Number(b.getAttribute('data-bedit'));
+          var found = bossData.bosses.filter(function (x) { return x.id === id; })[0];
+          if (!found) return;
+          // Clone so an abandoned edit never mutates the cached roster.
+          bossEditing = JSON.parse(JSON.stringify(found));
+          renderBossEditor();
+        };
+      });
+
+      // Sound library wiring.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bplay]'), function (b) {
+        b.onclick = function () {
+          try { var a = new Audio(b.getAttribute('data-bplay')); a.volume = 0.8; a.play(); } catch (e) { bossToast('Could not play that file.', false); }
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bsnd]'), function (inp) {
+        inp.onchange = function () {
+          var file = inp.files && inp.files[0];
+          if (!file) return;
+          fetch('/api/admin/boss/sound?slot=' + encodeURIComponent(inp.getAttribute('data-bsnd')) + '&name=' + encodeURIComponent(file.name), {
+            method: 'POST', credentials: 'same-origin', body: file
+          }).then(function (r) {
+            if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
+            return r.json();
+          }).then(function () { bossToast('Sound uploaded.', true); renderBoss(); })
+            .catch(function (e) { bossToast(e.message, false); });
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bsnddel]'), function (b) {
+        b.onclick = function () {
+          api('POST', '/api/admin/boss/sound/delete', { slot: b.getAttribute('data-bsnddel') })
+            .then(function () { bossToast('Cleared.', true); renderBoss(); })
+            .catch(function (e) { bossToast(e.message, false); });
+        };
+      });
+    }
+
+    /** Editable chip list used for the three emote lists and the battle taunts. */
+    function chipList(id, items, placeholder) {
+      var chips = (items || []).length
+        ? items.map(function (t) {
+            return '<span class="chip">' + esc(t) + '<button type="button" class="chip-x" data-bchip="' + esc(id) + '" data-bval="' + esc(t) + '" aria-label="Remove">×</button></span>';
+          }).join('')
+        : '<span class="muted">none</span>';
+      return '<div class="chips" id="chips-' + id + '">' + chips + '</div>' +
+        '<div class="rowline" style="margin-top:.5rem"><input type="text" id="new-' + id + '" placeholder="' + esc(placeholder) + '" style="flex:1" />' +
+        '<button type="button" class="pink" data-badd="' + id + '">Add</button></div>';
+    }
+
+    function renderBossEditor() {
+      var b = bossEditing;
+      var main = document.getElementById('admin-main');
+      document.getElementById('admin-sub').textContent = b.id ? 'Editing ' + b.name : 'Creating a new boss';
+
+      var artOpts = ['<option value="">— no art —</option>'].concat((bossData.images || []).map(function (i) {
+        return '<option value="' + esc(i.name) + '"' + (i.name === b.image ? ' selected' : '') + '>' + esc(i.name) + '</option>';
+      })).join('');
+      var styleBoxes = (bossData.styles || []).map(function (s) {
+        var labels = { pingpong: 'Ping Pong — drifts and bounces off the edges', darting: 'Darting — zig-zags to random points', spin: 'Spin — orbits a point while rotating' };
+        return '<label class="rowline" style="gap:.5rem; align-items:center"><input type="checkbox" data-bstyle="' + esc(s) + '"' +
+          ((b.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /><span>' + esc(labels[s] || s) + '</span></label>';
+      }).join('');
+      var sizeOpts = (bossData.sizes || []).map(function (n) {
+        return '<option value="' + n + '"' + (n === b.size ? ' selected' : '') + '>' + n + ' × ' + n + '</option>';
+      }).join('');
+
+      main.innerHTML = '<h2>' + (b.id ? 'Edit boss' : 'New boss') + '</h2>' +
+        '<div class="card"><div class="grid-fields">' +
+          '<label class="field"><span>Name</span><input type="text" id="be-name" maxlength="60" value="' + esc(b.name) + '" /><span class="muted" style="font-size:.78rem">Shown in the dossier and in chat.</span></label>' +
+          '<label class="field"><span>Health (HP)</span><input type="number" id="be-hp" min="1" max="500" value="' + b.hp + '" /><span class="muted" style="font-size:.78rem">Distinct vulnerable emotes needed to kill it.</span></label>' +
+          '<label class="field"><span>Escapes after</span><input type="number" id="be-escapeSeconds" min="10" max="3600" step="5" value="' + b.escapeSeconds + '" /><span class="muted" style="font-size:.78rem">Seconds the fight lasts.</span></label>' +
+          '<label class="field"><span>Size</span><select id="be-size">' + sizeOpts + '</select><span class="muted" style="font-size:.78rem">Rendered size on a 1920×1080 overlay.</span></label>' +
+          '<label class="field"><span>Speed at full health</span><input type="number" id="be-speedFull" min="1" max="10" value="' + b.speedFull + '" /><span class="muted" style="font-size:.78rem">1 slow – 10 fast.</span></label>' +
+          '<label class="field"><span>Speed near death</span><input type="number" id="be-speedNearDeath" min="1" max="10" value="' + b.speedNearDeath + '" /><span class="muted" style="font-size:.78rem">Interpolated as health drains — either direction works.</span></label>' +
+        '</div>' +
+        '<label class="field" style="margin-top:.8rem"><span>Description</span>' +
+        '<textarea id="be-description" rows="2" maxlength="400">' + esc(b.description) + '</textarea>' +
+        '<span class="muted" style="font-size:.78rem">Typed out on the intel screen under the name.</span></label>' +
+        '<div class="rowline" style="gap:.6rem; align-items:center; margin-top:.8rem; flex-wrap:wrap">' +
+          '<label class="field" style="flex:1; min-width:14rem"><span>Portrait</span><select id="be-image">' + artOpts + '</select></label>' +
+          (b.image ? '<img class="be-preview" src="' + esc('/assets/boss/' + b.image) + '" alt="" />' : '') +
+          '<label class="rowline" style="gap:.5rem; align-items:center"><input type="file" id="be-file" accept="image/png" />' +
+          '<button type="button" class="pink" id="be-upload">Upload PNG</button></label></div>' +
+        '<label class="rowline" style="gap:.5rem; align-items:center; margin-top:.8rem"><input type="checkbox" id="be-enabled"' + (b.enabled ? ' checked' : '') + ' />' +
+        '<span>Include in the random pool</span></label></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Vulnerabilities</h3>' +
+        '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Twitch emote names, exactly as typed in chat — <strong>case matters</strong> (Kappa is not kappa). Each distinct matching emote in a message takes off 1 HP; repeats and anything else are misses.</p>' +
+        '<h4 style="margin:.2rem 0 .4rem; font-size:.9rem">Emotes that hurt — public <span class="muted" style="font-weight:400">(revealed on the intel screen)</span></h4>' +
+        chipList('pub', b.emotesPublic, 'e.g. Kappa') +
+        '<h4 style="margin:1rem 0 .4rem; font-size:.9rem">Emotes that hurt — private <span class="muted" style="font-weight:400">(shown only as “???”)</span></h4>' +
+        chipList('priv', b.emotesPrivate, 'a secret weakness') +
+        '<h4 style="margin:1rem 0 .4rem; font-size:.9rem">Emotes that heal <span class="muted" style="font-weight:400">(never revealed)</span></h4>' +
+        chipList('heal', b.emotesHeal, 'heals the boss') + '</div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Taunts</h3>' +
+        '<label class="field"><span>Opening taunt</span><input type="text" id="be-tauntOpening" maxlength="200" value="' + esc(b.tauntOpening) + '" /></label>' +
+        '<h4 style="margin:1rem 0 .4rem; font-size:.9rem">Battle taunts <span class="muted" style="font-weight:400">(one picked at random each pause)</span></h4>' +
+        chipList('taunt', b.tauntBattle, 'add a battle taunt') +
+        '<div class="grid-fields" style="margin-top:1rem">' +
+        '<label class="field"><span>Death taunt</span><input type="text" id="be-tauntDeath" maxlength="200" value="' + esc(b.tauntDeath) + '" /></label>' +
+        '<label class="field"><span>Escape taunt</span><input type="text" id="be-tauntEscape" maxlength="200" value="' + esc(b.tauntEscape) + '" /></label>' +
+        '</div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Movement styles</h3>' +
+        '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">One is re-rolled from the ticked styles every time the boss pauses to taunt.</p>' +
+        styleBoxes + '</div>' +
+
+        '<div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
+        '<button type="button" class="pink" id="be-save">' + (b.id ? 'Save boss' : 'Create boss') + '</button>' +
+        '<button type="button" class="pink" id="be-back">Back to roster</button>' +
+        (b.id ? '<button type="button" class="danger" id="be-delete">Delete boss</button>' : '') +
+        '</div><div class="toast" id="boss-toast"></div>';
+
+      injectBossCss();
+
+      var LISTS = { pub: 'emotesPublic', priv: 'emotesPrivate', heal: 'emotesHeal', taunt: 'tauntBattle' };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-badd]'), function (btn) {
+        var id = btn.getAttribute('data-badd');
+        var inp = document.getElementById('new-' + id);
+        var add = function () {
+          var v = inp.value.trim();
+          if (!v) return;
+          var arr = bossEditing[LISTS[id]] || [];
+          if (arr.indexOf(v) === -1) arr.push(v);
+          bossEditing[LISTS[id]] = arr;
+          collectEditor();      // keep the other fields' edits before re-rendering
+          renderBossEditor();
+        };
+        btn.onclick = add;
+        inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); add(); } };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bchip]'), function (btn) {
+        btn.onclick = function () {
+          var id = btn.getAttribute('data-bchip');
+          var val = btn.getAttribute('data-bval');
+          bossEditing[LISTS[id]] = (bossEditing[LISTS[id]] || []).filter(function (t) { return t !== val; });
+          collectEditor();
+          renderBossEditor();
+        };
+      });
+
+      document.getElementById('be-image').onchange = function () { collectEditor(); renderBossEditor(); };
+      document.getElementById('be-upload').onclick = function () {
+        var inp = document.getElementById('be-file');
+        var file = inp.files && inp.files[0];
+        if (!file) { bossToast('Choose a square PNG first.', false); return; }
+        fetch('/api/admin/boss/image?name=' + encodeURIComponent(file.name), {
+          method: 'POST', credentials: 'same-origin', body: file
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function (d) {
+          collectEditor();
+          bossEditing.image = d.image.name;   // select what was just uploaded
+          bossToast('Uploaded.', true);
+          renderBoss();
+        }).catch(function (e) { bossToast(e.message, false); });
+      };
+
+      document.getElementById('be-back').onclick = function () { bossEditing = null; renderBoss(); };
+      document.getElementById('be-save').onclick = function () {
+        collectEditor();
+        if (!bossEditing.name) { bossToast('Give the boss a name.', false); return; }
+        api('POST', '/api/admin/boss/save', { id: bossEditing.id || null, boss: bossEditing })
+          .then(function () { bossEditing = null; renderBoss(); bossToast('Boss saved.', true); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+      var del = document.getElementById('be-delete');
+      if (del) del.onclick = function () {
+        if (!window.confirm('Delete "' + bossEditing.name + '" for good?')) return;
+        api('POST', '/api/admin/boss/delete', { id: bossEditing.id })
+          .then(function () { bossEditing = null; renderBoss(); })
+          .catch(function (e) { bossToast(e.message, false); });
+      };
+    }
+
+    /** Read every editor field back into the draft, so a re-render loses nothing. */
+    function collectEditor() {
+      var b = bossEditing;
+      if (!b) return;
+      var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+      b.name = val('be-name').trim();
+      b.description = val('be-description');
+      b.image = val('be-image');
+      b.hp = Number(val('be-hp'));
+      b.escapeSeconds = Number(val('be-escapeSeconds'));
+      b.size = Number(val('be-size'));
+      b.speedFull = Number(val('be-speedFull'));
+      b.speedNearDeath = Number(val('be-speedNearDeath'));
+      b.tauntOpening = val('be-tauntOpening');
+      b.tauntDeath = val('be-tauntDeath');
+      b.tauntEscape = val('be-tauntEscape');
+      var en = document.getElementById('be-enabled');
+      b.enabled = en ? en.checked : true;
+      var styles = [];
+      Array.prototype.forEach.call(document.querySelectorAll('[data-bstyle]'), function (cb) {
+        if (cb.checked) styles.push(cb.getAttribute('data-bstyle'));
+      });
+      b.styles = styles.length ? styles : ['pingpong'];
+    }
+
+    function injectBossCss() {
+      if (document.getElementById('boss-css')) return;
+      var st = document.createElement('style');
+      st.id = 'boss-css';
+      st.textContent = '.boss-list{display:flex;flex-direction:column;gap:.6rem}'
+        + '.boss-card{display:flex;align-items:center;gap:.8rem;background:var(--bg);border:1px solid var(--line);'
+        + 'border-radius:10px;padding:.55rem .7rem}'
+        + '.boss-card img{width:56px;height:56px;object-fit:cover;border-radius:8px;background:#0008;flex:0 0 auto}'
+        + '.boss-card .noart{width:56px;height:56px;border-radius:8px;background:#0004;display:flex;align-items:center;'
+        + 'justify-content:center;font-size:.68rem;color:var(--muted);flex:0 0 auto;text-align:center}'
+        + '.boss-card .boss-meta{flex:1;min-width:0}'
+        + '.boss-card .boss-name{font-weight:600}'
+        + '.grid-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.7rem}'
+        + '.field{display:flex;flex-direction:column;gap:.25rem}'
+        + '.field>span:first-child{font-size:.85rem;font-weight:600}'
+        + '.be-preview{width:72px;height:72px;object-fit:cover;border-radius:10px;background:#0008}'
+        + '.snd-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;'
+        + 'padding:.5rem 0;border-top:1px solid var(--line)}'
+        + '.snd-row:first-of-type{border-top:0}'
+        + '.snd-row input[type=file]{max-width:13rem}'
+        + '@media (max-width:640px){.boss-card{flex-wrap:wrap}.snd-row{flex-direction:column;align-items:flex-start}}';
+      document.head.appendChild(st);
     }
 
     window.onMe = async function (me) {

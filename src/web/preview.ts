@@ -12,6 +12,8 @@ import { ttsOverlayPage } from './pages/overlayTts.js';
 import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
+import { BOSS_DEFAULTS, BOSS_RANGES, SOUND_SLOTS, SIZES, STYLES } from '../services/bossBattle.js';
+import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
 import { ACHIEVEMENTS } from '../services/achievementCatalog.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -108,6 +110,7 @@ async function collectBuiltins() {
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, setBossSpawner: noop, getTaunts: () => [], randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
+    boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
     points: {},
@@ -257,6 +260,40 @@ const previewFloofImages = [
 ];
 let previewFloofTaunts = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
 
+// Mock Boss Battle state (exercises the settings, sound slots, roster + editor).
+const previewBossConfig: Record<string, unknown> = { ...BOSS_DEFAULTS, enabled: true };
+const previewBossImages = [
+  { name: 'dread-moth.png', url: '/assets/logo.png', bytes: 74210 },
+  { name: 'sock-goblin.png', url: '/assets/logo.png', bytes: 66104 },
+];
+/** A blank boss with every field populated, so a saved preview row is well-formed. */
+function previewBossTemplate() {
+  return {
+    id: 0, name: '', description: '', image: '', imageUrl: null as string | null, hp: 20,
+    emotesPublic: [] as string[], emotesPrivate: [] as string[], emotesHeal: [] as string[],
+    tauntOpening: '', tauntBattle: [] as string[], tauntDeath: '', tauntEscape: '',
+    escapeSeconds: 180, size: 256, speedFull: 9, speedNearDeath: 2,
+    styles: ['pingpong'] as string[], enabled: true,
+  };
+}
+const previewBosses = [
+  {
+    ...previewBossTemplate(),
+    id: 1, name: 'Dread Moth', description: 'It eats sweaters and hope alike.',
+    image: 'dread-moth.png', imageUrl: '/assets/logo.png', hp: 40,
+    emotesPublic: ['Kappa', 'PogChamp'], emotesPrivate: ['LUL'], emotesHeal: ['HeyGuys'],
+    tauntOpening: 'Your wool is MINE.', tauntBattle: ['is that all?', 'flutter flutter'],
+    tauntDeath: 'impossible…', tauntEscape: 'another time!', size: 384, styles: ['pingpong', 'spin'],
+  },
+  {
+    ...previewBossTemplate(),
+    id: 2, name: 'Sock Goblin', description: 'Responsible for every missing left sock.',
+    image: 'sock-goblin.png', imageUrl: '/assets/logo.png', hp: 15,
+    emotesPublic: ['LUL'], tauntOpening: 'you will never find them.',
+    escapeSeconds: 90, size: 256, styles: ['darting'], enabled: false,
+  },
+];
+
 // Mock quotes (exercises the searchable table + pagination).
 interface MockQuote { id: number; text: string; user: string; game: string | null; date: string; quotedByName: string | null; createdAt: string }
 const dISO = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
@@ -353,6 +390,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/overlays/chat-stats') return html(chatStatsOverlayPage());
     if (p === '/overlays/achievement') return html(achievementOverlayPage());
     if (p === '/overlays/floof') return html(floofOverlayPage());
+    if (p === '/overlays/boss-battle') return html(bossBattleOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/me/achievements') {
@@ -389,6 +427,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         { id: 'chat-stats', name: 'Chat activity — stats', url: base + '/overlays/chat-stats?token=preview-token' },
         { id: 'achievement', name: 'Achievement — unlock pop', url: base + '/overlays/achievement?token=preview-token' },
         { id: 'floof', name: 'Pet the Floof', url: base + '/overlays/floof?token=preview-token' },
+        { id: 'boss-battle', name: 'Boss Battle (full screen, 1920×1080)', url: base + '/overlays/boss-battle?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
@@ -399,6 +438,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         images: previewFloofImages,
         taunts: previewFloofTaunts,
         maxBytes: 2 * 1024 * 1024,
+      });
+    }
+    if (p === '/api/admin/boss') {
+      return json(200, {
+        config: previewBossConfig,
+        defaults: BOSS_DEFAULTS,
+        ranges: BOSS_RANGES,
+        bosses: previewBosses,
+        images: previewBossImages,
+        sounds: SOUND_SLOTS.map((s2) => ({ slot: s2.id, label: s2.label, hint: s2.hint, bgm: s2.bgm, file: null, url: null, bytes: 0 })),
+        sizes: SIZES,
+        styles: STYLES,
+        maxImageBytes: 2 * 1024 * 1024,
+        maxSfxBytes: 2 * 1024 * 1024,
+        maxBgmBytes: 8 * 1024 * 1024,
       });
     }
     if (p === '/api/admin/achievements') {
@@ -577,6 +631,34 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       Object.assign(previewFloofConfig, (body.config ?? body) as Record<string, unknown>);
       return json(200, { ok: true, config: previewFloofConfig });
     }
+    if (p === '/api/admin/boss') {
+      Object.assign(previewBossConfig, (body.config ?? body) as Record<string, unknown>);
+      return json(200, { ok: true, config: previewBossConfig });
+    }
+    if (p === '/api/admin/boss/start') return json(200, { ok: true });
+    if (p === '/api/admin/boss/cancel') return json(200, { ok: true });
+    if (p === '/api/admin/boss/sim/spawn') return json(200, { ok: true });
+    if (p === '/api/admin/boss/sim/action') {
+      const action = String(body.action ?? '');
+      if (action !== 'hit' && action !== 'miss' && action !== 'heal') return json(400, { error: 'Unknown simulate action.' });
+      return json(200, { ok: true });
+    }
+    if (p === '/api/admin/boss/save') {
+      const input = (body.boss ?? {}) as Record<string, unknown>;
+      const id = Number(body.id) || 0;
+      if (!String(input.name ?? '').trim()) return json(400, { error: 'Give the boss a name.' });
+      const row = { ...previewBossTemplate(), ...input, id: id || previewBosses.length + 1 } as (typeof previewBosses)[number];
+      const at = previewBosses.findIndex((b) => b.id === row.id);
+      if (at >= 0) previewBosses[at] = row;
+      else previewBosses.push(row);
+      return json(200, { ok: true, boss: row });
+    }
+    if (p === '/api/admin/boss/delete') {
+      const i = previewBosses.findIndex((b) => b.id === Number(body.id));
+      if (i >= 0) previewBosses.splice(i, 1);
+      return json(200, { ok: true });
+    }
+    if (p === '/api/admin/boss/sound/delete') return json(200, { ok: true });
     if (p === '/api/admin/floof/fire') return json(200, { ok: true });
     if (p === '/api/admin/floof/simulate-pet') return json(200, { ok: true });
     if (p === '/api/admin/floof/boss') return json(200, { ok: true });

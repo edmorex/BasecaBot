@@ -13,6 +13,7 @@ import type { TtsService } from '../services/tts.js';
 import type { GuestChannelService } from '../services/guestChannels.js';
 import type { AchievementService } from '../services/achievements.js';
 import type { FloofService } from '../services/floof.js';
+import type { BossBattleService } from '../services/bossBattle.js';
 import type { StreamService } from '../services/stream.js';
 import type { Storage } from '../services/storage/index.js';
 import type { WsHub } from '../web/wsHub.js';
@@ -56,6 +57,8 @@ export interface ServiceContext {
   readonly achievements: AchievementService;
   /** "Pet the Floof": settings, the image library, and the win scoreboard. */
   readonly floof: FloofService;
+  /** "Boss Battle": settings, the boss roster, media libraries and the scoreboard. */
+  readonly boss: BossBattleService;
   /** Raw persistence (Prisma) for plugin-specific tables/queries. */
   readonly storage: Storage;
   /** Push/receive messages to connected web apps. */

@@ -48,6 +48,7 @@ model User {
   firstCheckins FirstCheckin[]
   achievements  UserAchievement[]
   floofStat     FloofStat?
+  bossStat      BossStat?
 }
 
 /// Cumulative all-time "!first" scoreboard for a user. Only top-10 finishes
@@ -336,6 +337,58 @@ model FloofStat {
   /// Boss Floof battles this user took part in and that chat went on to win.
   bossWins  Int       @default(0)
   lastWonAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// A Boss Battle boss. Unlike floof photos (which are interchangeable), every
+/// boss carries its OWN stats, emote vulnerabilities, taunts and animation
+/// settings, so it gets a real table rather than a Setting blob.
+///
+/// The three emote lists and the battle-taunt list are stored as JSON arrays of
+/// strings; they're small, always read whole, and never queried by element.
+model Boss {
+  id             Int      @id @default(autoincrement())
+  name           String
+  description    String   @default("")
+  /// Filename under public/assets/boss (square PNG, same rules as floofs).
+  image          String   @default("")
+  /// Hits needed to defeat it.
+  hp             Int      @default(20)
+  /// Twitch emote names that damage it AND are revealed on the intel screen.
+  emotesPublic   String   @default("[]")
+  /// Twitch emote names that damage it but stay secret (shown as "???").
+  emotesPrivate  String   @default("[]")
+  /// Twitch emote names that HEAL it. Never revealed.
+  emotesHeal     String   @default("[]")
+  tauntOpening   String   @default("")
+  /// JSON string[] — one is picked at random each time it pauses to taunt.
+  tauntBattle    String   @default("[]")
+  tauntDeath     String   @default("")
+  tauntEscape    String   @default("")
+  /// Seconds the fight lasts before the boss escapes.
+  escapeSeconds  Int      @default(180)
+  /// Rendered size in design pixels: 128, 256, 384 or 512.
+  size           Int      @default(256)
+  /// Movement speed at FULL health and at 1 HP (1..10); interpolated between.
+  speedFull      Int      @default(9)
+  speedNearDeath Int      @default(2)
+  /// JSON string[] of movement styles: "pingpong" | "darting" | "spin".
+  styles         String   @default("[\"pingpong\"]")
+  /// Excluded from the random pool when false (still spawnable by name).
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// Boss Battle scoreboard. `defeats` counts battles a user helped win (they
+/// landed at least one hit); `kills` counts killing blows. Both are thresholded
+/// by the achievements engine.
+model BossStat {
+  userId  String    @id
+  defeats Int       @default(0)
+  kills   Int       @default(0)
+  lastAt  DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

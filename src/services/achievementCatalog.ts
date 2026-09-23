@@ -3,8 +3,8 @@ import type { Storage } from './storage/index.js';
 type Db = Storage['prisma'];
 
 /** Which activity re-evaluates a group of achievements. */
-export type TriggerGroup = 'first' | 'quote' | 'sub' | 'bits' | 'daily' | 'floof';
-export const TRIGGER_GROUPS: TriggerGroup[] = ['first', 'quote', 'sub', 'bits', 'daily', 'floof'];
+export type TriggerGroup = 'first' | 'quote' | 'sub' | 'bits' | 'daily' | 'floof' | 'boss';
+export const TRIGGER_GROUPS: TriggerGroup[] = ['first', 'quote', 'sub', 'bits', 'daily', 'floof', 'boss'];
 
 export type Tier = 'bronze' | 'silver' | 'gold';
 
@@ -61,6 +61,12 @@ export const METRICS: Record<string, MetricFn> = {
     (await db.floofStat.findUnique({ where: { userId }, select: { wins: true } }))?.wins ?? 0,
   'floof.bossWins': async (db, userId) =>
     (await db.floofStat.findUnique({ where: { userId }, select: { bossWins: true } }))?.bossWins ?? 0,
+
+  // ── Boss Battle ───────────────────────────────────────────────────────────
+  'boss.defeats': async (db, userId) =>
+    (await db.bossStat.findUnique({ where: { userId }, select: { defeats: true } }))?.defeats ?? 0,
+  'boss.kills': async (db, userId) =>
+    (await db.bossStat.findUnique({ where: { userId }, select: { kills: true } }))?.kills ?? 0,
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   'tenure.months': async (db, userId, now) =>
@@ -136,6 +142,12 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: 'floof.friend2', name: 'Floof Friend II', description: 'Win Pet the Floof 10 times.', emoji: '🐱', tier: 'silver', group: 'floof', metric: 'floof.wins', target: 10 },
   { key: 'floof.friend3', name: 'Floof Friend III', description: 'Win Pet the Floof 50 times.', emoji: '💖', tier: 'gold', group: 'floof', metric: 'floof.wins', target: 50 },
   { key: 'floof.boss', name: 'Defeat Boss Floof', description: 'Help chat bring down a Boss Floof.', emoji: '⚔️', tier: 'silver', group: 'floof', metric: 'floof.bossWins', target: 1 },
+
+  // ── Boss Battle ───────────────────────────────────────────────────────────
+  { key: 'boss.hero', name: 'Basecamp Hero', description: 'Land the killing blow on a boss.', emoji: '🦸', tier: 'gold', group: 'boss', metric: 'boss.kills', target: 1 },
+  { key: 'boss.protector1', name: 'Basecamp Protector I', description: 'Help chat defeat a boss.', emoji: '🛡️', tier: 'bronze', group: 'boss', metric: 'boss.defeats', target: 1 },
+  { key: 'boss.protector2', name: 'Basecamp Protector II', description: 'Help chat defeat 25 bosses.', emoji: '🛡️', tier: 'silver', group: 'boss', metric: 'boss.defeats', target: 25 },
+  { key: 'boss.protector3', name: 'Basecamp Protector III', description: 'Help chat defeat 50 bosses.', emoji: '⚔️', tier: 'gold', group: 'boss', metric: 'boss.defeats', target: 50 },
 
   // ── Tenure / identity ─────────────────────────────────────────────────────
   { key: 'tenure.foster1', name: 'Foster Fam I', description: 'Known to the bot for 6 months.', emoji: '🏡', tier: 'bronze', group: 'daily', metric: 'tenure.months', target: 6 },
