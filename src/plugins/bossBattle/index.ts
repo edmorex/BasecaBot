@@ -11,8 +11,8 @@ const ROOM = 'boss';
  * volume a message-per-emote would flood the overlay for no visual gain.
  */
 const FRAME_MS = 100;
-/** How long the defeat/escape outro holds before the overlay is cleared. */
-const OUTRO_MS = 6000;
+/** Extra time the banner stays up after the outro taunt has had its moment. */
+const BANNER_MS = 5000;
 /** Avatar lookups are debounced and batched (Helix takes 100 ids per call). */
 const AVATAR_DEBOUNCE_MS = 250;
 const AVATAR_BATCH = 100;
@@ -111,7 +111,11 @@ export function bossBattlePlugin(): Plugin {
       }
       emoteArt = { at: Date.now(), map };
     }
-    return names.map((name) => ({ name, url: emoteArt!.map.get(name) ?? null }));
+    // Anything Helix could not account for is almost certainly a subscriber emote
+    // from another channel; fall back to the art banked from chat tags.
+    const missing = names.filter((n) => !emoteArt!.map.has(n));
+    const banked = missing.length ? await ctx.boss.lookupEmoteArt(missing) : new Map<string, string>();
+    return names.map((name) => ({ name, url: emoteArt!.map.get(name) ?? banked.get(name) ?? null }));
   };
 
   // ── Crowd avatars ───────────────────────────────────────────────────────────
@@ -224,9 +228,15 @@ export function bossBattlePlugin(): Plugin {
     // overlay) opens the guest firehose onto this same bus, so this guard is
     // what keeps a boss from being fought in someone else's chat.
     if (e.channel !== channel()) return;
-    if (!battle || battle.phase !== 'fight') return;
     const emotes = e.emotes ?? [];
     if (!emotes.length) return;
+
+    // Bank the art for every emote seen, battle or not — that is how the dossier
+    // learns to render emotes from other channels. Fire-and-forget: a new emote
+    // costs one write, and combat must not wait on it.
+    void ctx.boss.rememberEmotes(emotes).catch(() => {});
+
+    if (!battle || battle.phase !== 'fight') return;
 
     const cooldownMs = ctx.boss.getConfig().cooldownSeconds * 1000;
     const onCooldown = Date.now() - (battle.lastLanded.get(e.user.id) ?? 0) < cooldownMs;
@@ -314,6 +324,7 @@ export function bossBattlePlugin(): Plugin {
         spinRadius: cfg.spinRadius,
         spinSeconds: cfg.spinSeconds,
         crowdMax: cfg.crowdMax,
+        outroTauntSeconds: cfg.outroTauntSeconds,
         volumeSfx: cfg.volumeSfx,
         volumeBgm: cfg.volumeBgm,
       },
@@ -368,12 +379,15 @@ export function bossBattlePlugin(): Plugin {
     }
 
     ctx.logger.info({ boss: b.boss.name, won, fighters: b.fighters.size, mock: b.mock }, 'boss: battle over');
+    // The overlay lets the dying taunt linger before the banner lands, so hold
+    // the whole sequence open for the taunt AND the banner.
+    const outroMs = ctx.boss.getConfig().outroTauntSeconds * 1000 + BANNER_MS;
     setTimeout(() => {
       if (battle === b) {
         battle = null;
         ctx.ws.broadcast(ROOM, 'clear', {});
       }
-    }, OUTRO_MS);
+    }, outroMs);
   };
 
   /** Queue a battle behind the countdown, so the streamer can step away first. */

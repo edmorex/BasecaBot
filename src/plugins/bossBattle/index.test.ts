@@ -42,6 +42,8 @@ describe('boss battle plugin', () => {
   let say: ReturnType<typeof vi.fn>;
   let broadcast: ReturnType<typeof vi.fn>;
   let recordDefeat: ReturnType<typeof vi.fn>;
+  let rememberEmotes: ReturnType<typeof vi.fn>;
+  let lookupEmoteArt: ReturnType<typeof vi.fn>;
   let evaluate: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof bossBattlePlugin>;
   let starter: (bossId: number | null, delay: number) => Promise<string | null>;
@@ -55,6 +57,8 @@ describe('boss battle plugin', () => {
     say = vi.fn(async () => {});
     broadcast = vi.fn();
     recordDefeat = vi.fn(async () => 1);
+    rememberEmotes = vi.fn(async () => {});
+    lookupEmoteArt = vi.fn(async () => new Map<string, string>());
     evaluate = vi.fn(async () => []);
     config = { ...BOSS_DEFAULTS, cooldownSeconds: 30, alertSeconds: 1, intelSeconds: 1 };
 
@@ -81,6 +85,8 @@ describe('boss battle plugin', () => {
         getConfig: () => config,
         pickBoss: vi.fn(async () => BOSS),
         listSounds: vi.fn(async () => [{ slot: 'bgm', url: '/assets/boss/sfx-bgm.mp3' }]),
+        rememberEmotes,
+        lookupEmoteArt,
         recordDefeat,
         setStarter: (fn: typeof starter) => { starter = fn; },
         setCanceller: vi.fn(),
@@ -250,6 +256,33 @@ describe('boss battle plugin', () => {
     const frames = sent('combat');
     expect(frames.length).toBe(1); // one frame, not three messages
     expect((frames[0] as { events: unknown[] }).events.length).toBe(3);
+  });
+
+  it('banks emote art from chat even when no battle is running', async () => {
+    // This is the only way to get art for another channel's subscriber emotes,
+    // so it must not be gated on a fight being in progress.
+    await bus.publish(chat([em('SomeOtherChannelEmote')]));
+    expect(rememberEmotes).toHaveBeenCalledWith([em('SomeOtherChannelEmote')]);
+  });
+
+  it('does not bank emote art from a guest channel', async () => {
+    await bus.publish(chat([em('Kappa')], user(), 'someoneelse'));
+    expect(rememberEmotes).not.toHaveBeenCalled();
+  });
+
+  it('falls back to banked art for emotes Helix cannot resolve', async () => {
+    lookupEmoteArt.mockResolvedValue(new Map([['Kappa', 'https://cdn/kappa.png']]));
+    await toFight(() => starter(null, 0));
+    // Helix returned nothing, so the one public emote must come from the bank.
+    expect(lookupEmoteArt).toHaveBeenCalledWith(['Kappa']);
+    expect(sent('intel')[0]).toMatchObject({
+      vulnerabilities: [{ name: 'Kappa', url: 'https://cdn/kappa.png' }],
+    });
+  });
+
+  it('renders an unresolvable emote as plain text rather than a broken image', async () => {
+    await toFight(() => starter(null, 0));
+    expect(sent('intel')[0]).toMatchObject({ vulnerabilities: [{ name: 'Kappa', url: null }] });
   });
 
   it('ignores messages with no emotes at all', async () => {

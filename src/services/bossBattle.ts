@@ -70,6 +70,8 @@ export interface BossConfig {
   spinSeconds: number;
   /** Most chatter avatars drawn along the bottom before they stop being added. */
   crowdMax: number;
+  /** How long the death/escape taunt lingers before the final banner lands. */
+  outroTauntSeconds: number;
 }
 
 export const BOSS_DEFAULTS: BossConfig = {
@@ -86,6 +88,7 @@ export const BOSS_DEFAULTS: BossConfig = {
   spinRadius: 180,
   spinSeconds: 6,
   crowdMax: 60,
+  outroTauntSeconds: 3,
 };
 
 /** [min, max] bounds for every numeric setting; applied on every write. */
@@ -102,6 +105,7 @@ export const BOSS_RANGES: Record<string, readonly [number, number]> = {
   spinRadius: [40, 600],
   spinSeconds: [2, 30],
   crowdMax: [1, 200],
+  outroTauntSeconds: [0, 15],
 };
 
 /** Settings that are meaningful as fractions; everything else is rounded. */
@@ -154,6 +158,11 @@ export interface BossSound {
 /** A user-facing problem (bad upload, missing boss); safe to show in chat/UI. */
 export class BossError extends Error {}
 
+/** The Twitch CDN image for an emote id, at the largest static size. */
+export function emoteImageUrl(emoteId: string): string {
+  return `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(emoteId)}/default/dark/3.0`;
+}
+
 /** How the admin panel's simulate buttons poke a running mock battle. */
 export type SimAction = 'hit' | 'miss' | 'heal';
 
@@ -176,6 +185,8 @@ export class BossBattleService {
   private canceller?: () => Promise<string | null>;
   private simSpawner?: (bossId: number | null) => Promise<string | null>;
   private simActor?: (action: SimAction) => Promise<string | null>;
+  /** Emote names already banked, so a repeat sighting costs nothing. */
+  private knownEmotes = new Set<string>();
 
   constructor(
     private readonly storage: Storage,
@@ -199,6 +210,54 @@ export class BossBattleService {
     } catch (err) {
       this.logger.warn({ err, dir: BOSS_DIR }, 'boss: could not create media directory');
     }
+    try {
+      for (const row of await this.db.emoteArt.findMany({ select: { name: true } })) this.knownEmotes.add(row.name);
+    } catch (err) {
+      this.logger.warn({ err }, 'boss: could not load the emote art index');
+    }
+  }
+
+  // ── Emote art ───────────────────────────────────────────────────────────────
+
+  /**
+   * Bank the emote ids carried by a chat message's IRC tags.
+   *
+   * This is the ONLY way to get art for an emote from another channel: Helix can
+   * enumerate global and channel emotes, but cannot look one up by name, so a
+   * subscriber emote from somebody else's channel is otherwise unresolvable. Each
+   * name costs one write the first time it is ever seen and nothing thereafter.
+   */
+  async rememberEmotes(list: readonly { id: string; name: string }[]): Promise<void> {
+    for (const e of list) {
+      const name = String(e?.name ?? '');
+      const emoteId = String(e?.id ?? '');
+      // Numeric-looking ids only; the tag format is stable and this keeps junk out.
+      if (!name || !emoteId || this.knownEmotes.has(name)) continue;
+      this.knownEmotes.add(name);
+      try {
+        await this.db.emoteArt.upsert({
+          where: { name },
+          create: { name, emoteId },
+          update: { emoteId, lastSeenAt: new Date() },
+        });
+      } catch (err) {
+        this.knownEmotes.delete(name); // let a later sighting retry
+        this.logger.debug({ err, name }, 'boss: could not bank emote art');
+      }
+    }
+  }
+
+  /** Look up banked art for these emote names. Unknown names are simply absent. */
+  async lookupEmoteArt(names: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!names.length) return out;
+    try {
+      const rows = await this.db.emoteArt.findMany({ where: { name: { in: [...names] } } });
+      for (const r of rows) out.set(r.name, emoteImageUrl(r.emoteId));
+    } catch (err) {
+      this.logger.warn({ err }, 'boss: emote art lookup failed');
+    }
+    return out;
   }
 
   // ── Settings ────────────────────────────────────────────────────────────────

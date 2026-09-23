@@ -882,7 +882,8 @@ export function adminPage(): string {
       { key: 'dartSeconds', label: 'Dart leg', hint: 'seconds per zig-zag leg', min: 0.2, max: 3, step: 0.1 },
       { key: 'spinRadius', label: 'Spin radius', hint: 'pixels across the circular path', min: 40, max: 600, step: 10 },
       { key: 'spinSeconds', label: 'Spin lap', hint: 'seconds for one full circle', min: 2, max: 30, step: 1 },
-      { key: 'crowdMax', label: 'Max fighters shown', hint: 'avatars drawn along the bottom', min: 1, max: 200, step: 1 }
+      { key: 'crowdMax', label: 'Max fighters shown', hint: 'avatars drawn along the bottom', min: 1, max: 200, step: 1 },
+      { key: 'outroTauntSeconds', label: 'Outro taunt holds', hint: 'seconds of dying words before the banner', min: 0, max: 15, step: 1 }
     ];
     var bossData = null;
     var bossEditing = null;   // the boss being edited, or null when the roster is showing

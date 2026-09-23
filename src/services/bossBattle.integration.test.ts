@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { Storage } from './storage/index.js';
-import { BossBattleService, BossError, safeBossFile } from './bossBattle.js';
+import { BossBattleService, BossError, safeBossFile, emoteImageUrl } from './bossBattle.js';
 import { AchievementService } from './achievements.js';
 import { EventBus } from '../core/eventBus.js';
 import type { AppConfig } from './config.js';
@@ -46,6 +46,7 @@ run('BossBattleService (integration)', () => {
 
   beforeEach(async () => {
     await prisma.boss.deleteMany({});
+    await prisma.emoteArt.deleteMany({});
     await prisma.setting.deleteMany({ where: { key: 'boss.config' } });
     svc = new BossBattleService({ prisma } as unknown as Storage, logger);
     await svc.init();
@@ -120,6 +121,39 @@ run('BossBattleService (integration)', () => {
     await svc.deleteBoss(boss.id);
     expect(await svc.getBoss(boss.id)).toBeNull();
     await expect(svc.deleteBoss(boss.id)).rejects.toBeInstanceOf(BossError);
+  });
+
+  it('banks emote art from chat tags and reads it back', async () => {
+    await svc.rememberEmotes([{ id: '25', name: 'Kappa' }, { id: '88', name: 'OtherChannelSub' }]);
+    const art = await svc.lookupEmoteArt(['Kappa', 'OtherChannelSub', 'NeverSeen']);
+    expect(art.get('Kappa')).toBe(emoteImageUrl('25'));
+    expect(art.get('OtherChannelSub')).toBe(emoteImageUrl('88'));
+    expect(art.has('NeverSeen')).toBe(false); // absent, not a broken url
+  });
+
+  it('writes a given emote only once, however often it is seen', async () => {
+    await svc.rememberEmotes([{ id: '25', name: 'Kappa' }]);
+    await svc.rememberEmotes([{ id: '25', name: 'Kappa' }, { id: '25', name: 'Kappa' }]);
+    expect(await prisma.emoteArt.count({ where: { name: 'Kappa' } })).toBe(1);
+  });
+
+  it('keeps case variants as separate art entries', async () => {
+    await svc.rememberEmotes([{ id: '1', name: 'Kappa' }, { id: '2', name: 'kappa' }]);
+    const art = await svc.lookupEmoteArt(['Kappa', 'kappa']);
+    expect(art.get('Kappa')).toBe(emoteImageUrl('1'));
+    expect(art.get('kappa')).toBe(emoteImageUrl('2'));
+  });
+
+  it('skips junk rather than banking it', async () => {
+    await svc.rememberEmotes([{ id: '', name: 'NoId' }, { id: '7', name: '' }]);
+    expect(await prisma.emoteArt.count()).toBe(0);
+  });
+
+  it('re-reads banked art after a restart', async () => {
+    await svc.rememberEmotes([{ id: '25', name: 'Kappa' }]);
+    const fresh = new BossBattleService({ prisma } as unknown as Storage, logger);
+    await fresh.init();
+    expect((await fresh.lookupEmoteArt(['Kappa'])).get('Kappa')).toBe(emoteImageUrl('25'));
   });
 
   it('persists clamped settings across a reload', async () => {

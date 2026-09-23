@@ -46,9 +46,14 @@ screen, starting at the centre and squeezing together as the crowd grows. Every
 message that throws emotes fires red laser beams from that chatter's icon at the
 boss, with the damage floating off it.
 
-**5. Defeat or escape.** At 0 HP the boss explodes, a victory sting plays and the
-bot congratulates chat. If the escape timer runs out first, it simply fades away
-with a sad sting and the bot reports the failure.
+**5. Defeat or escape.** At 0 HP the boss stops dead, shakes itself apart while
+delivering its death taunt as mini-explosions burst across it, and then goes up in
+one final blast with a victory sting — after which the bot congratulates chat. If
+the escape timer runs out first, it gets its escape taunt in, fades away with a
+sad sting, and the bot reports the failure.
+
+How long the dying words linger before the banner lands is the **Outro taunt
+holds** setting.
 
 ---
 
@@ -124,6 +129,7 @@ emote names actually match what viewers type) and is likewise never recorded.
 | Spin radius | 180px | Size of the circular path in the spin style |
 | Spin lap | 6s | Seconds for one full circle |
 | Max fighters shown | 60 | Avatars drawn along the bottom (everyone still counts for credit) |
+| Outro taunt holds | 3s | How long the death/escape taunt lingers before the final banner |
 | Sound effects / Battle music | 80% / 50% | Playback volumes |
 
 ### Sounds
@@ -169,8 +175,24 @@ they appear in chat.
 ### ⚠️ Twitch emotes only
 
 Weaknesses are matched against Twitch's own emote tags: **global, channel and
-subscriber emotes work**. Third-party emotes (7TV, BTTV, FFZ) are not part of
-those tags and **cannot be used** as weaknesses or heals.
+subscriber emotes work** — including subscriber emotes from other channels, since
+viewers bring those into your chat. Third-party emotes (7TV, BTTV, FFZ) are not
+carried in those tags and **cannot be used** as weaknesses or heals.
+
+### Where the dossier art comes from
+
+Twitch can list your channel's emotes and the global ones, but offers **no way to
+look up an arbitrary emote by name** — so a subscriber emote from somebody else's
+channel has no discoverable image.
+
+The bot works around this by banking the emote ids carried in every chat message
+it sees: once an emote has been **used in your chat at least once**, its picture
+is available to the dossier forever. Until then that vulnerability is listed by
+**name as plain text**, which still reads fine — it just isn't as pretty.
+
+In practice this sorts itself out: emotes your viewers actually use are exactly
+the ones the bot will have banked. If you want a weakness to show its art on day
+one, have someone post it in chat before the first battle.
 
 ### Movement styles
 

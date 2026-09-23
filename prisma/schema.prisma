@@ -392,3 +392,18 @@ model BossStat {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+/// Learned Twitch emote art: emote NAME -> emote id, harvested from the IRC tags
+/// of messages the bot sees.
+///
+/// Helix can list global and channel emotes, but there is no way to look up an
+/// arbitrary emote by name — so a subscriber emote from somebody ELSE's channel
+/// has no discoverable id. Chat tags carry the id for every emote actually used,
+/// so the bot banks them here and the Boss Battle dossier can then render art for
+/// any emote it has seen at least once.
+model EmoteArt {
+  /// Emote name exactly as it appears in chat (case-sensitive).
+  name       String   @id
+  emoteId    String
+  lastSeenAt DateTime @default(now())
+}

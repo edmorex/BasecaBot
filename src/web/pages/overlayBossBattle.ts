@@ -114,6 +114,24 @@ export function bossBattleOverlayPage(): string {
     50%{ transform:scale(1.5) rotate(6deg); filter:brightness(5) drop-shadow(0 0 120px #ffb347) }
     100%{ transform:scale(2.1) rotate(-4deg); opacity:0; filter:brightness(6) drop-shadow(0 0 160px #ff5722) }
   }
+  /* Death throes: the boss rattles itself apart while it gets its last word in.
+     Safe to animate transform on #boss because movement uses left/top. */
+  #boss.shaking{ animation:deathShake .16s linear infinite; }
+  @keyframes deathShake{
+    0%{ transform:translate(0,0) rotate(0deg) }
+    25%{ transform:translate(-7px,3px) rotate(-1.6deg) }
+    50%{ transform:translate(6px,-4px) rotate(1.4deg) }
+    75%{ transform:translate(-4px,-2px) rotate(-.8deg) }
+    100%{ transform:translate(5px,3px) rotate(1deg) }
+  }
+  .mini{ position:absolute; border-radius:50%; pointer-events:none; opacity:0;
+    background:radial-gradient(circle, #fff 0%, #ffe066 35%, #ff8a34 60%, rgba(255,80,0,0) 72%);
+    animation:mini .5s ease-out forwards; }
+  @keyframes mini{
+    0%{ opacity:0; transform:scale(.2) }
+    25%{ opacity:1; transform:scale(1.1) }
+    100%{ opacity:0; transform:scale(1.7) }
+  }
   #shock{ position:absolute; left:0; top:0; border-radius:50%; opacity:0; pointer-events:none;
     border:10px solid #ffd166; box-shadow:0 0 60px #ff8a34, inset 0 0 60px #ffd166; }
   #shock.go{ animation:shock 1.2s cubic-bezier(.15,.75,.3,1) forwards }
@@ -141,9 +159,14 @@ export function bossBattleOverlayPage(): string {
     animation:joinPop .45s cubic-bezier(.2,1.4,.4,1) both; }
   @keyframes joinPop{ from{ transform:translateY(26px) scale(.5); opacity:0 } to{ transform:none; opacity:1 } }
   .fighter.firing{ box-shadow:0 0 30px #ff2d55, 0 0 60px rgba(255,45,85,.7), 0 6px 14px rgba(0,0,0,.6) }
-  .beam{ position:absolute; height:6px; transform-origin:0 50%; pointer-events:none;
+  /* The wrapper owns the aim (a static inline rotate) and the inner bar owns the
+     animation. They MUST be separate elements: a CSS animation overrides inline
+     styles for the properties it animates, so animating transform on the same
+     element would silently discard the rotation and fire every beam due east. */
+  .beam-wrap{ position:absolute; height:6px; transform-origin:0 50%; pointer-events:none; }
+  .beam{ position:absolute; inset:0; transform-origin:0 50%; border-radius:3px;
     background:linear-gradient(to right, rgba(255,40,80,0), #ff2d55 30%, #fff 92%);
-    box-shadow:0 0 14px #ff2d55, 0 0 26px rgba(255,45,85,.8); border-radius:3px;
+    box-shadow:0 0 14px #ff2d55, 0 0 26px rgba(255,45,85,.8);
     animation:beam .34s ease-out forwards; }
   @keyframes beam{ 0%{ opacity:0; transform:scaleX(.2) } 22%{ opacity:1; transform:scaleX(1) }
     100%{ opacity:0; transform:scaleX(1) } }
@@ -231,12 +254,12 @@ export function bossBattleOverlayPage(): string {
   var loops = {};   // slot -> looping Audio element
   var live = [];    // one-shot Audio elements still playing
 
-  function playOnce(slot){
+  function playOnce(slot, scale){
     var url = sounds[slot];
     if(!url) return;
     try{
       var a = new Audio(url);
-      a.volume = volSfx;
+      a.volume = volSfx * (scale == null ? 1 : scale);
       // Overlapping one-shots need their own element; cap it so a chat burst
       // can't spawn hundreds of decoders.
       live = live.filter(function(x){ return !x.ended; });
@@ -296,7 +319,7 @@ export function bossBattleOverlayPage(): string {
     hide(elAlert); hide(elIntel); hide(elOutro);
     elOutro.className = 'layer hide';
     hud.classList.remove('show');
-    boss.classList.remove('in','dying');
+    boss.classList.remove('in','dying','shaking');
     bossImg.removeAttribute('src');
     bubble.classList.remove('show','flip');
     shock.classList.remove('go');
@@ -407,6 +430,7 @@ export function bossBattleOverlayPage(): string {
       tauntEvery: Number(cfg.tauntEverySeconds) || 12,
       tauntHold: Number(cfg.tauntHoldSeconds) || 3,
       crowdMax: Number(cfg.crowdMax) || 60,
+      outroTaunt: cfg.outroTauntSeconds == null ? 3 : Number(cfg.outroTauntSeconds),
       last: 0
     };
 
@@ -699,22 +723,25 @@ export function bossBattleOverlayPage(): string {
 
   function fireBeam(fromEl, delay){
     if(!state) return;
-    if(crowd.parentNode.querySelectorAll('.beam').length > 40) return;
+    if(field.querySelectorAll('.beam-wrap').length > 40) return;
     var fx = parseFloat(fromEl.style.left || '0');
     var fy = H - 26 - (parseFloat(fromEl.style.height || '84') / 2);
     var tx = state.x + state.size / 2;
     var ty = state.y + state.size / 2;
     var dx = tx - fx, dy = ty - fy;
     var len = Math.sqrt(dx * dx + dy * dy);
+    var wrap = document.createElement('div');
+    wrap.className = 'beam-wrap';
+    wrap.style.left = fx + 'px';
+    wrap.style.top = fy + 'px';
+    wrap.style.width = len + 'px';
+    wrap.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
     var beam = document.createElement('div');
     beam.className = 'beam';
-    beam.style.left = fx + 'px';
-    beam.style.top = fy + 'px';
-    beam.style.width = len + 'px';
-    beam.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
     if(delay) beam.style.animationDelay = delay + 'ms';
-    field.appendChild(beam);
-    setTimeout(function(){ if(beam.parentNode) beam.parentNode.removeChild(beam); }, 400 + (delay || 0));
+    wrap.appendChild(beam);
+    field.appendChild(wrap);
+    setTimeout(function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); }, 400 + (delay || 0));
   }
 
   function floatText(text, cls){
@@ -731,32 +758,85 @@ export function bossBattleOverlayPage(): string {
   }
 
   // ── Outro ─────────────────────────────────────────────────────────────────
+  /** How long the dying/fleeing boss gets to speak before the banner lands. */
+  function outroHold(){
+    var s = state ? state.outroTaunt : 3;
+    return Math.max(0, (isFinite(s) ? s : 3)) * 1000;
+  }
+
+  /**
+   * Scatter little blasts over the boss for the given duration, building towards
+   * the real
+   * explosion. Positions are re-read each time so they track the shaking body.
+   */
+  function miniExplosions(ms){
+    var every = 170;
+    var n = Math.max(1, Math.floor(ms / every));
+    for(var i = 0; i < n; i++){
+      later(function(){
+        if(!state) return;
+        var size = 40 + Math.random() * (state.size * 0.45);
+        var d = document.createElement('div');
+        d.className = 'mini';
+        d.style.width = size + 'px';
+        d.style.height = size + 'px';
+        d.style.left = (state.x + Math.random() * state.size - size / 2) + 'px';
+        d.style.top = (state.y + Math.random() * state.size - size / 2) + 'px';
+        field.appendChild(d);
+        // Under the victory sting, so the finale still reads as the big moment.
+        playOnce('hit', 0.45);
+        setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 600);
+      }, i * every + Math.random() * 90);
+    }
+  }
+
   function onDefeated(d){
     stopLoop('bgm');
     clearTimers();
     hideBubble();
     setHp(0, state ? state.maxHp : 1);
+    var hold = outroHold();
+
     if(state){
+      state.paused = true;              // it has bigger problems than patrolling
       var taunt = String((d && d.taunt) || '');
       if(taunt) sayBubble(taunt);
-      shock.classList.add('go');
-      boss.classList.add('dying');
+      boss.classList.add('shaking');
+      miniExplosions(hold);
     }
-    playOnce('victory');
-    var killer = (d && d.killer) ? esc(d.killer) : '';
-    banner('win', 'BOSS DEFEATED!', killer ? 'Killing blow: ' + killer : '');
-    later(function(){ if(state){ boss.classList.remove('in'); hideBubble(); } }, 1200);
+
+    later(function(){
+      hideBubble();
+      if(state){
+        boss.classList.remove('shaking');
+        shock.classList.add('go');
+        boss.classList.add('dying');
+      }
+      playOnce('victory');
+      var killer = (d && d.killer) ? esc(d.killer) : '';
+      banner('win', 'BOSS DEFEATED!', killer ? 'Killing blow: ' + killer : '');
+      later(function(){ if(state) boss.classList.remove('in'); }, 1200);
+    }, hold);
   }
 
   function onEscaped(d){
     stopLoop('bgm');
     clearTimers();
     hideBubble();
-    var taunt = String((d && d.taunt) || '');
-    if(taunt && state) sayBubble(taunt);
-    playOnce('escape');
-    banner('lose', 'THE BOSS ESCAPED', 'It got away with ' + Math.max(0, Number(d && d.hp) || 0) + ' HP');
-    later(function(){ boss.classList.remove('in'); hideBubble(); }, 1400);
+    var hold = outroHold();
+
+    if(state){
+      state.paused = true;
+      var taunt = String((d && d.taunt) || '');
+      if(taunt) sayBubble(taunt);
+    }
+
+    later(function(){
+      hideBubble();
+      playOnce('escape');
+      boss.classList.remove('in');
+      banner('lose', 'THE BOSS ESCAPED', 'It got away with ' + Math.max(0, Number(d && d.hp) || 0) + ' HP');
+    }, hold);
   }
 
   function banner(kind, big, sub){

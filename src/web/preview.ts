@@ -110,7 +110,7 @@ async function collectBuiltins() {
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, setBossSpawner: noop, getTaunts: () => [], randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
-    boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null },
+    boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null, rememberEmotes: async () => {}, lookupEmoteArt: async () => new Map() },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
     points: {},

@@ -1,0 +1,6 @@
+-- CreateTable
+CREATE TABLE "EmoteArt" (
+    "name" TEXT NOT NULL PRIMARY KEY,
+    "emoteId" TEXT NOT NULL,
+    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
