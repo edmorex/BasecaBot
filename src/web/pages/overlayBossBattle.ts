@@ -10,7 +10,8 @@
  *   alert     -> full-screen pulsing red klaxon warning
  *   intel     -> boss portrait + a dossier typed out like a military terminal
  *   spawn     -> fade in centre stage, fill the health bar, opening taunt
- *   combat    -> a frame of hits/misses/heals: lasers, floats, bar, glow, speed
+ *   combat    -> a frame of hits/misses/heals/dupes: lasers, arcs, floats, bar
+ *   cannon    -> the communal mega cannon discharges into the boss
  *   defeated  -> explosion, victory sting
  *   escaped   -> a quiet fade and a sad sting
  *   clear     -> tear everything down
@@ -181,6 +182,48 @@ export function bossBattleOverlayPage(): string {
     100%{ opacity:0; transform:translate(-50%,-92px) scale(1) }
   }
 
+  /* ── Mega cannon: shared battery in the bottom centre ──────────────────── */
+  #cannon{ position:absolute; left:50%; bottom:14px; width:150px; height:132px;
+    margin-left:-75px; opacity:0; transition:opacity .5s ease; }
+  #cannon.show{ opacity:1 }
+  /* The pulse lives on its own element: #cannon carries no transform of its own,
+     but keeping them separate means the glow animation can never fight the
+     layout, and the pulse rate is set inline per frame. */
+  #cannon-glow{ position:absolute; left:-40px; right:-40px; bottom:-30px; top:-10px;
+    border-radius:50%; pointer-events:none;
+    background:radial-gradient(ellipse at 50% 70%, rgba(255,60,60,.55) 0%, rgba(255,20,20,.22) 45%, rgba(255,0,0,0) 72%);
+    animation:cannonPulse 1.6s ease-in-out infinite; }
+  @keyframes cannonPulse{ 0%,100%{ opacity:.25; transform:scale(.9) } 50%{ opacity:1; transform:scale(1.08) } }
+  #cannon-barrel{ position:absolute; left:50%; margin-left:-27px; top:0; width:54px; height:62px;
+    border-radius:8px 8px 4px 4px; background:linear-gradient(90deg,#2a2f3a,#5b6474 40%,#39404e);
+    border:3px solid #10131a; box-shadow:inset 0 6px 12px rgba(255,255,255,.14); }
+  #cannon-base{ position:absolute; left:0; right:0; bottom:0; height:78px; border-radius:14px;
+    background:linear-gradient(180deg,#464f60,#20252f); border:3px solid #10131a;
+    box-shadow:0 8px 18px rgba(0,0,0,.6), inset 0 4px 10px rgba(255,255,255,.1); }
+  /* Vertical meter, centred on the cannon, filling bottom to top. */
+  #cannon-meter{ position:absolute; left:50%; margin-left:-19px; bottom:12px; width:38px; height:56px;
+    border-radius:6px; border:3px solid #0d1016; background:rgba(0,0,0,.6); overflow:hidden; }
+  #cannon-fill{ position:absolute; left:0; right:0; bottom:0; height:0%;
+    background:linear-gradient(180deg,#ff6b6b,#c1121f);
+    box-shadow:0 0 14px rgba(255,60,60,.9); transition:height .25s ease-out; }
+  #cannon.firing #cannon-glow{ animation:none; opacity:1; transform:scale(1.5) }
+  #cannon.firing #cannon-base, #cannon.firing #cannon-barrel{ animation:cannonKick .32s ease-out }
+  @keyframes cannonKick{ 0%{ transform:translateY(0) } 35%{ transform:translateY(12px) } 100%{ transform:translateY(0) } }
+
+  /* A dupe's grey shot, lobbed at the cannon instead of wasted on the boss.
+     Positioned here; the arc itself is scripted, since every shot has its own
+     start point and no CSS keyframe could know it. */
+  .arc{ position:absolute; width:20px; height:20px; border-radius:50%; pointer-events:none;
+    background:radial-gradient(circle,#f2f2f2 0%,#9aa0a6 55%,rgba(120,120,120,0) 72%);
+    box-shadow:0 0 12px rgba(200,200,200,.75); }
+  /* The cannon's own shot: thick, bright, and unmistakably not a laser. */
+  .beam-wrap.mega{ height:26px }
+  .mega .beam{ border-radius:13px;
+    background:linear-gradient(to right, rgba(255,80,80,0), #ff3b3b 25%, #fff 88%);
+    box-shadow:0 0 34px #ff2d2d, 0 0 80px rgba(255,45,45,.85);
+    animation:beam .5s ease-out forwards; }
+  .float.mega{ font-size:104px; }
+
   /* ── Outro banners ──────────────────────────────────────────────────────── */
   #outro{ display:flex; align-items:center; justify-content:center; }
   #outro .banner{ text-align:center; font-weight:900; line-height:1.1; opacity:0;
@@ -214,6 +257,12 @@ export function bossBattleOverlayPage(): string {
     <div id="boss"><img id="boss-img" alt="" /></div>
     <div id="bubble"></div>
     <div id="crowd"></div>
+    <div id="cannon">
+      <div id="cannon-glow"></div>
+      <div id="cannon-barrel"></div>
+      <div id="cannon-base"></div>
+      <div id="cannon-meter"><div id="cannon-fill"></div></div>
+    </div>
   </div>
 
   <div class="layer hide" id="outro"></div>
@@ -246,6 +295,9 @@ export function bossBattleOverlayPage(): string {
   var bubble = document.getElementById('bubble');
   var crowd = document.getElementById('crowd');
   var field = document.getElementById('field');
+  var cannon = document.getElementById('cannon');
+  var cannonGlow = document.getElementById('cannon-glow');
+  var cannonFill = document.getElementById('cannon-fill');
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   // Sound urls + volumes arrive with each battle's 'alert', so swapping a sound
@@ -323,6 +375,8 @@ export function bossBattleOverlayPage(): string {
     bossImg.removeAttribute('src');
     bubble.classList.remove('show','flip');
     shock.classList.remove('go');
+    cannon.classList.remove('show','firing');
+    cannonFill.style.height = '0%';
   }
 
   // ── Red alert ─────────────────────────────────────────────────────────────
@@ -435,6 +489,10 @@ export function bossBattleOverlayPage(): string {
       tauntHold: Number(cfg.tauntHoldSeconds) || 3,
       crowdMax: Number(cfg.crowdMax) || 60,
       outroTaunt: cfg.outroTauntSeconds == null ? 3 : Number(cfg.outroTauntSeconds),
+      charge: 0,
+      chargeMax: Math.max(1, Number(cfg.cannonFull) || 15),
+      chargeRate: Math.max(0, Number(cfg.cannonDischarge) || 0),
+      cannonDamage: Math.max(1, Number(cfg.cannonDamage) || 10),
       last: 0
     };
 
@@ -451,6 +509,8 @@ export function bossBattleOverlayPage(): string {
     // Force a reflow so the opacity transition actually runs from 0.
     void boss.offsetWidth;
     boss.classList.add('in');
+    cannon.classList.add('show');
+    paintCannon();
     playOnce('spawn');
     playLoop('bgm', volBgm);
 
@@ -561,6 +621,7 @@ export function bossBattleOverlayPage(): string {
     var dt = Math.min(0.05, (now - state.last) / 1000);
     state.last = now;
     if(!state.paused) move(dt);
+    dischargeCannon(dt);
     place();
   }
 
@@ -646,27 +707,138 @@ export function bossBattleOverlayPage(): string {
     bar.classList.add('shake');
   }
 
+  // ── Mega cannon ───────────────────────────────────────────────────────────
+  /**
+   * Draw the meter and set the pulse rate. The pulse speeds up as the cannon
+   * fills — from a slow idle throb to a frantic flash just before it goes off.
+   */
+  function paintCannon(){
+    if(!state) return;
+    var f = Math.max(0, Math.min(1, state.charge / state.chargeMax));
+    cannonFill.style.height = (f * 100) + '%';
+    cannonGlow.style.animationDuration = (1.6 - f * 1.32).toFixed(2) + 's';
+  }
+
+  /**
+   * Bleed the meter between authoritative updates. The bot sends the true charge
+   * with every combat frame, so this only has to look right in the quiet gaps —
+   * and any drift is corrected the moment somebody types.
+   */
+  function dischargeCannon(dt){
+    if(!state || state.chargeRate <= 0 || state.charge <= 0) return;
+    state.charge = Math.max(0, state.charge - state.chargeRate * dt);
+    paintCannon();
+  }
+
+  /** A dupe: a grey shot lobbed at the cannon rather than wasted on the boss. */
+  function arcToCannon(fromEl){
+    if(!state) return;
+    if(field.querySelectorAll('.arc').length > 24) return;
+    var fx = parseFloat(fromEl.style.left || '0');
+    var fy = H - 26 - (parseFloat(fromEl.style.height || '84') / 2);
+    var tx = W / 2;
+    var ty = H - 14 - 40;               // roughly the mouth of the barrel
+    var dx = tx - fx, dy = ty - fy;
+    var dot = document.createElement('div');
+    dot.className = 'arc';
+    dot.style.left = (fx - 10) + 'px';
+    dot.style.top = (fy - 10) + 'px';
+    field.appendChild(dot);
+    // Scripted rather than a CSS keyframe: the arc depends on where the chatter
+    // is standing, which no static keyframe could know.
+    var peak = 130 + Math.random() * 70;
+    var done = function(){ if(dot.parentNode) dot.parentNode.removeChild(dot); };
+    if(dot.animate){
+      var anim = dot.animate([
+        { transform:'translate(0px,0px) scale(.6)', opacity:0 },
+        { transform:'translate(' + (dx * .5) + 'px,' + (dy * .5 - peak) + 'px) scale(1)', opacity:1, offset:.5 },
+        { transform:'translate(' + dx + 'px,' + dy + 'px) scale(.5)', opacity:.9 }
+      ], { duration:560, easing:'linear', fill:'forwards' });
+      anim.onfinish = done;
+      setTimeout(done, 900); // belt and braces if onfinish never lands
+    }else{
+      setTimeout(done, 100);
+    }
+  }
+
+  /** The cannon discharges: kick, a fat beam into the boss, and a big number. */
+  function onCannon(d){
+    var damage = Math.max(0, Number(d && d.damage) || 0);
+    var hp = Number(d && d.hp);
+    var maxHp = Number(d && d.maxHp) || (state ? state.maxHp : 1);
+
+    if(state){
+      state.charge = 0;
+      paintCannon();
+      cannon.classList.add('firing');
+      setTimeout(function(){ cannon.classList.remove('firing'); }, 420);
+      megaBeam();
+      restartShock();
+      floatText('-' + damage, 'hit mega');
+    }
+    playOnce('cannon');
+    if(isFinite(hp) && state){
+      state.hp = hp; state.maxHp = maxHp;
+      setHp(hp, maxHp);
+      shakeBar();
+    }
+  }
+
+  /** The cannon's shot, fired from the barrel at the boss. */
+  function megaBeam(){
+    if(!state) return;
+    var fx = W / 2;
+    var fy = H - 14 - 40;
+    var dx = state.x + state.size / 2 - fx;
+    var dy = state.y + state.size / 2 - fy;
+    var wrap = document.createElement('div');
+    wrap.className = 'beam-wrap mega';
+    wrap.style.left = fx + 'px';
+    wrap.style.top = fy + 'px';
+    wrap.style.width = Math.sqrt(dx * dx + dy * dy) + 'px';
+    wrap.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
+    var beam = document.createElement('div');
+    beam.className = 'beam';
+    wrap.appendChild(beam);
+    field.appendChild(wrap);
+    setTimeout(function(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); }, 600);
+  }
+
+  /** Re-trigger the shockwave ring, which the death sequence also uses. */
+  function restartShock(){
+    shock.classList.remove('go');
+    void shock.offsetWidth;
+    shock.classList.add('go');
+  }
+
   // ── Crowd ─────────────────────────────────────────────────────────────────
   /**
    * Fighters accrete outward from the centre and squeeze together as the crowd
    * grows, so a busy chat packs the bottom of the screen shoulder to shoulder.
    */
+  /** Half the width kept clear in the middle for the cannon. */
+  var CANNON_GAP = 130;
+
   function layoutCrowd(){
     var ids = Object.keys(fighters);
     var n = ids.length;
     if(!n) return;
     var size = n > 18 ? Math.max(48, 84 - (n - 18) * 1.2) : 84;
-    var spacing = Math.min(size + 10, (W - 160) / n);
+    // Fighters fall in either side of the cannon, so each flank only has to hold
+    // half of them — and the spacing is squeezed to fit whatever room is left.
+    var perSide = Math.ceil(n / 2);
+    var room = W / 2 - 70 - CANNON_GAP;
+    var spacing = Math.min(size + 10, room / perSide);
     ids.sort(function(a, b){ return fighters[a].order - fighters[b].order; });
     for(var i = 0; i < n; i++){
       var f = fighters[ids[i]];
-      var k = Math.ceil(i / 2);
-      var sign = (i % 2 === 1) ? -1 : 1;
-      f.el.style.left = (W / 2 + sign * k * spacing) + 'px';
+      var k = Math.floor(i / 2);
+      var sign = (i % 2 === 0) ? -1 : 1;   // first arrival to the left, next to the right
+      f.el.style.left = (W / 2 + sign * (CANNON_GAP + k * spacing + size / 2)) + 'px';
       f.el.style.width = size + 'px';
       f.el.style.height = size + 'px';
       f.el.style.marginLeft = (-size / 2) + 'px';
-      f.el.style.zIndex = String(200 - k); // centre stays on top as they overlap
+      f.el.style.zIndex = String(200 - k); // innermost stays on top as they overlap
     }
   }
 
@@ -703,6 +875,10 @@ export function bossBattleOverlayPage(): string {
 
     for(var i = 0; i < events.length; i++) renderShot(events[i]);
 
+    // The bot's figure is authoritative; local decay just fills the gaps.
+    var charge = Number(d && d.charge);
+    if(isFinite(charge)){ state.charge = charge; paintCannon(); }
+
     if(isFinite(hp)){
       state.hp = hp; state.maxHp = maxHp;
       setHp(hp, maxHp);
@@ -719,6 +895,10 @@ export function bossBattleOverlayPage(): string {
       setTimeout(function(){ f.el.classList.remove('firing'); }, 260);
       var shots = Math.min(4, Math.max(1, (e.damage || 0) + (e.heal || 0) + (e.misses ? 1 : 0)));
       for(var i = 0; i < shots; i++) fireBeam(f.el, i * 45);
+      // Dupes go to the cannon instead of the boss — one lob per point earned,
+      // capped so a huge cap cannot bury the screen in grey.
+      var lobs = Math.min(6, e.dupes || 0);
+      for(var j = 0; j < lobs; j++) arcToCannon(f.el);
     }
     if(e.damage) floatText('-' + e.damage, 'hit');
     if(e.heal) floatText('+' + e.heal, 'heal');
@@ -873,6 +1053,7 @@ export function bossBattleOverlayPage(): string {
       else if(msg.type === 'intel') onIntel(d);
       else if(msg.type === 'spawn') onSpawn(d);
       else if(msg.type === 'combat') onCombat(d);
+      else if(msg.type === 'cannon') onCannon(d);
       else if(msg.type === 'crowd') onCrowd(d);
       else if(msg.type === 'defeated') onDefeated(d);
       else if(msg.type === 'escaped') onEscaped(d);

@@ -199,6 +199,26 @@ run('BossBattleService (integration)', () => {
     expect((await fresh.lookupEmoteArt(['Kappa'])).get('Kappa')).toBe(emoteImageUrl('25'));
   });
 
+  it('clamps the cannon settings, keeping the fractional ones fractional', async () => {
+    const cfg = await svc.setConfig({
+      cannonRate: 9,          // out of range
+      cannonDischarge: 0.35,  // must survive as a fraction
+      cannonCap: -3,
+      cannonFull: 0,
+      cannonDamage: 99999,
+    });
+    expect(cfg.cannonRate).toBe(1);
+    expect(cfg.cannonDischarge).toBe(0.35);
+    expect(cfg.cannonCap).toBe(0);
+    expect(cfg.cannonFull).toBe(1);
+    expect(cfg.cannonDamage).toBe(500);
+  });
+
+  it('keeps a fractional cannon rate intact rather than rounding it to nothing', async () => {
+    expect((await svc.setConfig({ cannonRate: 0.05 })).cannonRate).toBe(0.05);
+    expect((await svc.setConfig({ cannonRate: 0.5 })).cannonRate).toBe(0.5);
+  });
+
   it('persists clamped settings across a reload', async () => {
     await svc.setConfig({ cooldownSeconds: 45, startDelaySeconds: 9999, dartSeconds: 0.75 });
     const fresh = new BossBattleService({ prisma } as unknown as Storage, logger);

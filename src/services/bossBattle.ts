@@ -28,6 +28,7 @@ export const SOUND_SLOTS = [
   { id: 'spawn', label: 'Boss arrival', hint: 'one-shot as the boss fades in', bgm: false },
   { id: 'hit', label: 'Hit', hint: 'chat lands damage', bgm: false },
   { id: 'heal', label: 'Heal', hint: 'the boss regains health', bgm: false },
+  { id: 'cannon', label: 'Mega cannon', hint: 'the communal cannon fires', bgm: false },
   { id: 'victory', label: 'Victory', hint: 'the boss is defeated', bgm: false },
   { id: 'escape', label: 'Escape', hint: 'the boss gets away', bgm: false },
   { id: 'bgm', label: 'Battle music (BGM)', hint: 'loops for the whole fight', bgm: true },
@@ -72,6 +73,16 @@ export interface BossConfig {
   crowdMax: number;
   /** How long the death/escape taunt lingers before the final banner lands. */
   outroTauntSeconds: number;
+  /** Cannon points earned per duplicate emote (0–1). */
+  cannonRate: number;
+  /** Most duplicate emotes one message may feed the cannon. */
+  cannonCap: number;
+  /** Points needed to fill the cannon and fire it. */
+  cannonFull: number;
+  /** HP the cannon takes off the boss when it fires. */
+  cannonDamage: number;
+  /** Points the cannon bleeds per second, so filling it needs sustained pressure. */
+  cannonDischarge: number;
 }
 
 export const BOSS_DEFAULTS: BossConfig = {
@@ -89,6 +100,11 @@ export const BOSS_DEFAULTS: BossConfig = {
   spinSeconds: 6,
   crowdMax: 60,
   outroTauntSeconds: 3,
+  cannonRate: 0.5,
+  cannonCap: 4,
+  cannonFull: 15,
+  cannonDamage: 10,
+  cannonDischarge: 0.2,
 };
 
 /** [min, max] bounds for every numeric setting; applied on every write. */
@@ -106,10 +122,15 @@ export const BOSS_RANGES: Record<string, readonly [number, number]> = {
   spinSeconds: [2, 30],
   crowdMax: [1, 200],
   outroTauntSeconds: [0, 15],
+  cannonRate: [0, 1],
+  cannonCap: [0, 50],
+  cannonFull: [1, 500],
+  cannonDamage: [1, 500],
+  cannonDischarge: [0, 10],
 };
 
 /** Settings that are meaningful as fractions; everything else is rounded. */
-const FRACTIONAL = new Set(['dartSeconds']);
+const FRACTIONAL = new Set(['dartSeconds', 'cannonRate', 'cannonDischarge']);
 
 /** A boss as the rest of the app sees it — JSON columns already parsed. */
 export interface BossView {
@@ -164,7 +185,7 @@ export function emoteImageUrl(emoteId: string): string {
 }
 
 /** How the admin panel's simulate buttons poke a running mock battle. */
-export type SimAction = 'hit' | 'miss' | 'heal';
+export type SimAction = 'hit' | 'miss' | 'heal' | 'dupe';
 
 /**
  * Boss Battle — settings, the boss roster, the media libraries and the
@@ -332,7 +353,7 @@ export class BossBattleService {
     return this.simSpawner(bossId);
   }
 
-  /** Stand in for a chatter hitting, missing, or healing during a mock battle. */
+  /** Stand in for a chatter hitting, missing, healing or feeding the cannon. */
   async requestSimAction(action: SimAction): Promise<string | null> {
     if (!this.simActor) return 'The Boss Battle game is not running.';
     return this.simActor(action);

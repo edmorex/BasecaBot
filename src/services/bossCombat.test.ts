@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveCombat, cleanEmoteNames, speedForHp, glowForHp, type EmoteLists } from './bossCombat.js';
+import { resolveCombat, cleanEmoteNames, speedForHp, glowForHp, dischargedCharge, type EmoteLists } from './bossCombat.js';
 
 const lists: EmoteLists = {
   hurt: new Set(['Kappa', 'PogChamp']),
@@ -10,37 +10,37 @@ const em = (name: string, count = 1) => ({ name, count });
 describe('resolveCombat', () => {
   it('deals one damage per DISTINCT vulnerable emote', () => {
     expect(resolveCombat([em('Kappa'), em('PogChamp')], lists, false)).toEqual({
-      damage: 2, heal: 0, misses: 0, landed: true,
+      damage: 2, heal: 0, misses: 0, dupes: 0, landed: true,
     });
   });
 
   it('treats repeats of the same emote as misses, so spam does not out-damage variety', () => {
     // Kappa x3 -> one hit, two wasted shots.
     expect(resolveCombat([em('Kappa', 3)], lists, false)).toEqual({
-      damage: 1, heal: 0, misses: 2, landed: true,
+      damage: 1, heal: 0, misses: 2, dupes: 0, landed: true,
     });
   });
 
   it('counts emotes the boss is immune to as misses', () => {
     expect(resolveCombat([em('Kappa'), em('LUL', 2)], lists, false)).toEqual({
-      damage: 1, heal: 0, misses: 2, landed: true,
+      damage: 1, heal: 0, misses: 2, dupes: 0, landed: true,
     });
   });
 
   it('heals on healing emotes and still lands (so defenders share the cooldown)', () => {
     const r = resolveCombat([em('HeyGuys')], lists, false);
-    expect(r).toEqual({ damage: 0, heal: 1, misses: 0, landed: true });
+    expect(r).toEqual({ damage: 0, heal: 1, misses: 0, dupes: 0, landed: true });
   });
 
   it('lets one message both damage and heal', () => {
     expect(resolveCombat([em('Kappa'), em('HeyGuys')], lists, false)).toEqual({
-      damage: 1, heal: 1, misses: 0, landed: true,
+      damage: 1, heal: 1, misses: 0, dupes: 0, landed: true,
     });
   });
 
   it('turns EVERYTHING into a miss while the sender is on cooldown', () => {
     const r = resolveCombat([em('Kappa', 2), em('HeyGuys')], lists, true);
-    expect(r).toEqual({ damage: 0, heal: 0, misses: 3, landed: false });
+    expect(r).toEqual({ damage: 0, heal: 0, misses: 3, dupes: 0, landed: false });
     expect(r.landed).toBe(false); // a blocked message must not re-arm the cooldown
   });
 
@@ -50,22 +50,103 @@ describe('resolveCombat', () => {
 
   it('resolves an emote on both lists as damage only, never double-counted', () => {
     const both: EmoteLists = { hurt: new Set(['Kappa']), heal: new Set(['Kappa']) };
-    expect(resolveCombat([em('Kappa')], both, false)).toEqual({ damage: 1, heal: 0, misses: 0, landed: true });
+    expect(resolveCombat([em('Kappa')], both, false)).toEqual({ damage: 1, heal: 0, misses: 0, dupes: 0, landed: true });
   });
 
   it('does nothing for a message with no emotes', () => {
-    expect(resolveCombat([], lists, false)).toEqual({ damage: 0, heal: 0, misses: 0, landed: false });
+    expect(resolveCombat([], lists, false)).toEqual({ damage: 0, heal: 0, misses: 0, dupes: 0, landed: false });
   });
 
   it('ignores junk entries rather than counting them', () => {
     const r = resolveCombat([em('', 5), em('Kappa', 0), em('PogChamp')], lists, false);
-    expect(r).toEqual({ damage: 1, heal: 0, misses: 0, landed: true });
+    expect(r).toEqual({ damage: 1, heal: 0, misses: 0, dupes: 0, landed: true });
   });
 
   it('de-duplicates an emote name reported twice in one message', () => {
     expect(resolveCombat([em('Kappa'), em('Kappa')], lists, false)).toEqual({
-      damage: 1, heal: 0, misses: 1, landed: true,
+      damage: 1, heal: 0, misses: 1, dupes: 0, landed: true,
     });
+  });
+});
+
+describe('resolveCombat — mega cannon dupes', () => {
+  it('routes repeats of a vulnerable emote into the cannon instead of misses', () => {
+    // Kappa x4 = 1 hit + 3 dupes, nothing wasted.
+    expect(resolveCombat([em('Kappa', 4)], lists, false, 4)).toEqual({
+      damage: 1, heal: 0, misses: 0, dupes: 3, landed: true,
+    });
+  });
+
+  it('spills dupes past the cap back into misses', () => {
+    // Kappa x10 = 1 hit + 2 dupes (the cap) + 7 wasted.
+    expect(resolveCombat([em('Kappa', 10)], lists, false, 2)).toEqual({
+      damage: 1, heal: 0, misses: 7, dupes: 2, landed: true,
+    });
+  });
+
+  it('pools dupes across different vulnerable emotes', () => {
+    expect(resolveCombat([em('Kappa', 3), em('PogChamp', 2)], lists, false, 10)).toEqual({
+      damage: 2, heal: 0, misses: 0, dupes: 3, landed: true,
+    });
+  });
+
+  it('never charges the cannon from an immune emote', () => {
+    expect(resolveCombat([em('LUL', 5)], lists, false, 10)).toEqual({
+      damage: 0, heal: 0, misses: 5, dupes: 0, landed: false,
+    });
+  });
+
+  it('never charges the cannon from a repeated HEAL emote', () => {
+    // Healing the boss must not also help chat blow it up.
+    expect(resolveCombat([em('HeyGuys', 4)], lists, false, 10)).toEqual({
+      damage: 0, heal: 1, misses: 3, dupes: 0, landed: true,
+    });
+  });
+
+  it('gives a cooling-down chatter no cannon charge at all', () => {
+    expect(resolveCombat([em('Kappa', 6)], lists, true, 10)).toEqual({
+      damage: 0, heal: 0, misses: 6, dupes: 0, landed: false,
+    });
+  });
+
+  it('counts a repeat reported as a second emote group', () => {
+    expect(resolveCombat([em('Kappa'), em('Kappa', 2)], lists, false, 10)).toEqual({
+      damage: 1, heal: 0, misses: 0, dupes: 2, landed: true,
+    });
+  });
+
+  it('treats a cap of 0 as "no cannon", so every repeat is a miss', () => {
+    expect(resolveCombat([em('Kappa', 5)], lists, false, 0)).toMatchObject({ dupes: 0, misses: 4 });
+  });
+
+  it('always accounts for every emote instance sent', () => {
+    // Whatever the cap, damage + heal + dupes + misses must equal what was typed.
+    for (const cap of [0, 1, 3, 99]) {
+      const r = resolveCombat([em('Kappa', 4), em('HeyGuys', 2), em('LUL', 3)], lists, false, cap);
+      expect(r.damage + r.heal + r.dupes + r.misses).toBe(9);
+    }
+  });
+});
+
+describe('dischargedCharge', () => {
+  it('bleeds charge at the configured rate', () => {
+    expect(dischargedCharge(10, 0.2, 5000, 15)).toBeCloseTo(9, 5); // 5s x 0.2
+  });
+
+  it('never falls below zero however long it idles', () => {
+    expect(dischargedCharge(3, 0.2, 600_000, 15)).toBe(0);
+  });
+
+  it('never exceeds the cannon size', () => {
+    expect(dischargedCharge(99, 0.2, 0, 15)).toBe(15);
+  });
+
+  it('holds steady when the discharge rate is zero', () => {
+    expect(dischargedCharge(7, 0, 60_000, 15)).toBe(7);
+  });
+
+  it('ignores a negative elapsed time rather than charging itself', () => {
+    expect(dischargedCharge(7, 0.2, -5000, 15)).toBe(7);
   });
 });
 

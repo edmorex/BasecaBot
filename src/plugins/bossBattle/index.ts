@@ -2,7 +2,7 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatEvent } from '../../core/events.js';
 import { BossError, type BossView, type SimAction } from '../../services/bossBattle.js';
-import { resolveCombat, type EmoteLists } from '../../services/bossCombat.js';
+import { resolveCombat, dischargedCharge, type EmoteLists } from '../../services/bossCombat.js';
 
 /** WebSocket room the Boss Battle overlay subscribes to. */
 const ROOM = 'boss';
@@ -34,6 +34,8 @@ interface FrameEvent {
   damage: number;
   heal: number;
   misses: number;
+  /** Repeats routed to the mega cannon — drawn as arcing shots, not misses. */
+  dupes: number;
 }
 
 interface Battle {
@@ -51,8 +53,14 @@ interface Battle {
   fighters: Map<string, Fighter>;
   /** Last message that landed, per user — the cooldown clock. */
   lastLanded: Map<string, number>;
-  /** Who struck the killing blow. */
+  /**
+   * Who struck the killing blow, or null when the mega cannon finished it — the
+   * cannon is communal, so nobody may claim the Basecamp Hero badge for it.
+   */
   killerId: string | null;
+  /** Mega cannon charge, and when that figure was taken (it bleeds with time). */
+  charge: number;
+  chargeAt: number;
   escapeTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -172,14 +180,29 @@ export function bossBattlePlugin(): Plugin {
 
   // ── Combat ──────────────────────────────────────────────────────────────────
 
-  /** Push this frame's events to the overlay with the authoritative HP. */
+  /**
+   * The cannon's charge right now. It is only ever recomputed on demand — the
+   * decay is pure arithmetic over elapsed time, so no ticking timer is needed and
+   * the overlay can interpolate the same curve locally between updates.
+   */
+  const currentCharge = (b: Battle): number => {
+    const cfg = ctx.boss.getConfig();
+    return dischargedCharge(b.charge, cfg.cannonDischarge, Date.now() - b.chargeAt, cfg.cannonFull);
+  };
+
+  /** Push this frame's events to the overlay with the authoritative HP + charge. */
   const flushFrame = () => {
     frameTimer = undefined;
     if (!battle || !frame.length) {
       frame = [];
       return;
     }
-    ctx.ws.broadcast(ROOM, 'combat', { events: frame, hp: battle.hp, maxHp: battle.boss.hp });
+    ctx.ws.broadcast(ROOM, 'combat', {
+      events: frame,
+      hp: battle.hp,
+      maxHp: battle.boss.hp,
+      charge: currentCharge(battle),
+    });
     frame = [];
   };
 
@@ -195,29 +218,67 @@ export function bossBattlePlugin(): Plugin {
   const applyCombat = (
     userId: string,
     displayName: string,
-    result: { damage: number; heal: number; misses: number; landed: boolean },
+    result: { damage: number; heal: number; misses: number; dupes: number; landed: boolean },
   ) => {
     if (!battle || battle.phase !== 'fight') return;
-    const { damage, heal, misses, landed } = result;
-    if (!damage && !heal && !misses) return;
+    const { damage, heal, misses, dupes, landed } = result;
+    if (!damage && !heal && !misses && !dupes) return;
+    const cfg = ctx.boss.getConfig();
 
     let fighter = battle.fighters.get(userId);
     if (!fighter) {
       // Anyone who throws an emote joins the crowd, even if it did nothing.
       fighter = { displayName, avatarUrl: null, damage: 0 };
       battle.fighters.set(userId, fighter);
-      if (battle.fighters.size <= ctx.boss.getConfig().crowdMax) queueAvatar(userId);
+      if (battle.fighters.size <= cfg.crowdMax) queueAvatar(userId);
     }
     fighter.damage += damage;
     if (landed) battle.lastLanded.set(userId, Date.now());
 
     // Healing can never push a boss above the health it started with.
     battle.hp = Math.min(battle.boss.hp, Math.max(0, battle.hp - damage + heal));
-    queueFrame({ id: userId, name: displayName, damage, heal, misses });
+    queueFrame({ id: userId, name: displayName, damage, heal, misses, dupes });
 
     if (battle.hp <= 0) {
       battle.killerId = userId;
       flushFrame(); // land the final blow before the outro
+      void finish(true);
+      return;
+    }
+
+    // Dupes feed the shared cannon. Charge is re-read (and so re-decayed) first,
+    // which is what makes a slow trickle of dupes fail to keep it topped up.
+    if (dupes > 0 && cfg.cannonRate > 0) {
+      const charged = currentCharge(battle) + dupes * cfg.cannonRate;
+      battle.chargeAt = Date.now();
+      if (charged >= cfg.cannonFull) {
+        battle.charge = 0;
+        fireCannon();
+      } else {
+        battle.charge = charged;
+      }
+    }
+  };
+
+  /**
+   * The cannon goes off. Deliberately credits NO killer: it is charged by the
+   * whole chat, so a cannon kill leaves the Basecamp Hero badge unclaimed while
+   * everyone who damaged the boss still gets their participation credit.
+   */
+  const fireCannon = () => {
+    if (!battle) return;
+    const cfg = ctx.boss.getConfig();
+    battle.hp = Math.max(0, battle.hp - cfg.cannonDamage);
+    flushFrame(); // the individual shots land before the big one
+    ctx.ws.broadcast(ROOM, 'cannon', {
+      damage: cfg.cannonDamage,
+      hp: battle.hp,
+      maxHp: battle.boss.hp,
+      charge: 0,
+    });
+    ctx.logger.info({ damage: cfg.cannonDamage, hp: battle.hp }, 'boss: mega cannon fired');
+    if (battle.hp <= 0) {
+      battle.killerId = null;
       void finish(true);
     }
   };
@@ -238,9 +299,9 @@ export function bossBattlePlugin(): Plugin {
 
     if (!battle || battle.phase !== 'fight') return;
 
-    const cooldownMs = ctx.boss.getConfig().cooldownSeconds * 1000;
-    const onCooldown = Date.now() - (battle.lastLanded.get(e.user.id) ?? 0) < cooldownMs;
-    applyCombat(e.user.id, e.user.displayName, resolveCombat(emotes, battle.lists, onCooldown));
+    const cfg = ctx.boss.getConfig();
+    const onCooldown = Date.now() - (battle.lastLanded.get(e.user.id) ?? 0) < cfg.cooldownSeconds * 1000;
+    applyCombat(e.user.id, e.user.displayName, resolveCombat(emotes, battle.lists, onCooldown, cfg.cannonCap));
   };
 
   /** slot -> url for every sound that has a file loaded; empty slots are omitted. */
@@ -274,6 +335,8 @@ export function bossBattlePlugin(): Plugin {
       fighters: new Map(),
       lastLanded: new Map(),
       killerId: null,
+      charge: 0,
+      chargeAt: Date.now(),
     };
 
     // 1. Red alert. Sound urls ride along with it (rather than being fetched by
@@ -325,6 +388,9 @@ export function bossBattlePlugin(): Plugin {
         spinSeconds: cfg.spinSeconds,
         crowdMax: cfg.crowdMax,
         outroTauntSeconds: cfg.outroTauntSeconds,
+        cannonFull: cfg.cannonFull,
+        cannonDischarge: cfg.cannonDischarge,
+        cannonDamage: cfg.cannonDamage,
         volumeSfx: cfg.volumeSfx,
         volumeBgm: cfg.volumeBgm,
       },
@@ -451,10 +517,13 @@ export function bossBattlePlugin(): Plugin {
   const simAct = async (action: SimAction): Promise<string | null> => {
     if (!battle) return 'There is no battle running — spawn one first.';
     if (battle.phase !== 'fight') return 'The battle has not reached the fight yet.';
+    // "dupe" stands in for one chatter's maximum cannon contribution, so the
+    // cannon can be walked up to a shot without needing a room full of people.
     applyCombat('sim-tester', 'Tester', {
       damage: action === 'hit' ? 1 : 0,
       heal: action === 'heal' ? 1 : 0,
       misses: action === 'miss' ? 1 : 0,
+      dupes: action === 'dupe' ? Math.max(1, ctx.boss.getConfig().cannonCap) : 0,
       landed: action !== 'miss',
     });
     return null;

@@ -44,11 +44,12 @@ describe('boss battle plugin', () => {
   let recordDefeat: ReturnType<typeof vi.fn>;
   let rememberEmotes: ReturnType<typeof vi.fn>;
   let lookupEmoteArt: ReturnType<typeof vi.fn>;
+  let pickBoss: ReturnType<typeof vi.fn>;
   let evaluate: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof bossBattlePlugin>;
   let starter: (bossId: number | null, delay: number) => Promise<string | null>;
   let simSpawn: (bossId: number | null) => Promise<string | null>;
-  let simAct: (action: 'hit' | 'miss' | 'heal') => Promise<string | null>;
+  let simAct: (action: 'hit' | 'miss' | 'heal' | 'dupe') => Promise<string | null>;
   let config: typeof BOSS_DEFAULTS;
 
   beforeEach(async () => {
@@ -59,6 +60,7 @@ describe('boss battle plugin', () => {
     recordDefeat = vi.fn(async () => 1);
     rememberEmotes = vi.fn(async () => {});
     lookupEmoteArt = vi.fn(async () => new Map<string, string>());
+    pickBoss = vi.fn(async () => BOSS);
     evaluate = vi.fn(async () => []);
     config = { ...BOSS_DEFAULTS, cooldownSeconds: 30, alertSeconds: 1, intelSeconds: 1 };
 
@@ -83,7 +85,7 @@ describe('boss battle plugin', () => {
       stream: { broadcasterId: vi.fn(async () => 'b1') },
       boss: {
         getConfig: () => config,
-        pickBoss: vi.fn(async () => BOSS),
+        pickBoss,
         listSounds: vi.fn(async () => [{ slot: 'bgm', url: '/assets/boss/sfx-bgm.mp3' }]),
         rememberEmotes,
         lookupEmoteArt,
@@ -283,6 +285,118 @@ describe('boss battle plugin', () => {
   it('renders an unresolvable emote as plain text rather than a broken image', async () => {
     await toFight(() => starter(null, 0));
     expect(sent('intel')[0]).toMatchObject({ vulnerabilities: [{ name: 'Kappa', url: null }] });
+  });
+
+  describe('mega cannon', () => {
+    beforeEach(() => {
+      // Generous HP so charging the cannon does not accidentally end the fight.
+      config.cannonRate = 0.5;
+      config.cannonCap = 4;
+      config.cannonFull = 4;      // 2 full-allowance messages
+      config.cannonDamage = 10;
+      config.cannonDischarge = 0;  // frozen unless a test says otherwise
+    });
+
+    const bigBoss = { ...BOSS, hp: 100 };
+
+    it('charges from duplicate emotes instead of counting them as misses', async () => {
+      await toFight(() => starter(null, 0));
+      await bus.publish(chat([em('Kappa', 3)])); // 1 hit + 2 dupes
+      await flush();
+      expect(sent('combat')[0]).toMatchObject({
+        charge: 1, events: [{ damage: 1, misses: 0, dupes: 2 }],
+      });
+    });
+
+    it('fires for its damage value once full, and resets to empty', async () => {
+      pickBoss.mockResolvedValue(bigBoss);
+      await toFight(() => starter(null, 0));
+      const bob = user({ id: 'u2', login: 'bob', displayName: 'Bob' });
+      await bus.publish(chat([em('Kappa', 5)]));      // 1 dmg + 4 dupes -> 2 charge
+      await flush();
+      expect(sent('cannon')).toEqual([]);
+      await bus.publish(chat([em('Kappa', 5)], bob)); // another 2 -> full at 4
+      await flush();
+      expect(sent('cannon')[0]).toMatchObject({ damage: 10, charge: 0 });
+      // 100 HP - 2 personal hits - 10 from the cannon.
+      expect(sent('cannon')[0]).toMatchObject({ hp: 88 });
+    });
+
+    it('bleeds charge, so a slow trickle of dupes never fills it', async () => {
+      config.cannonDischarge = 1; // 1 point per second
+      pickBoss.mockResolvedValue(bigBoss);
+      await toFight(() => starter(null, 0));
+      const users = [1, 2, 3, 4, 5].map((n) => user({ id: 'u' + n, login: 'u' + n, displayName: 'U' + n }));
+      for (const u of users) {
+        await bus.publish(chat([em('Kappa', 5)], u)); // +2 charge each
+        await flush();
+        await vi.advanceTimersByTimeAsync(3000);      // -3 charge in the gap
+      }
+      // Each contribution is more than undone before the next arrives.
+      expect(sent('cannon')).toEqual([]);
+      expect((sent('combat').at(-1) as { charge: number }).charge).toBeLessThanOrEqual(2);
+    });
+
+    it('leaves the Hero badge unclaimed when the cannon lands the kill', async () => {
+      // 6 HP: two personal hits plus a 10-damage cannon shot finishes it.
+      pickBoss.mockResolvedValue({ ...BOSS, hp: 6 });
+      await toFight(() => starter(null, 0));
+      const bob = user({ id: 'u2', login: 'bob', displayName: 'Bob' });
+      await bus.publish(chat([em('Kappa', 5)]));
+      await flush();
+      await bus.publish(chat([em('Kappa', 5)], bob));
+      await flush();
+
+      expect(sent('cannon').length).toBe(1);
+      expect(sent('defeated')[0]).toMatchObject({ killer: null, count: 2 });
+      // Everyone who damaged it still gets participation credit...
+      expect(recordDefeat).toHaveBeenCalledWith(['u1', 'u2'], null);
+      // ...and null as the killer is what withholds Basecamp Hero.
+      expect(evaluate.mock.calls.map((c) => c[0]).sort()).toEqual(['u1', 'u2']);
+    });
+
+    it('still credits a personal killing blow when the cannon is not involved', async () => {
+      pickBoss.mockResolvedValue({ ...BOSS, hp: 1 });
+      await toFight(() => starter(null, 0));
+      await bus.publish(chat([em('Kappa')]));
+      await flush();
+      expect(sent('defeated')[0]).toMatchObject({ killer: 'Alice' });
+      expect(sent('cannon')).toEqual([]);
+    });
+
+    it('does not charge from dupes while the sender is on cooldown', async () => {
+      pickBoss.mockResolvedValue(bigBoss);
+      await toFight(() => starter(null, 0));
+      await bus.publish(chat([em('Kappa', 5)]));
+      await flush();
+      await bus.publish(chat([em('Kappa', 5)])); // same user, cooling down
+      await flush();
+      const frames = sent('combat') as { charge: number }[];
+      expect(frames[1]).toMatchObject({ events: [{ dupes: 0, misses: 5 }] });
+      expect(frames[1]!.charge).toBe(frames[0]!.charge); // no further charge
+    });
+
+    it('never charges when the conversion rate is zero', async () => {
+      config.cannonRate = 0;
+      await toFight(() => starter(null, 0));
+      await bus.publish(chat([em('Kappa', 9)]));
+      await flush();
+      expect(sent('combat')[0]).toMatchObject({ charge: 0 });
+      expect(sent('cannon')).toEqual([]);
+    });
+
+    it('walks the cannon up to a shot from the Dupe simulate button', async () => {
+      pickBoss.mockResolvedValue(bigBoss);
+      await toFight(() => simSpawn(null));
+      await simAct('dupe');
+      await flush();
+      expect(sent('cannon')).toEqual([]);
+      await simAct('dupe');
+      await flush();
+      expect(sent('cannon')[0]).toMatchObject({ damage: 10 });
+      // A simulated battle still records nothing.
+      expect(recordDefeat).not.toHaveBeenCalled();
+    });
   });
 
   it('ignores messages with no emotes at all', async () => {

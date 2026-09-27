@@ -640,7 +640,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/admin/boss/sim/spawn') return json(200, { ok: true });
     if (p === '/api/admin/boss/sim/action') {
       const action = String(body.action ?? '');
-      if (action !== 'hit' && action !== 'miss' && action !== 'heal') return json(400, { error: 'Unknown simulate action.' });
+      if (action !== 'hit' && action !== 'miss' && action !== 'heal' && action !== 'dupe') {
+        return json(400, { error: 'Unknown simulate action.' });
+      }
       return json(200, { ok: true });
     }
     if (p === '/api/admin/boss/save') {

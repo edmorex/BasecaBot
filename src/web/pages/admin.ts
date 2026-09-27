@@ -885,6 +885,13 @@ export function adminPage(): string {
       { key: 'crowdMax', label: 'Max fighters shown', hint: 'avatars drawn along the bottom', min: 1, max: 200, step: 1 },
       { key: 'outroTauntSeconds', label: 'Outro taunt holds', hint: 'seconds of dying words before the banner', min: 0, max: 15, step: 1 }
     ];
+    var BOSS_CANNON = [
+      { key: 'cannonRate', label: 'Conversion rate', hint: 'cannon points per duplicate emote', min: 0, max: 1, step: 0.05 },
+      { key: 'cannonCap', label: 'Conversion cap', hint: 'most dupes one message may contribute', min: 0, max: 50, step: 1 },
+      { key: 'cannonFull', label: 'Full size', hint: 'points needed before it fires', min: 1, max: 500, step: 1 },
+      { key: 'cannonDamage', label: 'Damage', hint: 'HP the cannon takes off the boss', min: 1, max: 500, step: 1 },
+      { key: 'cannonDischarge', label: 'Discharge rate', hint: 'points lost per second', min: 0, max: 10, step: 0.05 }
+    ];
     var bossData = null;
     var bossEditing = null;   // the boss being edited, or null when the roster is showing
 
@@ -972,13 +979,20 @@ export function adminPage(): string {
           '<button type="button" class="pink" id="boss-sim-spawn">Spawn</button>' +
           '<button type="button" class="pink" id="boss-sim-hit">Hit</button>' +
           '<button type="button" class="pink" id="boss-sim-miss">Miss</button>' +
-          '<button type="button" class="pink" id="boss-sim-heal">Heal</button></div></div>' +
+          '<button type="button" class="pink" id="boss-sim-heal">Heal</button>' +
+          '<button type="button" class="pink" id="boss-sim-dupe">Dupe</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Dupe</strong> feeds the cannon one chatter\u2019s full allowance, so you can walk it up to a shot on your own.</p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Combat</h3>' +
           '<label class="rowline" style="gap:.6rem; align-items:center"><span style="flex:0 0 11rem">Emote cooldown</span>' +
           '<input type="range" id="boss-cooldownSeconds" min="0" max="600" step="1" value="' + c.cooldownSeconds + '" style="flex:1" />' +
           '<span class="muted" id="boss-cooldownSeconds-val" style="flex:0 0 3.4em; text-align:right"></span></label>' +
           '<p class="muted" style="font-size:.8rem; margin:.4rem 0 0">How long a chatter waits before their emotes land again. Everything they send while cooling down shows as a MISS — healers are held to the same clock.</p></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Mega cannon</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Repeating an emote the boss is weak to no longer misses — those duplicates charge a shared cannon in the bottom centre of the screen, which fires for big damage once full. It bleeds charge continuously, so it takes sustained spam from the whole chat rather than one well-timed burst. A cannon kill leaves the <strong>Basecamp Hero</strong> badge unclaimed, since nobody fired it alone.</p>' +
+          '<div class="grid-fields">' + BOSS_CANNON.map(function (f) { return numField(f, c); }).join('') + '</div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0" id="boss-cannon-math"></p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Animation &amp; presentation</h3>' +
           '<div class="grid-fields">' + BOSS_ANIM.map(function (f) { return numField(f, c); }).join('') + '</div></div>' +
@@ -1015,13 +1029,34 @@ export function adminPage(): string {
         sync();
       });
 
+      // Spell out what the five numbers add up to, since their interaction is
+      // much easier to grasp as "N chatters within M seconds".
+      function cannonMath() {
+        var rate = Number(document.getElementById('boss-cannonRate').value);
+        var cap = Number(document.getElementById('boss-cannonCap').value);
+        var full = Number(document.getElementById('boss-cannonFull').value);
+        var dmg = Number(document.getElementById('boss-cannonDamage').value);
+        var drain = Number(document.getElementById('boss-cannonDischarge').value);
+        var out = document.getElementById('boss-cannon-math');
+        var perUser = rate * cap;
+        if (perUser <= 0) { out.textContent = 'With these numbers the cannon can never charge.'; return; }
+        var users = Math.ceil(full / perUser);
+        var txt = 'One chatter at full allowance adds ' + (Math.round(perUser * 100) / 100) +
+          ' points, so it takes about ' + users + (users === 1 ? ' message' : ' such messages') +
+          ' to fire for ' + dmg + ' damage.';
+        if (drain > 0) txt += ' A full cannon drains away in ' + Math.round(full / drain) + 's if chat goes quiet.';
+        out.textContent = txt;
+      }
+      BOSS_CANNON.forEach(function (f) { document.getElementById('boss-' + f.key).oninput = cannonMath; });
+      cannonMath();
+
       document.getElementById('boss-save').onclick = function () {
         var out = { enabled: document.getElementById('boss-enabled').checked,
           cooldownSeconds: Number(document.getElementById('boss-cooldownSeconds').value),
           startDelaySeconds: Number(document.getElementById('boss-delay').value),
           volumeSfx: Number(document.getElementById('boss-volumeSfx').value),
           volumeBgm: Number(document.getElementById('boss-volumeBgm').value) };
-        BOSS_ANIM.forEach(function (f) { out[f.key] = Number(document.getElementById('boss-' + f.key).value); });
+        BOSS_ANIM.concat(BOSS_CANNON).forEach(function (f) { out[f.key] = Number(document.getElementById('boss-' + f.key).value); });
         api('POST', '/api/admin/boss', { config: out })
           .then(function () { bossToast('Settings saved.', true); })
           .catch(function (e) { bossToast(e.message, false); });
@@ -1042,7 +1077,7 @@ export function adminPage(): string {
           .then(function () { bossToast('Mock battle incoming (nothing is recorded).', true); })
           .catch(function (e) { bossToast(e.message, false); });
       };
-      ['hit', 'miss', 'heal'].forEach(function (action) {
+      ['hit', 'miss', 'heal', 'dupe'].forEach(function (action) {
         document.getElementById('boss-sim-' + action).onclick = function () {
           api('POST', '/api/admin/boss/sim/action', { action: action })
             .then(function () { bossToast('Simulated a ' + action + '.', true); })

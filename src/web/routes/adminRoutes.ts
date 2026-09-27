@@ -430,7 +430,9 @@ export async function postAdminBossSimAction(s: WebServer, req: IncomingMessage,
   s.requireAdmin(req);
   const body = await s.readJson(req);
   const action = String(body.action ?? '');
-  if (action !== 'hit' && action !== 'miss' && action !== 'heal') throw new HttpError(400, 'Unknown simulate action.');
+  if (action !== 'hit' && action !== 'miss' && action !== 'heal' && action !== 'dupe') {
+    throw new HttpError(400, 'Unknown simulate action.');
+  }
   const problem = await s.boss.requestSimAction(action);
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });

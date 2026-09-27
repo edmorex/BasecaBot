@@ -42,9 +42,10 @@ top, and it delivers its opening taunt.
 **4. The fight.** The battle music loops. The boss drifts, darts or spins, pausing
 every so often to taunt — and it re-rolls its movement style at each pause. As
 chatters join, their Twitch profile pictures pile in along the bottom of the
-screen, starting at the centre and squeezing together as the crowd grows. Every
-message that throws emotes fires red laser beams from that chatter's icon at the
-boss, with the damage floating off it.
+screen either side of the mega cannon, squeezing together as the crowd grows.
+Every message that throws emotes fires red laser beams from that chatter's icon at
+the boss, with the damage floating off it — and any duplicate emotes lob grey
+shots into the cannon instead.
 
 **5. Defeat or escape.** At 0 HP the boss stops dead, shakes itself apart while
 delivering its death taunt as mini-explosions burst across it, and then goes up in
@@ -63,14 +64,16 @@ holds** setting.
 |---|---|
 | A message contains one of the boss's **hurt** emotes | **1 HP of damage** |
 | A message contains *several different* hurt emotes | **1 HP each** — three different weaknesses in one message is 3 damage |
-| The same hurt emote repeated | **1 hit, the rest are misses** — variety beats spam |
+| The same hurt emote repeated | **1 hit; the repeats charge the mega cannon** (up to the conversion cap) |
+| Repeats beyond the conversion cap | **miss** |
 | An emote the boss is immune to | **miss** |
 | A **heal** emote | **+1 HP**, never above the boss's starting health |
-| Anything sent while the sender is on cooldown | **all misses** |
+| A **heal** emote repeated | **1 heal, the rest are misses** — healing never charges the cannon |
+| Anything sent while the sender is on cooldown | **all misses**, and no cannon charge |
 
-Damage counts **distinct** emotes per message, so `Kappa Kappa Kappa` does one
-point of damage and two misses, while `Kappa PogChamp LUL` (against a boss weak
-to all three) does three.
+Damage counts **distinct** emotes per message, so `Kappa PogChamp LUL` (against a
+boss weak to all three) does 3 damage. Variety is still what hurts the boss —
+but repeats are no longer wasted, because they go to the cannon instead.
 
 ### The cooldown
 
@@ -82,6 +85,37 @@ never easier than attacking it.
 
 A miss does **not** start the cooldown, so someone who guesses wrong is free to
 guess again immediately.
+
+### The mega cannon
+
+A shared battery sits in the bottom centre of the screen. Repeating an emote the
+boss is weak to sends a grey arcing shot into it rather than missing, and its red
+meter fills from the bottom up while its glow pulses faster the fuller it gets.
+At full charge it discharges into the boss for a large fixed hit.
+
+It **bleeds charge continuously**, which is the whole point: the cannon rewards
+sustained pressure from the whole chat, not one well-timed burst. With the
+defaults a single chatter's best message adds 2 of the 15 points needed, and a
+full cannon drains away in 75 seconds of silence — so it takes roughly eight
+spamming chatters in quick succession to land a shot.
+
+Charge can never drop below zero or exceed the full size.
+
+> **A cannon kill leaves 🦸 Basecamp Hero unclaimed.** Nobody fired it alone, so
+> there is no killing blow to award — but everyone who damaged the boss still gets
+> their 🛡️ **Basecamp Protector** credit as usual.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Conversion rate | 0.5 | Cannon points earned per duplicate emote (0–1) |
+| Conversion cap | 4 | Most duplicates one message may contribute |
+| Full size | 15 | Points needed before it fires |
+| Damage | 10 | HP the cannon takes off the boss |
+| Discharge rate | 0.2 | Points bled per second |
+
+The panel prints what your numbers actually add up to — how many messages it takes
+to fire, and how fast a full cannon drains — underneath the fields, so you can tune
+it without doing the arithmetic yourself.
 
 ### Colour tells
 
@@ -109,9 +143,11 @@ start before you get up for a break and the boss arrives once you're away.
 ### Simulate
 **Spawn** runs a complete mock battle — every phase, every sound — but **records
 nothing**: no scoreboard rows, no achievements, no chat messages. **Hit**,
-**Miss** and **Heal** stand in for a chatter and run through exactly the same
-combat code as a real message, so you can step a boss down to zero and watch the
-whole death sequence without touching the database.
+**Miss**, **Heal** and **Dupe** stand in for a chatter and run through exactly the
+same combat code as a real message, so you can step a boss down to zero and watch
+the whole death sequence without touching the database. **Dupe** contributes one
+chatter's full cannon allowance, so you can walk the cannon up to a shot on your
+own instead of rounding up eight people.
 
 Real chat *can* still join a simulated battle (useful for checking that your
 emote names actually match what viewers type) and is likewise never recorded.
@@ -134,8 +170,8 @@ emote names actually match what viewers type) and is likewise never recorded.
 
 ### Sounds
 
-Eight slots — red alert klaxon, terminal typing, boss arrival, hit, heal,
-victory, escape, and the looping battle music. Upload **MP3, OGG or WAV**;
+Nine slots — red alert klaxon, terminal typing, boss arrival, hit, heal, mega
+cannon, victory, escape, and the looping battle music. Upload **MP3, OGG or WAV**;
 effects up to **2MB**, music up to **8MB**.
 
 **Nothing ships by default.** An empty slot simply plays silence and the game

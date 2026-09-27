@@ -6,11 +6,13 @@
  * browser. The plugin owns the state machine; this module owns the RULES.
  *
  * The rules, in one place:
- *  - Damage is the number of DISTINCT vulnerable emotes in the message. Sending
- *    the same emote three times is one hit and two misses, so variety beats spam.
+ *  - Damage is the number of DISTINCT vulnerable emotes in the message, so
+ *    variety is what actually hurts the boss.
  *  - Healing works the same way, counting distinct healing emotes.
- *  - Every other emote instance in the message is a miss (an emote the boss is
- *    immune to, or a repeat of one already counted).
+ *  - REPEATS of a vulnerable emote are not wasted: up to a per-message cap they
+ *    become "dupes", which charge the shared mega cannon instead of missing.
+ *  - Every other emote instance is a miss — an emote the boss is immune to, a
+ *    repeated heal, or a dupe beyond the cap.
  *  - While a user is on cooldown, nothing they send lands: damage and healing are
  *    both zero and every emote instance is a miss. Attackers and defenders are
  *    rate-limited identically, so neither side can out-spam the other.
@@ -39,25 +41,37 @@ export interface CombatResult {
   heal: number;
   /** Emote instances that did nothing. */
   misses: number;
+  /** Repeated vulnerable emotes, already capped — these charge the mega cannon. */
+  dupes: number;
   /** True when this message should start the sender's cooldown. */
   landed: boolean;
 }
 
-export const NO_EFFECT: CombatResult = { damage: 0, heal: 0, misses: 0, landed: false };
+export const NO_EFFECT: CombatResult = { damage: 0, heal: 0, misses: 0, dupes: 0, landed: false };
 
 /**
  * Resolve one chat message against a boss.
  *
  * `onCooldown` is decided by the caller (it owns the clock); when true this
- * degrades to "every emote is a miss" without consulting the lists at all.
+ * degrades to "every emote is a miss" without consulting the lists at all — a
+ * cooling-down chatter cannot charge the cannon either.
+ *
+ * `cannonCap` is the most dupes one message may feed the cannon; anything past it
+ * is a miss. The default of 0 means no cannon, so every repeat is a miss.
  *
  * An emote listed as BOTH hurtful and healing counts as damage only — the
  * attacking reading wins, and it is never double-counted as a miss.
  */
-export function resolveCombat(emotes: readonly MessageEmote[], lists: EmoteLists, onCooldown: boolean): CombatResult {
+export function resolveCombat(
+  emotes: readonly MessageEmote[],
+  lists: EmoteLists,
+  onCooldown: boolean,
+  cannonCap = 0,
+): CombatResult {
   let damage = 0;
   let heal = 0;
   let total = 0;
+  let rawDupes = 0;
   // Twitch can report the same emote id twice in odd cases; de-duplicate by name
   // so a distinct-emote rule can't be gamed.
   const counted = new Set<string>();
@@ -67,14 +81,24 @@ export function resolveCombat(emotes: readonly MessageEmote[], lists: EmoteLists
     const count = Math.max(0, Math.floor(Number(e?.count) || 0));
     if (!name || count === 0) continue;
     total += count;
-    if (onCooldown || counted.has(name)) continue;
+    if (onCooldown) continue;
+    if (counted.has(name)) {
+      // Same emote reported in a second group — still a repeat.
+      if (lists.hurt.has(name)) rawDupes += count;
+      continue;
+    }
     counted.add(name);
-    if (lists.hurt.has(name)) damage++;
-    else if (lists.heal.has(name)) heal++;
+    if (lists.hurt.has(name)) {
+      damage++;
+      rawDupes += count - 1; // the first lands, the rest feed the cannon
+    } else if (lists.heal.has(name)) {
+      heal++;
+    }
   }
 
+  const dupes = Math.min(rawDupes, Math.max(0, Math.floor(cannonCap)));
   const landed = damage > 0 || heal > 0;
-  return { damage, heal, misses: total - damage - heal, landed };
+  return { damage, heal, misses: total - damage - heal - dupes, dupes, landed };
 }
 
 /**
@@ -120,4 +144,18 @@ export function glowForHp(remaining: number, max: number): 'green' | 'yellow' | 
   if (r > 2 / 3) return 'green';
   if (r > 1 / 3) return 'yellow';
   return 'red';
+}
+
+/**
+ * The mega cannon bleeds charge over time, so filling it takes SUSTAINED pressure
+ * from chat rather than one well-timed burst.
+ *
+ * Kept pure and separate from any clock: the caller passes how long it has been
+ * since the stored value was taken, which makes the decay trivially testable and
+ * means the bot needs no ticking timer — charge is only ever recomputed when
+ * something actually contributes to it.
+ */
+export function dischargedCharge(charge: number, ratePerSecond: number, elapsedMs: number, max: number): number {
+  const lost = Math.max(0, ratePerSecond) * (Math.max(0, elapsedMs) / 1000);
+  return Math.min(Math.max(0, max), Math.max(0, charge - lost));
 }
