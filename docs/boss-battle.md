@@ -88,9 +88,14 @@ guess again immediately.
 
 ### The mega cannon
 
-A shared battery sits in the bottom centre of the screen. Repeating an emote the
-boss is weak to sends a grey arcing shot into it rather than missing, and its red
-meter fills from the bottom up while its glow pulses faster the fuller it gets.
+A shared battery sits in the bottom centre of the screen, built as a tesla coil so
+its bolt can plausibly leave the terminal in any direction. Repeating an emote the
+boss is weak to lobs a grey arcing shot up into that terminal rather than missing,
+and the red meter fills from the bottom up.
+
+The tell-tale ramps hard as it charges: the halo grows and beats faster, a
+shockwave ring starts pulsing past a tenth full, the coil begins to crackle at a
+third, and past three-quarters the whole battery rattles with a white-hot terminal.
 At full charge it discharges into the boss for a large fixed hit.
 
 It **bleeds charge continuously**, which is the whole point: the cannon rewards

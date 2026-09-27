@@ -77,9 +77,16 @@ export function bossBattleOverlayPage(): string {
   #intel .vuln img{ width:56px; height:56px; vertical-align:middle;
     filter:drop-shadow(0 0 10px rgba(255,255,255,.35)); }
   #intel .vuln .q{ font-size:34px; font-weight:700; color:#ffe37a; text-shadow:0 0 12px rgba(255,200,60,.6) }
-  /* The blinking terminal cursor, shown only while text is still typing. */
-  .cursor{ display:inline-block; width:.6em; height:1.05em; background:#8dff9b; vertical-align:-.16em;
+  /* Every character is in the DOM from the start and merely HIDDEN, so the frame
+     is already at its final size and nothing reflows as the text arrives. */
+  #intel .ch{ visibility:hidden; }
+  #intel .ch.on{ visibility:visible; }
+  /* The next cell to fill doubles as the cursor: a blinking block that occupies
+     the character's own space, so the caret costs no layout either. */
+  #intel .ch.next{ visibility:visible; color:transparent; background:#8dff9b;
     animation:blink .8s step-end infinite; }
+  /* Held open while the dossier types, then revealed. */
+  #intel .vuln.pending{ visibility:hidden; }
   @keyframes blink{ 0%,100%{ opacity:1 } 50%{ opacity:0 } }
 
   /* ── Health bar ─────────────────────────────────────────────────────────── */
@@ -189,14 +196,54 @@ export function bossBattleOverlayPage(): string {
   /* The pulse lives on its own element: #cannon carries no transform of its own,
      but keeping them separate means the glow animation can never fight the
      layout, and the pulse rate is set inline per frame. */
-  #cannon-glow{ position:absolute; left:-40px; right:-40px; bottom:-30px; top:-10px;
-    border-radius:50%; pointer-events:none;
-    background:radial-gradient(ellipse at 50% 70%, rgba(255,60,60,.55) 0%, rgba(255,20,20,.22) 45%, rgba(255,0,0,0) 72%);
-    animation:cannonPulse 1.6s ease-in-out infinite; }
-  @keyframes cannonPulse{ 0%,100%{ opacity:.25; transform:scale(.9) } 50%{ opacity:1; transform:scale(1.08) } }
-  #cannon-barrel{ position:absolute; left:50%; margin-left:-27px; top:0; width:54px; height:62px;
-    border-radius:8px 8px 4px 4px; background:linear-gradient(90deg,#2a2f3a,#5b6474 40%,#39404e);
-    border:3px solid #10131a; box-shadow:inset 0 6px 12px rgba(255,255,255,.14); }
+  /* The pulse. Its SIZE is set inline from the charge (growing from a modest
+     halo to something that swamps the cannon) and its PERIOD shortens as it
+     fills, so "nearly full" is unmistakable from across the room. */
+  #cannon-glow{ position:absolute; left:50%; top:30px; border-radius:50%; pointer-events:none;
+    width:240px; height:240px; margin:-120px 0 0 -120px;
+    background:radial-gradient(circle, rgba(255,110,110,.95) 0%, rgba(255,40,40,.55) 34%, rgba(255,0,0,.2) 58%, rgba(255,0,0,0) 74%);
+    animation:cannonPulse 1.7s ease-in-out infinite; }
+  @keyframes cannonPulse{
+    0%,100%{ opacity:.14; transform:scale(.6) }
+    50%{ opacity:1; transform:scale(1.22) }
+  }
+  /* A shockwave ring emitted on every beat — the visual metronome. */
+  #cannon-ring{ position:absolute; left:50%; top:30px; width:150px; height:150px; margin:-75px 0 0 -75px;
+    border-radius:50%; border:7px solid rgba(255,70,70,.95); opacity:0; pointer-events:none;
+    box-shadow:0 0 26px rgba(255,50,50,.8); }
+  #cannon-ring.on{ animation:cannonRing 1.7s linear infinite; }
+  @keyframes cannonRing{ 0%{ opacity:.95; transform:scale(.3) } 100%{ opacity:0; transform:scale(2.1) } }
+  /* Nearly full: the whole battery rattles and the terminal runs white-hot. */
+  #cannon.hot{ animation:cannonRattle .11s linear infinite; }
+  @keyframes cannonRattle{
+    0%,100%{ transform:translate(0,0) } 25%{ transform:translate(-3px,1px) }
+    50%{ transform:translate(3px,-2px) } 75%{ transform:translate(-2px,-1px) }
+  }
+  #cannon.hot #cannon-coil{ background:radial-gradient(circle at 35% 30%, #fff 0%, #fff 42%, #ff8a8a 70%, #c31010 100%);
+    box-shadow:0 0 34px #fff, 0 0 80px rgba(255,60,60,.95); }
+  #cannon.hot #cannon-windings{ opacity:1; filter:brightness(1.7) }
+  /* A tesla-coil tower rather than a barrel: a discharge terminal can plausibly
+     throw a bolt in ANY direction, which a fixed gun barrel cannot. */
+  #cannon-mast{ position:absolute; left:50%; margin-left:-17px; top:26px; width:34px; height:44px;
+    background:linear-gradient(90deg,#2a2f3a,#6b7484 45%,#333a47);
+    clip-path:polygon(30% 0, 70% 0, 100% 100%, 0 100%); }
+  /* Stacked windings, purely decorative. */
+  #cannon-windings{ position:absolute; left:50%; margin-left:-14px; top:38px; width:28px; height:30px;
+    background:repeating-linear-gradient(to bottom, rgba(255,190,120,.85) 0 2px, rgba(90,50,20,.7) 2px 5px);
+    border-radius:3px; opacity:.85; }
+  /* The terminal the bolt leaves from. Its live position is read from the DOM, so
+     restyling the tower cannot desync the beam's origin. */
+  #cannon-coil{ position:absolute; left:50%; margin-left:-19px; top:0; width:38px; height:38px;
+    border-radius:50%; background:radial-gradient(circle at 35% 30%, #fff 0%, #ffd2d2 30%, #ff5555 62%, #8d0b0b 100%);
+    box-shadow:0 0 18px rgba(255,80,80,.9), 0 0 42px rgba(255,40,40,.55); }
+  /* Crackle around the terminal, wound up by charge. */
+  #cannon-arc{ position:absolute; left:50%; top:19px; width:70px; height:70px; margin:-35px 0 0 -35px;
+    border-radius:50%; opacity:0; pointer-events:none;
+    background:conic-gradient(from 0deg, rgba(255,255,255,0) 0deg, rgba(255,210,210,.95) 24deg, rgba(255,255,255,0) 48deg,
+      rgba(255,255,255,0) 160deg, rgba(255,190,190,.9) 188deg, rgba(255,255,255,0) 214deg); }
+  #cannon-arc.on{ animation:coilArc .5s linear infinite; }
+  @keyframes coilArc{ 0%{ opacity:.25; transform:rotate(0deg) } 50%{ opacity:.95; transform:rotate(180deg) }
+    100%{ opacity:.25; transform:rotate(360deg) } }
   #cannon-base{ position:absolute; left:0; right:0; bottom:0; height:78px; border-radius:14px;
     background:linear-gradient(180deg,#464f60,#20252f); border:3px solid #10131a;
     box-shadow:0 8px 18px rgba(0,0,0,.6), inset 0 4px 10px rgba(255,255,255,.1); }
@@ -206,8 +253,9 @@ export function bossBattleOverlayPage(): string {
   #cannon-fill{ position:absolute; left:0; right:0; bottom:0; height:0%;
     background:linear-gradient(180deg,#ff6b6b,#c1121f);
     box-shadow:0 0 14px rgba(255,60,60,.9); transition:height .25s ease-out; }
-  #cannon.firing #cannon-glow{ animation:none; opacity:1; transform:scale(1.5) }
-  #cannon.firing #cannon-base, #cannon.firing #cannon-barrel{ animation:cannonKick .32s ease-out }
+  #cannon.firing #cannon-glow{ animation:none; opacity:1; transform:scale(1.7) }
+  #cannon.firing #cannon-coil{ background:#fff; box-shadow:0 0 60px #fff, 0 0 140px rgba(255,120,120,1) }
+  #cannon.firing #cannon-base, #cannon.firing #cannon-mast{ animation:cannonKick .32s ease-out }
   @keyframes cannonKick{ 0%{ transform:translateY(0) } 35%{ transform:translateY(12px) } 100%{ transform:translateY(0) } }
 
   /* A dupe's grey shot, lobbed at the cannon instead of wasted on the boss.
@@ -259,8 +307,12 @@ export function bossBattleOverlayPage(): string {
     <div id="crowd"></div>
     <div id="cannon">
       <div id="cannon-glow"></div>
-      <div id="cannon-barrel"></div>
+      <div id="cannon-ring"></div>
       <div id="cannon-base"></div>
+      <div id="cannon-mast"></div>
+      <div id="cannon-windings"></div>
+      <div id="cannon-arc"></div>
+      <div id="cannon-coil"></div>
       <div id="cannon-meter"><div id="cannon-fill"></div></div>
     </div>
   </div>
@@ -298,6 +350,9 @@ export function bossBattleOverlayPage(): string {
   var cannon = document.getElementById('cannon');
   var cannonGlow = document.getElementById('cannon-glow');
   var cannonFill = document.getElementById('cannon-fill');
+  var cannonRing = document.getElementById('cannon-ring');
+  var cannonArc = document.getElementById('cannon-arc');
+  var cannonCoil = document.getElementById('cannon-coil');
 
   // ── Audio ─────────────────────────────────────────────────────────────────
   // Sound urls + volumes arrive with each battle's 'alert', so swapping a sound
@@ -375,7 +430,9 @@ export function bossBattleOverlayPage(): string {
     bossImg.removeAttribute('src');
     bubble.classList.remove('show','flip');
     shock.classList.remove('go');
-    cannon.classList.remove('show','firing');
+    cannon.classList.remove('show','firing','hot');
+    cannonRing.classList.remove('on');
+    cannonArc.classList.remove('on');
     cannonFill.style.height = '0%';
   }
 
@@ -401,7 +458,11 @@ export function bossBattleOverlayPage(): string {
     var nameEl = document.getElementById('intel-name');
     var descEl = document.getElementById('intel-desc');
     var vulnEl = document.getElementById('intel-vuln');
-    nameEl.textContent = ''; descEl.textContent = ''; vulnEl.innerHTML = '';
+    nameEl.textContent = ''; descEl.textContent = '';
+    // Drawn now but held invisible, so it reserves its height instead of shoving
+    // the frame open when the typing finishes.
+    renderVulns(vulnEl, d);
+    vulnEl.classList.add('pending');
 
     // Type the dossier out, name first then description, like a slow terminal.
     var name = String((d && d.name) || '').toUpperCase();
@@ -418,23 +479,40 @@ export function bossBattleOverlayPage(): string {
 
     typeInto(nameEl, name, per, function(){
       typeInto(descEl, desc, per, function(){
-        renderVulns(vulnEl, d);
+        vulnEl.classList.remove('pending');
       });
     });
   }
 
+  /**
+   * Reveal text one character at a time WITHOUT the box growing as it goes.
+   *
+   * The whole string is laid out up front with every character hidden, so the
+   * frame settles at its final height immediately (and line wrapping is decided
+   * once, rather than re-flowing on every keystroke). Typing then just flips
+   * characters visible, which cannot affect layout at all.
+   */
   function typeInto(el, text, per, done){
+    el.textContent = '';
+    var chars = [];
+    for(var n = 0; n < text.length; n++){
+      var sp = document.createElement('span');
+      sp.className = 'ch';
+      sp.textContent = text.charAt(n);
+      el.appendChild(sp);
+      chars.push(sp);
+    }
+    // The caret waits on the first cell before anything is revealed.
+    if(chars[0]) chars[0].classList.add('next');
     var i = 0;
-    var cursor = document.createElement('span');
-    cursor.className = 'cursor';
-    el.appendChild(cursor);
     (function step(){
-      if(i >= text.length){
-        if(cursor.parentNode) cursor.parentNode.removeChild(cursor);
-        return done && done();
-      }
+      if(i >= chars.length) return done && done();
+      // Clear the caret off this cell BEFORE revealing it, or the character would
+      // stay masked by its own cursor for a tick and read one behind.
+      chars[i].classList.remove('next');
+      chars[i].classList.add('on');
+      if(chars[i + 1]) chars[i + 1].classList.add('next');
       i++;
-      cursor.insertAdjacentText('beforebegin', text.charAt(i - 1));
       later(step, per);
     })();
   }
@@ -716,7 +794,23 @@ export function bossBattleOverlayPage(): string {
     if(!state) return;
     var f = Math.max(0, Math.min(1, state.charge / state.chargeMax));
     cannonFill.style.height = (f * 100) + '%';
-    cannonGlow.style.animationDuration = (1.6 - f * 1.32).toFixed(2) + 's';
+
+    // One period drives the glow and the ring together so they beat as one.
+    var period = (1.7 - f * 1.45).toFixed(2) + 's';
+    cannonGlow.style.animationDuration = period;
+    cannonRing.style.animationDuration = period;
+
+    // The halo GROWS with charge as well as quickening. Size is set inline
+    // because the keyframes own opacity and transform.
+    var halo = Math.round(150 + f * 290);
+    cannonGlow.style.width = halo + 'px';
+    cannonGlow.style.height = halo + 'px';
+    cannonGlow.style.margin = (-halo / 2) + 'px 0 0 ' + (-halo / 2) + 'px';
+
+    // Ring and coil crackle only once there is something worth advertising.
+    cannonRing.classList.toggle('on', f > 0.12);
+    cannonArc.classList.toggle('on', f > 0.3);
+    cannon.classList.toggle('hot', f >= 0.75);
   }
 
   /**
@@ -730,15 +824,29 @@ export function bossBattleOverlayPage(): string {
     paintCannon();
   }
 
+  /**
+   * The discharge terminal's centre in design pixels.
+   *
+   * Read from offsetLeft/offsetTop rather than hardcoded: those are LAYOUT pixels
+   * (unaffected by the stage's scale transform), so they are already in the same
+   * coordinate space as everything else here — and restyling the tower in CSS can
+   * never leave the bolt firing from the wrong spot.
+   */
+  function coilTip(){
+    return {
+      x: cannon.offsetLeft + cannonCoil.offsetLeft + cannonCoil.offsetWidth / 2,
+      y: cannon.offsetTop + cannonCoil.offsetTop + cannonCoil.offsetHeight / 2
+    };
+  }
+
   /** A dupe: a grey shot lobbed at the cannon rather than wasted on the boss. */
   function arcToCannon(fromEl){
     if(!state) return;
     if(field.querySelectorAll('.arc').length > 24) return;
     var fx = parseFloat(fromEl.style.left || '0');
     var fy = H - 26 - (parseFloat(fromEl.style.height || '84') / 2);
-    var tx = W / 2;
-    var ty = H - 14 - 40;               // roughly the mouth of the barrel
-    var dx = tx - fx, dy = ty - fy;
+    var tip = coilTip();                // fed in at the terminal, same place it fires from
+    var dx = tip.x - fx, dy = tip.y - fy;
     var dot = document.createElement('div');
     dot.className = 'arc';
     dot.style.left = (fx - 10) + 'px';
@@ -787,8 +895,8 @@ export function bossBattleOverlayPage(): string {
   /** The cannon's shot, fired from the barrel at the boss. */
   function megaBeam(){
     if(!state) return;
-    var fx = W / 2;
-    var fy = H - 14 - 40;
+    var tip = coilTip();
+    var fx = tip.x, fy = tip.y;
     var dx = state.x + state.size / 2 - fx;
     var dy = state.y + state.size / 2 - fy;
     var wrap = document.createElement('div');
