@@ -100,6 +100,8 @@ export function floofPlugin(): Plugin {
       // separate fetch and a settings change applies to the very next floof.
       anim: {
         speed: cfg.speed,
+        pingpongWagDegrees: cfg.pingpongWagDegrees,
+        pingpongWagSeconds: cfg.pingpongWagSeconds,
         rollSpeed: cfg.rollSpeed,
         hopDistance: cfg.hopDistance,
         hopHeight: cfg.hopHeight,
@@ -109,6 +111,8 @@ export function floofPlugin(): Plugin {
         peekRiseSeconds: cfg.peekRiseSeconds,
         peekHoldSeconds: cfg.peekHoldSeconds,
         peekDelaySeconds: cfg.peekDelaySeconds,
+        peekWagDegrees: cfg.peekWagDegrees,
+        peekWagSeconds: cfg.peekWagSeconds,
         ghostFadeSeconds: cfg.ghostFadeSeconds,
         ghostHoldSeconds: cfg.ghostHoldSeconds,
         ghostDelaySeconds: cfg.ghostDelaySeconds,

@@ -59,6 +59,8 @@ Each animation style has its own tuning:
 | Style | Setting | Chat variable | Default |
 |---|---|---|---|
 | Ping Pong | Drift speed | `speed` | 5 (1 slow – 10 fast) |
+| Ping Pong | Wag amount | `pingpong-wag` | 9° |
+| Ping Pong | Wag speed | `pingpong-wag-seconds` | 0.63s |
 | Roll | Roll speed | `roll-speed` | 5 (1 slow – 10 fast) |
 | Hop | Hop distance | `hop-distance` | 220px |
 | Hop | Hop height | `hop-height` | 120px |
@@ -68,6 +70,8 @@ Each animation style has its own tuning:
 | Peek | Slide time | `peek-rise` | 0.5s |
 | Peek | Peek duration | `peek-hold` | 2.5s |
 | Peek | Hidden between peeks | `peek-delay` | 0.8s |
+| Peek | Wag amount | `peek-wag` | 5° |
+| Peek | Wag speed | `peek-wag-seconds` | 0.63s |
 | Ghost | Fade time | `ghost-fade` | 1.2s |
 | Ghost | Visible for | `ghost-hold` | 1.6s |
 | Ghost | Hidden between | `ghost-delay` | 0.6s |
@@ -88,21 +92,31 @@ column of the photo table to fold out its editor.
 The overlay picks one of that floof's lines at random every time a bubble appears,
 and never shows the same line twice in a row.
 
+In **Ghost** mode the bubble matches the floof's opacity frame by frame, so the
+taunt fades in and out with it rather than hanging in the air on its own. If a
+taunt is due while the ghost is fully invisible it waits for the floof to come
+back, so the line is never spent on an empty screen.
+
 > Remove **all** of a floof's taunts and it stays completely silent — useful for a
 > photo where a speech bubble would spoil the shot. An emptied list is remembered
 > as empty; it does not quietly revert to the default.
 
 ## Animation styles
 
+Ping Pong, Peek and Ghost each wag, and each has its **own** wag amount and speed —
+tuning one never moves another. (Roll's rotation comes from the rolling itself, and
+Hop leans into its arc, so neither takes wag settings.)
+
+
 Every spawn picks **two** things at random: which photo appears, and how it moves.
 
 | Style | Behaviour |
 |---|---|
-| **Ping Pong** | Drifts in a straight line and bounces off the padded edges |
+| **Ping Pong** | Drifts in a straight line and bounces off the padded edges, wagging as it goes |
 | **Roll** | Trundles along the bottom edge like a tyre, rotating in proportion to the distance travelled, and turning round at each end |
 | **Hop** | Bounds left and right in arcs, sitting still for a beat between hops and turning round at the edges |
-| **Peek** | Pops up from a random spot along the bottom edge, looks around, ducks back down, and reappears somewhere else |
-| **Ghost** | Fades in on the spot, wags gently, fades out, and reappears elsewhere — never travelling |
+| **Peek** | Pops up from a random spot along the bottom edge, looks around, ducks back down, and reappears somewhere else, wagging while it watches |
+| **Ghost** | Fades in on the spot, wags gently, fades out, and reappears elsewhere — never travelling. Its speech bubble fades with it, so the taunt comes and goes with the floof |
 
 A **Hop** taller than the overlay is capped at the available headroom, so a short
 strip will never launch a floof out of frame.

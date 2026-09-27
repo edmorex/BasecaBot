@@ -39,6 +39,10 @@ export interface FloofConfig {
   despawnSeconds: number;
   /** Ping Pong drift speed, 1 (slow) … 10 (fast). */
   speed: number;
+  /** Ping Pong: how far the floof wags as it drifts, in degrees. */
+  pingpongWagDegrees: number;
+  /** Ping Pong: seconds for one full wag cycle. */
+  pingpongWagSeconds: number;
   /** Roll: how fast it trundles along the floor, 1 … 10. */
   rollSpeed: number;
   /** Hop: horizontal distance covered by one hop, in pixels. */
@@ -57,6 +61,10 @@ export interface FloofConfig {
   peekHoldSeconds: number;
   /** Peek: seconds hidden before it pops up somewhere else. */
   peekDelaySeconds: number;
+  /** Peek: how far it wags while watching, in degrees. */
+  peekWagDegrees: number;
+  /** Peek: seconds for one full wag cycle. */
+  peekWagSeconds: number;
   /** Ghost: seconds to fade in (and to fade back out). */
   ghostFadeSeconds: number;
   /** Ghost: seconds held at full opacity. */
@@ -79,6 +87,8 @@ export const FLOOF_DEFAULTS: FloofConfig = {
   randomSeconds: 480, // + up to 8 min
   despawnSeconds: 120,
   speed: 5,
+  pingpongWagDegrees: 9,
+  pingpongWagSeconds: 0.63,
   rollSpeed: 5,
   hopDistance: 220,
   hopHeight: 120,
@@ -88,6 +98,8 @@ export const FLOOF_DEFAULTS: FloofConfig = {
   peekRiseSeconds: 0.5,
   peekHoldSeconds: 2.5,
   peekDelaySeconds: 0.8,
+  peekWagDegrees: 5,
+  peekWagSeconds: 0.63,
   ghostFadeSeconds: 1.2,
   ghostHoldSeconds: 1.6,
   ghostDelaySeconds: 0.6,
@@ -105,6 +117,8 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
   randomSeconds: [0, 86400],
   despawnSeconds: [5, 3600],
   speed: [1, 10],
+  pingpongWagDegrees: [0, 45],
+  pingpongWagSeconds: [0.2, 5],
   rollSpeed: [1, 10],
   hopDistance: [40, 1200],
   hopHeight: [10, 600],
@@ -114,6 +128,8 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
   peekRiseSeconds: [0.1, 3],
   peekHoldSeconds: [0.2, 15],
   peekDelaySeconds: [0, 10],
+  peekWagDegrees: [0, 45],
+  peekWagSeconds: [0.2, 5],
   ghostFadeSeconds: [0.2, 5],
   ghostHoldSeconds: [0.2, 10],
   ghostDelaySeconds: [0, 10],
@@ -127,7 +143,7 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
 
 /** Settings that are meaningful as fractions of a second; the rest are rounded. */
 const FRACTIONAL = new Set([
-  'hopSeconds', 'hopDelaySeconds', 'peekRiseSeconds', 'peekHoldSeconds', 'peekDelaySeconds',
+  'pingpongWagSeconds', 'peekWagSeconds', 'hopSeconds', 'hopDelaySeconds', 'peekRiseSeconds', 'peekHoldSeconds', 'peekDelaySeconds',
   'ghostFadeSeconds', 'ghostHoldSeconds', 'ghostDelaySeconds', 'ghostWagSeconds',
 ]);
 
@@ -138,6 +154,8 @@ export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
   random: 'randomSeconds',
   despawn: 'despawnSeconds',
   speed: 'speed',
+  'pingpong-wag': 'pingpongWagDegrees',
+  'pingpong-wag-seconds': 'pingpongWagSeconds',
   'roll-speed': 'rollSpeed',
   'hop-distance': 'hopDistance',
   'hop-height': 'hopHeight',
@@ -147,6 +165,8 @@ export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
   'peek-rise': 'peekRiseSeconds',
   'peek-hold': 'peekHoldSeconds',
   'peek-delay': 'peekDelaySeconds',
+  'peek-wag': 'peekWagDegrees',
+  'peek-wag-seconds': 'peekWagSeconds',
   'ghost-fade': 'ghostFadeSeconds',
   'ghost-hold': 'ghostHoldSeconds',
   'ghost-delay': 'ghostDelaySeconds',

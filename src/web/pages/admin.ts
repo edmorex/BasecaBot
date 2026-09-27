@@ -692,8 +692,10 @@ export function adminPage(): string {
     ];
     // One tuning group per animation style, matching the overlay's movers.
     var FLOOF_ANIM = [
-      { style: 'pingpong', blurb: 'Drifts in a straight line and bounces off the padded edges.', fields: [
-        { key: 'speed', label: 'Drift speed', hint: '1 slow - 10 fast', min: 1, max: 10, step: 1 }
+      { style: 'pingpong', blurb: 'Drifts in a straight line and bounces off the padded edges, wagging as it goes.', fields: [
+        { key: 'speed', label: 'Drift speed', hint: '1 slow - 10 fast', min: 1, max: 10, step: 1 },
+        { key: 'pingpongWagDegrees', label: 'Wag amount', hint: 'degrees either side', min: 0, max: 45, step: 1 },
+        { key: 'pingpongWagSeconds', label: 'Wag speed', hint: 'seconds per full wag', min: 0.2, max: 5, step: 0.05 }
       ] },
       { style: 'roll', blurb: 'Trundles along the bottom edge like a tyre, rotating as it travels.', fields: [
         { key: 'rollSpeed', label: 'Roll speed', hint: '1 slow - 10 fast', min: 1, max: 10, step: 1 }
@@ -704,11 +706,13 @@ export function adminPage(): string {
         { key: 'hopSeconds', label: 'Hop duration', hint: 'seconds in the air', min: 0.2, max: 3, step: 0.1 },
         { key: 'hopDelaySeconds', label: 'Rest between hops', hint: 'seconds sat still', min: 0, max: 5, step: 0.1 }
       ] },
-      { style: 'peek', blurb: 'Pops up from random spots along the bottom edge, then ducks away again.', fields: [
+      { style: 'peek', blurb: 'Pops up from random spots along the bottom edge, then ducks away again, wagging while it watches.', fields: [
         { key: 'peekHeight', label: 'Peek height', hint: 'pixels it rises above the edge', min: 16, max: 400, step: 4 },
         { key: 'peekRiseSeconds', label: 'Slide time', hint: 'seconds to rise (and to duck)', min: 0.1, max: 3, step: 0.1 },
         { key: 'peekHoldSeconds', label: 'Peek duration', hint: 'seconds spent looking around', min: 0.2, max: 15, step: 0.1 },
-        { key: 'peekDelaySeconds', label: 'Hidden between peeks', hint: 'seconds out of sight', min: 0, max: 10, step: 0.1 }
+        { key: 'peekDelaySeconds', label: 'Hidden between peeks', hint: 'seconds out of sight', min: 0, max: 10, step: 0.1 },
+        { key: 'peekWagDegrees', label: 'Wag amount', hint: 'degrees either side while watching', min: 0, max: 45, step: 1 },
+        { key: 'peekWagSeconds', label: 'Wag speed', hint: 'seconds per full wag', min: 0.2, max: 5, step: 0.05 }
       ] },
       { style: 'ghost', blurb: 'Fades in and out on the spot, wagging, without travelling.', fields: [
         { key: 'ghostFadeSeconds', label: 'Fade time', hint: 'seconds to fade in (and out)', min: 0.2, max: 5, step: 0.1 },

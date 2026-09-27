@@ -107,8 +107,6 @@ export function floofOverlayPage(): string {
   var TAUNTS = [];
   var IDLE_MS = 10000;      // unpet time before a taunt
   var BUBBLE_MS = 2500;     // how long the bubble stays up
-  var ROCK_DEG = 9;         // happy wiggle amplitude
-  var ROCK_HZ = 1.6;
   var PET_MS = 7600;        // full win sequence before the stage is torn down
 
   var stage = document.getElementById('stage');
@@ -152,6 +150,19 @@ export function floofOverlayPage(): string {
     if(idleTimer) clearTimeout(idleTimer); idleTimer = null;
     if(bubbleTimer) clearTimeout(bubbleTimer); bubbleTimer = null;
   }
+
+  /**
+   * Hide the bubble AND hand its opacity back to the stylesheet.
+   *
+   * Ghost mode drives the bubble's opacity inline to match the floof; leaving that
+   * inline value behind would override the .show rule and pin the bubble visible
+   * for the rest of the round.
+   */
+  function hideBubble(){
+    bubble.classList.remove('show');
+    bubble.style.opacity = '';
+    bubble.style.transition = '';
+  }
   function stopLoop(){ if(raf) cancelAnimationFrame(raf); raf = null; }
 
   /** A random taunt that is never the same as the previous one. */
@@ -169,8 +180,15 @@ export function floofOverlayPage(): string {
   function num(v, fallback){ var n = Number(v); return isFinite(n) ? n : fallback; }
   /** Ease-out cubic, for the peek slide. */
   function ease(p){ var q = 1 - p; return 1 - q * q * q; }
-  /** The happy wiggle shared by a few of the styles. */
-  function rock(){ return Math.sin(performance.now() / 1000 * Math.PI * 2 * ROCK_HZ) * ROCK_DEG; }
+  /**
+   * The wiggle, as degrees off vertical right now. Every style that wags passes its
+   * OWN amount and period, so they can be tuned independently.
+   */
+  function wag(deg, sec){
+    var d = Math.max(0, num(deg, 9));
+    var s = Math.max(0.2, num(sec, 0.63));
+    return Math.sin(performance.now() / 1000 * Math.PI * 2 / s) * d;
+  }
 
   function bounds(){
     var b = {
@@ -216,14 +234,14 @@ export function floofOverlayPage(): string {
         state.vx = Math.cos(ang) * sp * (Math.random() < 0.5 ? 1 : -1);
         state.vy = Math.sin(ang) * sp * 0.45;
       },
-      step: function(dt, b){
+      step: function(dt, b, a){
         state.x += state.vx * dt;
         state.y += state.vy * dt;
         if(state.x <= b.minX){ state.x = b.minX; state.vx = Math.abs(state.vx); }
         if(state.x >= b.maxX){ state.x = b.maxX; state.vx = -Math.abs(state.vx); }
         if(state.y <= b.minY){ state.y = b.minY; state.vy = Math.abs(state.vy); }
         if(state.y >= b.maxY){ state.y = b.maxY; state.vy = -Math.abs(state.vy); }
-        state.rot = rock();
+        state.rot = wag(a.pingpongWagDegrees, a.pingpongWagSeconds);
       }
     },
 
@@ -304,7 +322,7 @@ export function floofOverlayPage(): string {
           if(p >= 1){ state.peekPhase = 'hold'; state.peekT = 0; }
         } else if(state.peekPhase === 'hold'){
           state.y = shown;
-          state.rot = rock() * 0.6;           // a gentler wiggle while it watches
+          state.rot = wag(a.peekWagDegrees, a.peekWagSeconds);   // wiggles while it watches
           if(state.peekT >= Math.max(0.2, num(a.peekHoldSeconds, 2.5))){ state.peekPhase = 'drop'; state.peekT = 0; }
         } else if(state.peekPhase === 'drop'){
           var q = Math.min(1, state.peekT / rise);
@@ -334,9 +352,8 @@ export function floofOverlayPage(): string {
       step: function(dt, b, a){
         state.ghostT += dt;
         var fade = Math.max(0.2, num(a.ghostFadeSeconds, 1.2));
-        var wagSec = Math.max(0.2, num(a.ghostWagSeconds, 1.4));
         // Wags on the spot without ever travelling — that is the whole effect.
-        state.rot = Math.sin(performance.now() / 1000 * Math.PI * 2 / wagSec) * Math.max(0, num(a.ghostWagDegrees, 12));
+        state.rot = wag(a.ghostWagDegrees, a.ghostWagSeconds);
         if(state.ghostPhase === 'in'){
           state.opacity = Math.min(1, state.ghostT / fade);
           if(state.ghostT >= fade){ state.ghostPhase = 'hold'; state.ghostT = 0; state.opacity = 1; }
@@ -367,7 +384,12 @@ export function floofOverlayPage(): string {
   function draw(){
     el.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px) rotate(' + state.rot.toFixed(2) + 'deg)';
     // Only the ghost drives opacity directly; every other style uses the .in class.
-    if(state.opacity !== null) el.style.opacity = String(state.opacity);
+    if(state.opacity !== null){
+      el.style.opacity = String(state.opacity);
+      // The bubble fades WITH the floof, so a ghost's speech comes and goes with
+      // it instead of hanging in the air on its own.
+      if(bubble.classList.contains('show')) bubble.style.opacity = String(state.opacity);
+    }
 
     // Put the bubble on the side with room: floof in the right half -> bubble to
     // its LEFT, and vice versa, so the bubble is never pushed off the edge. The
@@ -397,23 +419,36 @@ export function floofOverlayPage(): string {
   function scheduleTaunt(){
     clearTimers();
     if(!TAUNTS.length) return;          // this floof has nothing to say
-    idleTimer = setTimeout(function(){
-      if(!state) return;
-      // Styles with their own appear/disappear cycle keep moving while they talk.
-      paused = mover().pausable;
-      bubble.textContent = pickTaunt();
-      // Measure once now the text is set; draw() reuses it instead of forcing a
-      // layout every frame.
-      bubbleW = bubble.offsetWidth;
-      bubbleH = bubble.offsetHeight;
-      draw();                       // reposition before it becomes visible
-      bubble.classList.add('show');
-      bubbleTimer = setTimeout(function(){
-        bubble.classList.remove('show');
-        paused = false;
-        scheduleTaunt();                              // ...and taunt again later
-      }, BUBBLE_MS);
-    }, IDLE_MS);
+    idleTimer = setTimeout(showTaunt, IDLE_MS);
+  }
+
+  function showTaunt(){
+    if(!state) return;
+    // A ghost caught mid-blink would show a bubble nobody can see and the line
+    // would be spent for nothing; wait for it to fade back in.
+    if(state.opacity !== null && state.opacity < 0.05){
+      idleTimer = setTimeout(showTaunt, 200);
+      return;
+    }
+    // Styles with their own appear/disappear cycle keep moving while they talk.
+    paused = mover().pausable;
+    bubble.textContent = pickTaunt();
+    // Measure once now the text is set; draw() reuses it instead of forcing a
+    // layout every frame.
+    bubbleW = bubble.offsetWidth;
+    bubbleH = bubble.offsetHeight;
+    if(state.opacity !== null){
+      // Matched frame by frame, so the CSS fade would only smear it.
+      bubble.style.transition = 'none';
+      bubble.style.opacity = String(state.opacity);
+    }
+    draw();                       // reposition before it becomes visible
+    bubble.classList.add('show');
+    bubbleTimer = setTimeout(function(){
+      hideBubble();
+      paused = false;
+      scheduleTaunt();                              // ...and taunt again later
+    }, BUBBLE_MS);
   }
 
   function reset(){
@@ -426,7 +461,8 @@ export function floofOverlayPage(): string {
     el.style.transition = 'none';
     el.classList.remove('in', 'pet');
     el.style.opacity = '';          // drop any ghost-driven opacity
-    bubble.classList.remove('show', 'flip');
+    hideBubble();
+    bubble.classList.remove('flip');
     bubbleFlipped = null;
     heart.classList.remove('go');
     burst.classList.remove('go');
@@ -468,7 +504,7 @@ export function floofOverlayPage(): string {
     if(!state) return;
     clearTimers();
     paused = true;                 // stop dead, whatever it was doing
-    bubble.classList.remove('show');
+    hideBubble();
 
     // Whatever the style was mid-way through, make sure the win is fully visible:
     // a ghost could be mid-fade and a peeking floof mostly below the edge.

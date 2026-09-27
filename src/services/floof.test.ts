@@ -58,12 +58,29 @@ describe('floof config surface', () => {
     );
   });
 
+  it('gives each wagging style its own independent amount and speed', () => {
+    // 9 degrees at 1.6Hz was the fixed behaviour before these became settings;
+    // 0.63s per cycle is the same feel expressed as a period. Peek's 5 degrees
+    // preserves the 60% gentling it used to get from a shared value.
+    expect(FLOOF_DEFAULTS.pingpongWagDegrees).toBe(9);
+    expect(FLOOF_DEFAULTS.pingpongWagSeconds).toBeCloseTo(0.63, 2);
+    expect(FLOOF_DEFAULTS.peekWagDegrees).toBe(5);
+    expect(FLOOF_DEFAULTS.ghostWagDegrees).toBe(12);
+    // Three separate pairs, so tuning one never moves another.
+    const keys = Object.keys(FLOOF_DEFAULTS).filter((k) => k.toLowerCase().includes('wag'));
+    expect(keys.sort()).toEqual([
+      'ghostWagDegrees', 'ghostWagSeconds',
+      'peekWagDegrees', 'peekWagSeconds',
+      'pingpongWagDegrees', 'pingpongWagSeconds',
+    ]);
+  });
+
   it('gives every animation style at least one chat-settable knob', () => {
     const vars = Object.keys(FLOOF_VARIABLES);
     expect(vars).toEqual(expect.arrayContaining([
-      'speed', 'roll-speed',
+      'speed', 'pingpong-wag', 'pingpong-wag-seconds', 'roll-speed',
       'hop-distance', 'hop-height', 'hop-seconds', 'hop-delay',
-      'peek-height', 'peek-rise', 'peek-hold', 'peek-delay',
+      'peek-height', 'peek-rise', 'peek-hold', 'peek-delay', 'peek-wag', 'peek-wag-seconds',
       'ghost-fade', 'ghost-hold', 'ghost-delay', 'ghost-wag', 'ghost-wag-seconds',
     ]));
   });
