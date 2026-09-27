@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readPngSize, safeImageName, FLOOF_VARIABLES, FLOOF_DEFAULTS } from './floof.js';
+import { readPngSize, safeImageName, FLOOF_VARIABLES, FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, isFloofStyle } from './floof.js';
 
 /** Build a minimal PNG header with the given dimensions. */
 function pngHeader(width: number, height: number): Buffer {
@@ -56,5 +56,45 @@ describe('floof config surface', () => {
     expect(Object.keys(FLOOF_VARIABLES)).toEqual(
       expect.arrayContaining(['enabled', 'base', 'random', 'despawn', 'speed', 'pad-left', 'pad-right', 'pad-top', 'pad-bottom']),
     );
+  });
+
+  it('gives every animation style at least one chat-settable knob', () => {
+    const vars = Object.keys(FLOOF_VARIABLES);
+    expect(vars).toEqual(expect.arrayContaining([
+      'speed', 'roll-speed',
+      'hop-distance', 'hop-height', 'hop-seconds', 'hop-delay',
+      'peek-height', 'peek-rise', 'peek-hold', 'peek-delay',
+      'ghost-fade', 'ghost-hold', 'ghost-delay', 'ghost-wag', 'ghost-wag-seconds',
+    ]));
+  });
+
+  it('bounds every numeric setting, and every default sits inside its bounds', () => {
+    for (const [key, value] of Object.entries(FLOOF_DEFAULTS)) {
+      if (typeof value !== 'number') continue;
+      const range = FLOOF_RANGES[key];
+      expect(range, `${key} has no range`).toBeDefined();
+      expect(value).toBeGreaterThanOrEqual(range![0]);
+      expect(value).toBeLessThanOrEqual(range![1]);
+    }
+  });
+
+  it('has no Boss Floof settings left', () => {
+    // Boss battles moved to their own game; nothing boss-shaped should survive here.
+    for (const key of Object.keys(FLOOF_DEFAULTS)) expect(key.toLowerCase()).not.toContain('boss');
+    for (const key of Object.keys(FLOOF_VARIABLES)) expect(key.toLowerCase()).not.toContain('boss');
+  });
+});
+
+describe('floof animation styles', () => {
+  it('lists the five styles, each with a label', () => {
+    expect(FLOOF_STYLES).toEqual(['pingpong', 'roll', 'hop', 'peek', 'ghost']);
+    for (const s of FLOOF_STYLES) expect(FLOOF_STYLE_LABELS[s]).toBeTruthy();
+  });
+
+  it('recognises only real style names', () => {
+    expect(isFloofStyle('hop')).toBe(true);
+    expect(isFloofStyle('Hop')).toBe(false); // ids are lower-case
+    expect(isFloofStyle('boss')).toBe(false);
+    expect(isFloofStyle(undefined)).toBe(false);
   });
 });

@@ -10,6 +10,23 @@ export const FLOOF_URL = '/assets/floofs/';
 /** Largest upload accepted, in bytes. */
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
+/** The movement styles a floof can spawn with. */
+export const FLOOF_STYLES = ['pingpong', 'roll', 'hop', 'peek', 'ghost'] as const;
+export type FloofStyle = (typeof FLOOF_STYLES)[number];
+
+/** Human labels for the admin panel and chat messages. */
+export const FLOOF_STYLE_LABELS: Record<FloofStyle, string> = {
+  pingpong: 'Ping Pong',
+  roll: 'Roll',
+  hop: 'Hop',
+  peek: 'Peek',
+  ghost: 'Ghost',
+};
+
+export function isFloofStyle(v: unknown): v is FloofStyle {
+  return (FLOOF_STYLES as readonly string[]).includes(String(v));
+}
+
 /** Tunable game settings (persisted in the Setting table as one JSON blob). */
 export interface FloofConfig {
   /** Master switch: when off, the timer never spawns (manual fire still works). */
@@ -20,20 +37,36 @@ export interface FloofConfig {
   randomSeconds: number;
   /** How long an un-pet floof stays before giving up. */
   despawnSeconds: number;
-  /** Animation speed, 1 (slow) … 10 (fast). */
+  /** Ping Pong drift speed, 1 (slow) … 10 (fast). */
   speed: number;
-  /** Boss battle: how many chatters must !pet to defeat it. */
-  bossPets: number;
-  /** Boss battle: percent chance a scheduled spawn is a boss instead. */
-  bossChance: number;
-  /** Boss battle: seconds before the boss escapes (usually longer than normal). */
-  bossDespawnSeconds: number;
-  /** Boss battle: seconds a chatter must wait between their own hits. */
-  bossCooldownSeconds: number;
-  /** Boss battle: movement speed at FULL health (fast and angry). */
-  bossSpeedStart: number;
-  /** Boss battle: movement speed at 1 life left (slow and calm). */
-  bossSpeedEnd: number;
+  /** Roll: how fast it trundles along the floor, 1 … 10. */
+  rollSpeed: number;
+  /** Hop: horizontal distance covered by one hop, in pixels. */
+  hopDistance: number;
+  /** Hop: peak height of the arc, in pixels. */
+  hopHeight: number;
+  /** Hop: seconds spent in the air per hop. */
+  hopSeconds: number;
+  /** Hop: seconds sat still between hops. */
+  hopDelaySeconds: number;
+  /** Peek: how far it rises above the bottom edge, in pixels. */
+  peekHeight: number;
+  /** Peek: seconds to slide up (and to slide back down). */
+  peekRiseSeconds: number;
+  /** Peek: seconds spent peeking before it ducks away. */
+  peekHoldSeconds: number;
+  /** Peek: seconds hidden before it pops up somewhere else. */
+  peekDelaySeconds: number;
+  /** Ghost: seconds to fade in (and to fade back out). */
+  ghostFadeSeconds: number;
+  /** Ghost: seconds held at full opacity. */
+  ghostHoldSeconds: number;
+  /** Ghost: seconds invisible before reappearing elsewhere. */
+  ghostDelaySeconds: number;
+  /** Ghost: how far it wags, in degrees. */
+  ghostWagDegrees: number;
+  /** Ghost: seconds for one full wag cycle. */
+  ghostWagSeconds: number;
   padLeft: number;
   padRight: number;
   padTop: number;
@@ -46,12 +79,20 @@ export const FLOOF_DEFAULTS: FloofConfig = {
   randomSeconds: 480, // + up to 8 min
   despawnSeconds: 120,
   speed: 5,
-  bossPets: 20,
-  bossChance: 10,
-  bossDespawnSeconds: 180,
-  bossCooldownSeconds: 30,
-  bossSpeedStart: 9,
-  bossSpeedEnd: 2,
+  rollSpeed: 5,
+  hopDistance: 220,
+  hopHeight: 120,
+  hopSeconds: 0.7,
+  hopDelaySeconds: 0.5,
+  peekHeight: 96,
+  peekRiseSeconds: 0.5,
+  peekHoldSeconds: 2.5,
+  peekDelaySeconds: 0.8,
+  ghostFadeSeconds: 1.2,
+  ghostHoldSeconds: 1.6,
+  ghostDelaySeconds: 0.6,
+  ghostWagDegrees: 12,
+  ghostWagSeconds: 1.4,
   padLeft: 0,
   padRight: 0,
   padTop: 0,
@@ -64,17 +105,31 @@ export const FLOOF_RANGES: Record<string, readonly [number, number]> = {
   randomSeconds: [0, 86400],
   despawnSeconds: [5, 3600],
   speed: [1, 10],
-  bossPets: [1, 500],
-  bossChance: [0, 100],
-  bossDespawnSeconds: [10, 3600],
-  bossCooldownSeconds: [0, 600],
-  bossSpeedStart: [1, 10],
-  bossSpeedEnd: [1, 10],
+  rollSpeed: [1, 10],
+  hopDistance: [40, 1200],
+  hopHeight: [10, 600],
+  hopSeconds: [0.2, 3],
+  hopDelaySeconds: [0, 5],
+  peekHeight: [16, 400],
+  peekRiseSeconds: [0.1, 3],
+  peekHoldSeconds: [0.2, 15],
+  peekDelaySeconds: [0, 10],
+  ghostFadeSeconds: [0.2, 5],
+  ghostHoldSeconds: [0.2, 10],
+  ghostDelaySeconds: [0, 10],
+  ghostWagDegrees: [0, 45],
+  ghostWagSeconds: [0.2, 5],
   padLeft: [0, 800],
   padRight: [0, 800],
   padTop: [0, 200],
   padBottom: [0, 200],
 };
+
+/** Settings that are meaningful as fractions of a second; the rest are rounded. */
+const FRACTIONAL = new Set([
+  'hopSeconds', 'hopDelaySeconds', 'peekRiseSeconds', 'peekHoldSeconds', 'peekDelaySeconds',
+  'ghostFadeSeconds', 'ghostHoldSeconds', 'ghostDelaySeconds', 'ghostWagSeconds',
+]);
 
 /** Chat-facing setter names -> config keys (`!pet set <variable> <value>`). */
 export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
@@ -83,12 +138,20 @@ export const FLOOF_VARIABLES: Record<string, keyof FloofConfig> = {
   random: 'randomSeconds',
   despawn: 'despawnSeconds',
   speed: 'speed',
-  'boss-pets': 'bossPets',
-  'boss-chance': 'bossChance',
-  'boss-despawn': 'bossDespawnSeconds',
-  'boss-cooldown': 'bossCooldownSeconds',
-  'boss-speed-start': 'bossSpeedStart',
-  'boss-speed-end': 'bossSpeedEnd',
+  'roll-speed': 'rollSpeed',
+  'hop-distance': 'hopDistance',
+  'hop-height': 'hopHeight',
+  'hop-seconds': 'hopSeconds',
+  'hop-delay': 'hopDelaySeconds',
+  'peek-height': 'peekHeight',
+  'peek-rise': 'peekRiseSeconds',
+  'peek-hold': 'peekHoldSeconds',
+  'peek-delay': 'peekDelaySeconds',
+  'ghost-fade': 'ghostFadeSeconds',
+  'ghost-hold': 'ghostHoldSeconds',
+  'ghost-delay': 'ghostDelaySeconds',
+  'ghost-wag': 'ghostWagDegrees',
+  'ghost-wag-seconds': 'ghostWagSeconds',
   'pad-left': 'padLeft',
   'pad-right': 'padRight',
   'pad-top': 'padTop',
@@ -99,12 +162,14 @@ export interface FloofImage {
   name: string;
   url: string;
   bytes: number;
-  /** True when this photo is reserved for Boss Floof battles. */
-  boss: boolean;
+  /** Movement styles this photo is allowed to spawn with (all of them by default). */
+  styles: FloofStyle[];
+  /** This photo's own speech-bubble lines. */
+  taunts: string[];
 }
 
-/** The taunts shipped out of the box; the admin panel can edit the list freely. */
-export const DEFAULT_TAUNTS = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
+/** What a newly-added floof starts with; each photo's list is edited separately. */
+export const DEFAULT_TAUNT = '!pet me';
 
 export interface FloofStatView {
   wins: number;
@@ -148,16 +213,17 @@ export function safeImageName(raw: string): string {
  */
 export class FloofService {
   private config: FloofConfig = { ...FLOOF_DEFAULTS };
-  private taunts: string[] = [...DEFAULT_TAUNTS];
-  /** Image filenames flagged as Boss-only (stored as a Setting, not a directory,
-   *  so bosses share the one bind-mounted folder). */
-  private bossImages = new Set<string>();
+  /** Per-photo speech-bubble lines. Absent means "never customised", which reads
+   *  as the single default taunt; present-but-empty means a deliberately silent
+   *  floof, so the two cases must stay distinguishable. */
+  private imageTaunts = new Map<string, string[]>();
+  /** Per-photo allowed movement styles. A photo absent from this map allows all
+   *  of them, so uploading a floof needs no extra step. */
+  private imageStyles = new Map<string, FloofStyle[]>();
   /** Set by the floof plugin; lets the admin panel trigger a spawn on demand. */
-  private spawner?: () => Promise<string | null>;
+  private spawner?: (image: string | null, style: FloofStyle | null) => Promise<string | null>;
   /** Set by the floof plugin; stands in for a chatter's !pet without scoring it. */
   private petSimulator?: () => Promise<string | null>;
-  /** Set by the floof plugin; spawns a Boss Floof battle on demand. */
-  private bossSpawner?: () => Promise<string | null>;
 
   constructor(
     private readonly storage: Storage,
@@ -170,19 +236,32 @@ export class FloofService {
 
   /** Load persisted settings and make sure the image directory exists. */
   async init(): Promise<void> {
+    // Taunts used to be one shared list. If this install still has that and no
+    // per-photo lists yet, every existing photo inherits it — silently dropping a
+    // configured set of taunts would be a nasty surprise on upgrade.
+    let legacyShared: string[] | null = null;
+    let hadPerImage = false;
     try {
       const rows = await this.db.setting.findMany({
-        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.bossImages'] } },
+        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.imageStyles', 'floof.imageTaunts'] } },
       });
       for (const row of rows) {
         if (row.key === 'floof.config') {
           this.config = this.clamp({ ...FLOOF_DEFAULTS, ...(safeJson(row.value) as Partial<FloofConfig>) });
         } else if (row.key === 'floof.taunts') {
           const list = safeJson(row.value);
-          if (Array.isArray(list)) this.taunts = cleanTaunts(list as unknown[]);
-        } else if (row.key === 'floof.bossImages') {
-          const list = safeJson(row.value);
-          if (Array.isArray(list)) this.bossImages = new Set((list as unknown[]).map(String));
+          if (Array.isArray(list)) legacyShared = cleanTaunts(list as unknown[]);
+        } else if (row.key === 'floof.imageTaunts') {
+          hadPerImage = true;
+          const map = safeJson(row.value) as Record<string, unknown>;
+          for (const [name, list] of Object.entries(map ?? {})) {
+            if (Array.isArray(list)) this.imageTaunts.set(name, cleanTaunts(list));
+          }
+        } else if (row.key === 'floof.imageStyles') {
+          const map = safeJson(row.value) as Record<string, unknown>;
+          for (const [name, list] of Object.entries(map ?? {})) {
+            if (Array.isArray(list)) this.imageStyles.set(name, cleanStyles(list));
+          }
         }
       }
     } catch (err) {
@@ -193,31 +272,33 @@ export class FloofService {
     } catch (err) {
       this.logger.warn({ err, dir: FLOOF_DIR }, 'floof: could not create image directory');
     }
+    if (!hadPerImage && legacyShared && legacyShared.length) {
+      try {
+        const names = (await readdir(FLOOF_DIR)).filter((n) => n.toLowerCase().endsWith('.png'));
+        for (const name of names) this.imageTaunts.set(name, [...legacyShared]);
+        await this.saveImageTaunts(); // writing the key is what marks this done
+        this.logger.info({ photos: names.length }, 'floof: migrated the shared taunt list onto each photo');
+      } catch (err) {
+        this.logger.warn({ err }, 'floof: could not migrate the shared taunt list');
+      }
+    }
   }
 
   /**
    * The plugin owns the round state machine, but the admin panel (which only has
    * this service) needs to fire a spawn. It registers its spawn function here.
    */
-  setSpawner(fn: () => Promise<string | null>): void {
+  setSpawner(fn: (image: string | null, style: FloofStyle | null) => Promise<string | null>): void {
     this.spawner = fn;
   }
 
-  /** Manually spawn a floof now. Resolves to an error message, or null on success. */
-  async requestSpawn(): Promise<string | null> {
+  /**
+   * Manually spawn a floof now. `image` and `style` may each be null for "pick at
+   * random". Resolves to an error message, or null on success.
+   */
+  async requestSpawn(image: string | null = null, style: FloofStyle | null = null): Promise<string | null> {
     if (!this.spawner) return 'The floof game is not running.';
-    return this.spawner();
-  }
-
-  /** Register the plugin's boss-spawn hook. */
-  setBossSpawner(fn: () => Promise<string | null>): void {
-    this.bossSpawner = fn;
-  }
-
-  /** Start a Boss Floof battle now. Resolves to an error message, or null. */
-  async requestBossSpawn(): Promise<string | null> {
-    if (!this.bossSpawner) return 'The floof game is not running.';
-    return this.bossSpawner();
+    return this.spawner(image, style);
   }
 
   /** Register the plugin's simulated-`!pet` hook. */
@@ -228,8 +309,7 @@ export class FloofService {
   /**
    * Stand in for a chatter typing `!pet`, for testing. Scores NOTHING — no win
    * recorded, no chat announcement, no achievement — so the broadcaster can step
-   * through a boss battle or trigger the win animation without polluting the
-   * scoreboard.
+   * trigger the win animation without polluting the scoreboard.
    */
   async requestSimulatedPet(): Promise<string | null> {
     if (!this.petSimulator) return 'The floof game is not running.';
@@ -256,69 +336,86 @@ export class FloofService {
   }
 
   private clamp(c: FloofConfig): FloofConfig {
-    const n = (v: unknown, key: string, fallback: number) => {
+    const out = { ...FLOOF_DEFAULTS, enabled: !!c.enabled };
+    for (const key of Object.keys(FLOOF_RANGES) as (keyof FloofConfig)[]) {
       const [lo, hi] = FLOOF_RANGES[key]!;
-      const num = Math.round(Number(v));
-      return Number.isFinite(num) ? Math.min(hi, Math.max(lo, num)) : fallback;
-    };
-    return {
-      enabled: !!c.enabled,
-      baseSeconds: n(c.baseSeconds, 'baseSeconds', FLOOF_DEFAULTS.baseSeconds),
-      randomSeconds: n(c.randomSeconds, 'randomSeconds', FLOOF_DEFAULTS.randomSeconds),
-      despawnSeconds: n(c.despawnSeconds, 'despawnSeconds', FLOOF_DEFAULTS.despawnSeconds),
-      speed: n(c.speed, 'speed', FLOOF_DEFAULTS.speed),
-      bossPets: n(c.bossPets, 'bossPets', FLOOF_DEFAULTS.bossPets),
-      bossChance: n(c.bossChance, 'bossChance', FLOOF_DEFAULTS.bossChance),
-      bossDespawnSeconds: n(c.bossDespawnSeconds, 'bossDespawnSeconds', FLOOF_DEFAULTS.bossDespawnSeconds),
-      bossCooldownSeconds: n(c.bossCooldownSeconds, 'bossCooldownSeconds', FLOOF_DEFAULTS.bossCooldownSeconds),
-      bossSpeedStart: n(c.bossSpeedStart, 'bossSpeedStart', FLOOF_DEFAULTS.bossSpeedStart),
-      bossSpeedEnd: n(c.bossSpeedEnd, 'bossSpeedEnd', FLOOF_DEFAULTS.bossSpeedEnd),
-      padLeft: n(c.padLeft, 'padLeft', 0),
-      padRight: n(c.padRight, 'padRight', 0),
-      padTop: n(c.padTop, 'padTop', 0),
-      padBottom: n(c.padBottom, 'padBottom', 0),
-    };
+      const raw = Number(c[key]);
+      const num = FRACTIONAL.has(key) ? Math.round(raw * 100) / 100 : Math.round(raw);
+      (out[key] as number) = Number.isFinite(num) ? Math.min(hi, Math.max(lo, num)) : (FLOOF_DEFAULTS[key] as number);
+    }
+    return out;
   }
 
-  // ── Taunts ──────────────────────────────────────────────────────────────────
+  // ── Taunts (per photo) ──────────────────────────────────────────────────────
 
-  /** The speech-bubble lines the overlay picks from. Never empty. */
-  getTaunts(): string[] {
-    return this.taunts.length ? [...this.taunts] : [...DEFAULT_TAUNTS];
+  /** One photo's speech-bubble lines. A photo never customised gets the default. */
+  getImageTaunts(name: string): string[] {
+    const key = safeImageName(name);
+    const own = this.imageTaunts.get(key);
+    return own ? [...own] : [DEFAULT_TAUNT];
   }
 
-  /** Replace the whole list (trimmed, de-duplicated, capped). */
-  async setTaunts(list: unknown[]): Promise<string[]> {
-    this.taunts = cleanTaunts(list);
-    await this.saveSetting('floof.taunts', JSON.stringify(this.taunts));
-    return this.getTaunts();
+  /** Replace one photo's list outright (trimmed, de-duplicated, capped). */
+  async setImageTaunts(name: string, list: unknown[]): Promise<string[]> {
+    const key = safeImageName(name);
+    this.imageTaunts.set(key, cleanTaunts(list));
+    await this.saveImageTaunts();
+    return this.getImageTaunts(key);
   }
 
-  async addTaunt(text: string): Promise<string[]> {
+  async addImageTaunt(name: string, text: string): Promise<string[]> {
     const line = String(text ?? '').trim();
     if (!line) throw new FloofError('Enter a taunt first.');
-    if (this.taunts.some((t) => t.toLowerCase() === line.toLowerCase())) throw new FloofError('That taunt is already in the list.');
-    return this.setTaunts([...this.taunts, line]);
+    const current = this.getImageTaunts(name);
+    if (current.some((t) => t.toLowerCase() === line.toLowerCase())) {
+      throw new FloofError('That floof already says that.');
+    }
+    return this.setImageTaunts(name, [...current, line]);
   }
 
-  async removeTaunt(text: string): Promise<string[]> {
+  async removeImageTaunt(name: string, text: string): Promise<string[]> {
     const line = String(text ?? '').trim().toLowerCase();
-    return this.setTaunts(this.taunts.filter((t) => t.toLowerCase() !== line));
+    // Persist the empty list rather than falling back to the default, so a floof
+    // really can be made silent.
+    return this.setImageTaunts(name, this.getImageTaunts(name).filter((t) => t.toLowerCase() !== line));
+  }
+
+  private async saveImageTaunts(): Promise<void> {
+    const obj: Record<string, string[]> = {};
+    for (const [name, list] of this.imageTaunts) obj[name] = list;
+    await this.saveSetting('floof.imageTaunts', JSON.stringify(obj));
   }
 
   // ── Image library ───────────────────────────────────────────────────────────
 
-  /** Whether an image is reserved for Boss Floof battles. */
-  isBossImage(name: string): boolean {
-    return this.bossImages.has(safeImageName(name));
+  /** The movement styles a photo may spawn with (all of them unless narrowed). */
+  getImageStyles(name: string): FloofStyle[] {
+    return [...(this.imageStyles.get(safeImageName(name)) ?? FLOOF_STYLES)];
   }
 
-  /** Flag/unflag an image as boss-only. */
-  async setBossImage(name: string, boss: boolean): Promise<void> {
+  /**
+   * Allow or forbid one style for one photo.
+   *
+   * A photo with NO styles left is simply never picked at random — which doubles
+   * as a way to shelve a photo without deleting it. It can still be spawned
+   * explicitly from the admin panel.
+   */
+  async setImageStyle(name: string, style: string, on: boolean): Promise<FloofStyle[]> {
+    if (!isFloofStyle(style)) throw new FloofError(`"${style}" is not a floof animation style.`);
     const key = safeImageName(name);
-    if (boss) this.bossImages.add(key);
-    else this.bossImages.delete(key);
-    await this.saveSetting('floof.bossImages', JSON.stringify([...this.bossImages]));
+    const set = new Set(this.getImageStyles(key));
+    if (on) set.add(style);
+    else set.delete(style);
+    const list = cleanStyles([...set]);
+    this.imageStyles.set(key, list);
+    await this.saveImageStyles();
+    return list;
+  }
+
+  private async saveImageStyles(): Promise<void> {
+    const obj: Record<string, FloofStyle[]> = {};
+    for (const [name, list] of this.imageStyles) obj[name] = list;
+    await this.saveSetting('floof.imageStyles', JSON.stringify(obj));
   }
 
   /** Every PNG currently available to the game. */
@@ -329,7 +426,7 @@ export class FloofService {
       for (const name of names.sort()) {
         try {
           const buf = await readFile(path.join(FLOOF_DIR, name));
-          out.push({ name, url: FLOOF_URL + name, bytes: buf.length, boss: this.bossImages.has(name) });
+          out.push({ name, url: FLOOF_URL + name, bytes: buf.length, styles: this.getImageStyles(name), taunts: this.getImageTaunts(name) });
         } catch {
           // skip unreadable file
         }
@@ -341,14 +438,40 @@ export class FloofService {
   }
 
   /**
-   * One random image from the requested pool — boss photos are kept separate from
-   * normal ones, so a boss battle never shows an ordinary floof (or vice versa).
+   * Choose what to spawn. Either argument may be null for "surprise me"; a photo
+   * and a style are picked together so the pair is always one the admin allowed.
+   *
+   * An explicit request is honoured even if that photo has the style switched off
+   * — the admin asked for it by name, which only happens when testing.
    */
-  async randomImage(boss = false): Promise<FloofImage | null> {
-    const pool = (await this.listImages()).filter((i) => i.boss === boss);
-    return pool.length ? pool[Math.floor(Math.random() * pool.length)]! : null;
+  async pickSpawn(
+    imageName: string | null = null,
+    style: FloofStyle | null = null,
+  ): Promise<{ image: FloofImage; style: FloofStyle }> {
+    const images = await this.listImages();
+    if (!images.length) throw new FloofError('No floof photos have been uploaded yet.');
+
+    if (imageName) {
+      const wanted = safeImageName(imageName);
+      const found = images.find((i) => i.name === wanted);
+      if (!found) throw new FloofError(`There is no floof photo called "${wanted}".`);
+      return { image: found, style: style ?? randomOf(found.styles) ?? 'pingpong' };
+    }
+
+    // Only photos that allow the requested style (or allow anything at all).
+    const pool = images.filter((i) => (style ? i.styles.includes(style) : i.styles.length > 0));
+    if (!pool.length) {
+      throw new FloofError(
+        style
+          ? `No floof photos have the ${FLOOF_STYLE_LABELS[style]} animation enabled.`
+          : 'Every floof photo has all of its animations switched off.',
+      );
+    }
+    const image = randomOf(pool)!;
+    return { image, style: style ?? randomOf(image.styles)! };
   }
 
+  /**
   /**
    * Store an uploaded PNG. Rejects anything that isn't a real PNG or isn't
    * square — validated from the file's own IHDR header, no image library needed.
@@ -364,7 +487,7 @@ export class FloofService {
     await mkdir(FLOOF_DIR, { recursive: true });
     await writeFile(path.join(FLOOF_DIR, name), buf);
     this.logger.info({ name, bytes: buf.length, size: size.width }, 'floof: image uploaded');
-    return { name, url: FLOOF_URL + name, bytes: buf.length, boss: this.bossImages.has(name) };
+    return { name, url: FLOOF_URL + name, bytes: buf.length, styles: this.getImageStyles(name), taunts: this.getImageTaunts(name) };
   }
 
   /** Delete an image by name (path-traversal safe). */
@@ -372,7 +495,8 @@ export class FloofService {
     const name = safeImageName(rawName);
     try {
       await unlink(path.join(FLOOF_DIR, name));
-      if (this.bossImages.delete(name)) await this.saveSetting('floof.bossImages', JSON.stringify([...this.bossImages]));
+      if (this.imageStyles.delete(name)) await this.saveImageStyles();
+      if (this.imageTaunts.delete(name)) await this.saveImageTaunts();
       this.logger.info({ name }, 'floof: image deleted');
     } catch {
       throw new FloofError(`No image called "${name}".`);
@@ -389,27 +513,6 @@ export class FloofService {
       update: { wins: { increment: 1 }, lastWonAt: new Date() },
     });
     return row.wins;
-  }
-
-  /**
-   * Credit everyone who joined a winning boss battle. Returns how many rows were
-   * touched. Boss wins are counted separately from solo wins.
-   */
-  async recordBossWin(userIds: string[]): Promise<number> {
-    let n = 0;
-    for (const userId of userIds) {
-      try {
-        await this.db.floofStat.upsert({
-          where: { userId },
-          create: { userId, bossWins: 1, lastWonAt: new Date() },
-          update: { bossWins: { increment: 1 }, lastWonAt: new Date() },
-        });
-        n++;
-      } catch (err) {
-        this.logger.error({ err, userId }, 'floof: could not record boss win');
-      }
-    }
-    return n;
   }
 
   /** A player's wins plus their rank among all winners. */
@@ -444,6 +547,16 @@ function cleanTaunts(list: unknown[]): string[] {
     if (out.length >= 50) break;
   }
   return out;
+}
+
+/** Trim a style list to the known styles, de-duplicated and in canonical order. */
+function cleanStyles(list: unknown[]): FloofStyle[] {
+  const set = new Set(list.map(String).filter(isFloofStyle));
+  return FLOOF_STYLES.filter((s) => set.has(s));
+}
+
+function randomOf<T>(list: readonly T[]): T | undefined {
+  return list.length ? list[Math.floor(Math.random() * list.length)] : undefined;
 }
 
 function safeJson(s: string): unknown {

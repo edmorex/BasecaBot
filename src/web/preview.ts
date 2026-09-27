@@ -13,6 +13,7 @@ import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
 import { BOSS_DEFAULTS, BOSS_RANGES, SOUND_SLOTS, SIZES, STYLES } from '../services/bossBattle.js';
+import { FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, DEFAULT_TAUNT } from '../services/floof.js';
 import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
 import { ACHIEVEMENTS } from '../services/achievementCatalog.js';
@@ -109,7 +110,7 @@ async function collectBuiltins() {
     text: previewText, // real service — plugins register their editable strings here
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
-    floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, setBossSpawner: noop, getTaunts: () => [], randomImage: async () => null, statsFor: async () => ({ wins: 0, rank: null }) },
+    floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, getImageTaunts: () => [], pickSpawn: async () => null, getImageStyles: () => [], statsFor: async () => ({ wins: 0, rank: null }) },
     boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null, rememberEmotes: async () => {}, lookupEmoteArt: async () => new Map() },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
@@ -247,18 +248,12 @@ const previewTtsSpeakers = [
 ];
 
 // Mock "Pet the Floof" state (exercises the admin panel's settings + gallery).
-const previewFloofConfig: Record<string, unknown> = {
-  enabled: true, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120,
-  speed: 5, padLeft: 0, padRight: 24, padTop: 0, padBottom: 12,
-  bossPets: 20, bossChance: 10, bossDespawnSeconds: 180,
-  bossCooldownSeconds: 30, bossSpeedStart: 9, bossSpeedEnd: 2,
-};
-const previewFloofImages = [
-  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, boss: false },
-  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044, boss: false },
-  { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, boss: true },
+const previewFloofConfig: Record<string, unknown> = { ...FLOOF_DEFAULTS, enabled: true, padRight: 24, padBottom: 12 };
+const previewFloofImages: { name: string; url: string; bytes: number; styles: string[]; taunts: string[] }[] = [
+  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, styles: [...FLOOF_STYLES], taunts: [DEFAULT_TAUNT, 'i can haz !pet?'] },
+  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044, styles: ['pingpong', 'hop', 'ghost'], taunts: [DEFAULT_TAUNT] },
+  { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, styles: ['ghost'], taunts: [] },
 ];
-let previewFloofTaunts = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
 
 // Mock Boss Battle state (exercises the settings, sound slots, roster + editor).
 const previewBossConfig: Record<string, unknown> = { ...BOSS_DEFAULTS, enabled: true };
@@ -434,9 +429,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/admin/floof') {
       return json(200, {
         config: previewFloofConfig,
-        defaults: { enabled: false, baseSeconds: 960, randomSeconds: 480, despawnSeconds: 120, speed: 5, padLeft: 0, padRight: 0, padTop: 0, padBottom: 0 },
+        defaults: FLOOF_DEFAULTS,
+        ranges: FLOOF_RANGES,
         images: previewFloofImages,
-        taunts: previewFloofTaunts,
+        styles: FLOOF_STYLES,
+        styleLabels: FLOOF_STYLE_LABELS,
         maxBytes: 2 * 1024 * 1024,
       });
     }
@@ -672,20 +669,34 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       return json(200, { ok: true });
     }
     if (p === '/api/admin/boss/sound/delete') return json(200, { ok: true });
-    if (p === '/api/admin/floof/fire') return json(200, { ok: true });
-    if (p === '/api/admin/floof/simulate-pet') return json(200, { ok: true });
-    if (p === '/api/admin/floof/boss') return json(200, { ok: true });
-    if (p === '/api/admin/floof/taunt') {
-      const text = String(body.text ?? '').trim();
-      if (body.remove) previewFloofTaunts = previewFloofTaunts.filter((t) => t.toLowerCase() !== text.toLowerCase());
-      else if (!text) return json(400, { error: 'Enter a taunt first.' });
-      else if (!previewFloofTaunts.some((t) => t.toLowerCase() === text.toLowerCase())) previewFloofTaunts.push(text);
-      return json(200, { ok: true, taunts: previewFloofTaunts });
-    }
-    if (p === '/api/admin/floof/image/boss') {
-      const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));
-      if (im) im.boss = !!body.boss;
+    if (p === '/api/admin/floof/fire') {
+      const style = String(body.style ?? '');
+      if (style && !(FLOOF_STYLES as readonly string[]).includes(style)) {
+        return json(400, { error: 'Unknown floof animation style.' });
+      }
       return json(200, { ok: true });
+    }
+    if (p === '/api/admin/floof/simulate-pet') return json(200, { ok: true });
+    if (p === '/api/admin/floof/taunt') {
+      const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));
+      if (!im) return json(400, { error: 'Which floof?' });
+      const text = String(body.text ?? '').trim();
+      if (body.remove) im.taunts = im.taunts.filter((t) => t.toLowerCase() !== text.toLowerCase());
+      else if (!text) return json(400, { error: 'Enter a taunt first.' });
+      else if (im.taunts.some((t) => t.toLowerCase() === text.toLowerCase())) return json(400, { error: 'That floof already says that.' });
+      else im.taunts.push(text);
+      return json(200, { ok: true, taunts: im.taunts });
+    }
+    if (p === '/api/admin/floof/image/style') {
+      const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));
+      const style = String(body.style ?? '');
+      if (!im) return json(400, { error: 'No such floof photo.' });
+      if (!(FLOOF_STYLES as readonly string[]).includes(style)) return json(400, { error: 'Unknown floof animation style.' });
+      const set = new Set(im.styles);
+      if (body.on) set.add(style);
+      else set.delete(style);
+      im.styles = FLOOF_STYLES.filter((s2) => set.has(s2));
+      return json(200, { ok: true, styles: im.styles });
     }
     if (p === '/api/admin/floof/image/delete') {
       const n = String(body.name ?? '');

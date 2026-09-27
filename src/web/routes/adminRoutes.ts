@@ -5,7 +5,15 @@ import type { WebServer } from '../webServer.js';
 import { HttpError, LEVEL_LABELS } from '../httpShared.js';
 import { AliasError } from '../../services/users.js';
 import type { VoiceParams } from '../../services/tts.js';
-import { FloofError, MAX_IMAGE_BYTES, type FloofConfig } from '../../services/floof.js';
+import {
+  FloofError,
+  MAX_IMAGE_BYTES,
+  FLOOF_RANGES,
+  FLOOF_STYLES,
+  FLOOF_STYLE_LABELS,
+  isFloofStyle,
+  type FloofConfig,
+} from '../../services/floof.js';
 import {
   BossError,
   BOSS_RANGES,
@@ -269,8 +277,10 @@ export async function getAdminFloof(s: WebServer, req: IncomingMessage, res: Ser
   s.json(res, 200, {
     config: s.floof.getConfig(),
     defaults: s.floof.defaults,
+    ranges: FLOOF_RANGES,
     images,
-    taunts: s.floof.getTaunts(),
+    styles: FLOOF_STYLES,
+    styleLabels: FLOOF_STYLE_LABELS,
     maxBytes: MAX_IMAGE_BYTES,
   });
 }
@@ -282,30 +292,35 @@ export async function postAdminFloof(s: WebServer, req: IncomingMessage, res: Se
   s.json(res, 200, { ok: true, config });
 }
 
-/** Spawn a floof right now — bypasses the enable switch AND the live check. */
+/**
+ * Spawn a floof right now — bypasses the enable switch AND the live check.
+ * `image` and `style` are each optional; omitting one means "pick at random".
+ */
 export async function postAdminFloofFire(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
-  const problem = await s.floof.requestSpawn();
+  const body = await s.readJson(req);
+  const image = String(body.image ?? '').trim() || null;
+  const raw = String(body.style ?? '').trim();
+  // Narrow first, so the service only ever sees a real style or null.
+  if (raw && !isFloofStyle(raw)) throw new HttpError(400, 'Unknown floof animation style.');
+  const problem = await s.floof.requestSpawn(image, isFloofStyle(raw) ? raw : null);
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });
 }
 
-/** Start a Boss Floof battle now (alert, then the boss). */
-export async function postAdminFloofBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
-  const problem = await s.floof.requestBossSpawn();
-  if (problem) throw new HttpError(409, problem);
-  s.json(res, 200, { ok: true });
-}
-
-/** Add or remove a taunt line (the overlay picks one at random per bubble). */
+/**
+ * Add or remove one taunt line on ONE floof photo. Each floof has its own list and
+ * the overlay picks from it at random per bubble.
+ */
 export async function postAdminFloofTaunt(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const body = await s.readJson(req);
+  const name = String(body.name ?? '').trim();
+  if (!name) throw new HttpError(400, 'Which floof?');
   try {
     const taunts = body.remove
-      ? await s.floof.removeTaunt(String(body.text ?? ''))
-      : await s.floof.addTaunt(String(body.text ?? ''));
+      ? await s.floof.removeImageTaunt(name, String(body.text ?? ''))
+      : await s.floof.addImageTaunt(name, String(body.text ?? ''));
     s.json(res, 200, { ok: true, taunts });
   } catch (e) {
     if (e instanceof FloofError) throw new HttpError(400, e.message);
@@ -313,18 +328,22 @@ export async function postAdminFloofTaunt(s: WebServer, req: IncomingMessage, re
   }
 }
 
-/** Flag an uploaded image as boss-only (or back to normal). */
-export async function postAdminFloofImageBoss(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+/** Allow or forbid one animation style for one floof photo. */
+export async function postAdminFloofImageStyle(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const body = await s.readJson(req);
-  await s.floof.setBossImage(String(body.name ?? ''), !!body.boss);
-  s.json(res, 200, { ok: true });
+  try {
+    const styles = await s.floof.setImageStyle(String(body.name ?? ''), String(body.style ?? ''), !!body.on);
+    s.json(res, 200, { ok: true, styles });
+  } catch (e) {
+    if (e instanceof FloofError) throw new HttpError(400, e.message);
+    throw e;
+  }
 }
 
 /**
  * Stand in for a chatter's `!pet` WITHOUT scoring it — no win recorded, no chat
- * announcement, no achievement. Click it repeatedly to walk a boss battle down to
- * a defeat, or once to trigger the normal win animation.
+ * announcement, no achievement. Triggers the normal win animation.
  */
 export async function postAdminFloofSimulatePet(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);

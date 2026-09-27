@@ -684,192 +684,266 @@ export function adminPage(): string {
       }
     }
 
-    // ── Pet the Floof: settings, manual trigger, and the image library ──────────
-    var FLOOF_NUM = [
+    // ── Pet the Floof: settings, manual spawn, and the photo library ────────────
+    var FLOOF_TIMING = [
       { key: 'baseSeconds', label: 'Base timer', hint: 'seconds between floofs', min: 10, max: 86400, step: 10 },
       { key: 'randomSeconds', label: 'Random extra', hint: 'up to this many more seconds', min: 0, max: 86400, step: 10 },
       { key: 'despawnSeconds', label: 'Despawn after', hint: 'seconds before an un-pet floof gives up', min: 5, max: 3600, step: 5 }
     ];
-    var FLOOF_BOSS = [
-      { key: 'bossPets', label: 'Pets to defeat', hint: 'how many chatters must !pet the boss', min: 1, max: 500, step: 1 },
-      { key: 'bossChance', label: 'Boss chance', hint: '% of spawns that are a boss', min: 0, max: 100, step: 1 },
-      { key: 'bossDespawnSeconds', label: 'Boss escapes after', hint: 'seconds before the boss gets away', min: 10, max: 3600, step: 5 },
-      { key: 'bossCooldownSeconds', label: 'Pet cooldown', hint: 'seconds a chatter waits between their own hits', min: 0, max: 600, step: 1 },
-      { key: 'bossSpeedStart', label: 'Speed at full health', hint: '1 slow - 10 fast; angry at the start', min: 1, max: 10, step: 1 },
-      { key: 'bossSpeedEnd', label: 'Speed at 1 life left', hint: '1 slow - 10 fast; calm at the end', min: 1, max: 10, step: 1 }
+    // One tuning group per animation style, matching the overlay's movers.
+    var FLOOF_ANIM = [
+      { style: 'pingpong', blurb: 'Drifts in a straight line and bounces off the padded edges.', fields: [
+        { key: 'speed', label: 'Drift speed', hint: '1 slow - 10 fast', min: 1, max: 10, step: 1 }
+      ] },
+      { style: 'roll', blurb: 'Trundles along the bottom edge like a tyre, rotating as it travels.', fields: [
+        { key: 'rollSpeed', label: 'Roll speed', hint: '1 slow - 10 fast', min: 1, max: 10, step: 1 }
+      ] },
+      { style: 'hop', blurb: 'Bounds left and right in arcs, sitting still between hops.', fields: [
+        { key: 'hopDistance', label: 'Hop distance', hint: 'pixels covered per hop', min: 40, max: 1200, step: 10 },
+        { key: 'hopHeight', label: 'Hop height', hint: 'pixels at the top of the arc', min: 10, max: 600, step: 10 },
+        { key: 'hopSeconds', label: 'Hop duration', hint: 'seconds in the air', min: 0.2, max: 3, step: 0.1 },
+        { key: 'hopDelaySeconds', label: 'Rest between hops', hint: 'seconds sat still', min: 0, max: 5, step: 0.1 }
+      ] },
+      { style: 'peek', blurb: 'Pops up from random spots along the bottom edge, then ducks away again.', fields: [
+        { key: 'peekHeight', label: 'Peek height', hint: 'pixels it rises above the edge', min: 16, max: 400, step: 4 },
+        { key: 'peekRiseSeconds', label: 'Slide time', hint: 'seconds to rise (and to duck)', min: 0.1, max: 3, step: 0.1 },
+        { key: 'peekHoldSeconds', label: 'Peek duration', hint: 'seconds spent looking around', min: 0.2, max: 15, step: 0.1 },
+        { key: 'peekDelaySeconds', label: 'Hidden between peeks', hint: 'seconds out of sight', min: 0, max: 10, step: 0.1 }
+      ] },
+      { style: 'ghost', blurb: 'Fades in and out on the spot, wagging, without travelling.', fields: [
+        { key: 'ghostFadeSeconds', label: 'Fade time', hint: 'seconds to fade in (and out)', min: 0.2, max: 5, step: 0.1 },
+        { key: 'ghostHoldSeconds', label: 'Visible for', hint: 'seconds at full opacity', min: 0.2, max: 10, step: 0.1 },
+        { key: 'ghostDelaySeconds', label: 'Hidden between', hint: 'seconds invisible', min: 0, max: 10, step: 0.1 },
+        { key: 'ghostWagDegrees', label: 'Wag amount', hint: 'degrees either side', min: 0, max: 45, step: 1 },
+        { key: 'ghostWagSeconds', label: 'Wag speed', hint: 'seconds per full wag', min: 0.2, max: 5, step: 0.1 }
+      ] }
     ];
     var FLOOF_PAD = [
       { key: 'padLeft', label: 'Left' }, { key: 'padRight', label: 'Right' },
       { key: 'padTop', label: 'Top' }, { key: 'padBottom', label: 'Bottom' }
     ];
+    var floofData = null;
+
+    function floofField(f, cfg) {
+      return '<label class="field"><span>' + esc(f.label) + '</span>' +
+        '<input type="number" id="fl-' + f.key + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+        '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
+    }
+
+    function styleLabel(id) {
+      return (floofData && floofData.styleLabels && floofData.styleLabels[id]) || id;
+    }
 
     async function renderFloof() {
       document.getElementById('init-user-btn').style.display = 'none';
-      document.getElementById('admin-sub').textContent = 'Pet the Floof — timing, movement, and the floof photo library.';
+      document.getElementById('admin-sub').textContent = 'Pet the Floof — timing, animation styles, and the floof photo library.';
       var main = document.getElementById('admin-main');
       main.innerHTML = '<h2>Pet the Floof</h2><p class="muted">Loading…</p>';
       try {
-        var d = await api('GET', '/api/admin/floof');
-        var c = d.config || {};
-        var imgs = d.images || [];
-
-        var nums = FLOOF_NUM.map(function (f) {
-          return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
-            '<label style="flex:0 0 11rem">' + esc(f.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(f.hint) + ')</span></label>' +
-            '<input type="number" data-fcfg="' + f.key + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:9rem" /></div>';
-        }).join('');
-        var pads = FLOOF_PAD.map(function (f) {
-          return '<div style="display:flex; flex-direction:column; gap:.2rem">' +
-            '<label class="muted" style="font-size:.8rem">' + esc(f.label) + '</label>' +
-            '<input type="number" data-fcfg="' + f.key + '" min="0" max="800" step="1" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:100%" /></div>';
-        }).join('');
-        var bossNums = FLOOF_BOSS.map(function (f) {
-          return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
-            '<label style="flex:0 0 11rem">' + esc(f.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(f.hint) + ')</span></label>' +
-            '<input type="number" data-fcfg="' + f.key + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" value="' + (c[f.key] != null ? c[f.key] : 0) + '" style="width:9rem" /></div>';
-        }).join('');
-        var taunts = (d.taunts || []);
-        var tauntRows = taunts.length
-          ? taunts.map(function (t) {
-              return '<span class="chip">' + esc(t) + ' <button title="remove" data-ftaunt="' + esc(t) + '">×</button></span>';
-            }).join('')
-          : '<span class="muted">No taunts yet — the floof will stay quiet.</span>';
-        var gallery = imgs.length
-          ? imgs.map(function (im) {
-              return '<div class="floof-card">' +
-                '<img src="' + esc(im.url) + '" alt="' + esc(im.name) + '" />' +
-                '<div class="muted" style="font-size:.74rem; word-break:break-all">' + esc(im.name) + '</div>' +
-                '<label class="muted" style="display:inline-flex; align-items:center; gap:.3rem; font-size:.76rem">' +
-                  '<input type="checkbox" data-fboss="' + esc(im.name) + '"' + (im.boss ? ' checked' : '') + ' /> Boss only</label>' +
-                '<button type="button" class="danger" data-fdel="' + esc(im.name) + '">Delete</button></div>';
-            }).join('')
-          : '<span class="muted">No floofs uploaded yet. Add a square PNG to get started.</span>';
-
-        main.innerHTML = '<h2>Pet the Floof</h2>' +
-          '<p class="muted">A floof drifts across the overlay and the first chatter to type <code>!pet</code> wins. Add the <strong>Pet the Floof</strong> overlay (1600×200, bottom-right) from the Overlays section.</p>' +
-          '<div class="card" style="margin:0 0 1rem"><div class="row"><div><strong>Enable the game</strong>' +
-            '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div>' +
-            '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
-          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Timing</h3>' + nums +
-            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">With the defaults a floof appears every 16–24 minutes.</p></div>' +
-          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Movement</h3>' +
-            '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
-              '<label style="flex:0 0 11rem">Speed <span class="muted" style="font-size:.76rem">(1 slow – 10 fast)</span></label>' +
-              '<input type="range" data-fcfg="speed" min="1" max="10" step="1" value="' + (c.speed != null ? c.speed : 5) + '" style="flex:1; accent-color:var(--pink)">' +
-              '<span class="muted" id="floof-speed-val" style="flex:0 0 2em; text-align:right"></span></div>' +
-            '<h4 style="margin:.9rem 0 .3rem; font-size:.9rem">Edge padding <span class="muted" style="font-weight:400; font-size:.78rem">(pixels kept clear so the floof never clips an edge)</span></h4>' +
-            '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem">' + pads + '</div></div>' +
-          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Boss Floof battles</h3>' +
-            '<p class="muted" style="font-size:.85rem; margin:0 0 .4rem">A boss needs the whole chat. Each <code>!pet</code> takes one point off its life; a chatter can hit again once their cooldown is up. It charges around while healthy and calms down as it weakens. Boss photos are the ones ticked <strong>Boss only</strong> below.</p>' +
-            bossNums + '</div>' +
-          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Taunts</h3>' +
-            '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Shown in the speech bubble when a floof goes unpet. One is picked at random each time (never the same line twice in a row).</p>' +
-            '<div class="chips" id="floof-taunts">' + tauntRows + '</div>' +
-            '<div class="rowline" style="margin-top:.85rem"><input type="text" id="floof-taunt-new" maxlength="120" placeholder="add a taunt" style="flex:1" />' +
-            '<button type="button" class="pink" id="floof-taunt-add">Add</button></div></div>' +
-          '<div class="card" style="margin:0 0 1rem"><div class="rowline" style="gap:.8rem; align-items:center">' +
-            '<button type="button" class="pink" id="floof-save">Save settings</button>' +
-            '<button type="button" class="pink" id="floof-fire">Fire a floof now</button>' +
-            '<button type="button" class="pink" id="floof-boss">Fire a BOSS now</button>' +
-            '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
-            '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">Firing works even when the game is disabled or the stream is offline. ' +
-            '<strong>Simulate !pet</strong> stands in for a chatter: click it once to play the normal win, or repeatedly to chip a boss\u2019s life down to a defeat. ' +
-            'It never records a win, so the scoreboard stays clean.</p>' +
-            '<div class="toast" id="floof-toast"></div></div>' +
-          '<div class="card" style="margin:0 0 1rem"><h3 style="margin:0 0 .5rem">Floof photos</h3>' +
-            '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Square PNGs only (rendered at 128×128). Max ' + Math.floor((d.maxBytes || 0) / 1024 / 1024) + 'MB each.</p>' +
-            '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="floof-file" accept="image/png" />' +
-            '<button type="button" class="pink" id="floof-upload">Upload</button></div>' +
-            '<div class="floof-grid" style="margin-top:.9rem">' + gallery + '</div></div>';
-
-        // Inject the gallery styles once.
-        if (!document.getElementById('floof-css')) {
-          var st = document.createElement('style'); st.id = 'floof-css';
-          st.textContent = '.floof-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(8rem,1fr));gap:.7rem}'
-            + '.floof-card{display:flex;flex-direction:column;gap:.35rem;align-items:center;background:var(--bg);'
-            + 'border:1px solid var(--border);border-radius:10px;padding:.6rem}'
-            + '.floof-card img{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#0008}';
-          document.head.appendChild(st);
-        }
-
-        function showSpeed() {
-          var r = document.querySelector('[data-fcfg="speed"]');
-          document.getElementById('floof-speed-val').textContent = r ? r.value : '';
-        }
-        showSpeed();
-        var sp = document.querySelector('[data-fcfg="speed"]');
-        if (sp) sp.oninput = showSpeed;
-
-        function collect() {
-          var out = { enabled: document.getElementById('floof-enabled').checked };
-          Array.prototype.forEach.call(document.querySelectorAll('[data-fcfg]'), function (i) {
-            out[i.getAttribute('data-fcfg')] = Number(i.value);
-          });
-          return out;
-        }
-        document.getElementById('floof-save').onclick = function () {
-          api('POST', '/api/admin/floof', { config: collect() })
-            .then(function () { toast('floof-toast', 'Settings saved.', true); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        document.getElementById('floof-fire').onclick = function () {
-          api('POST', '/api/admin/floof/fire', {})
-            .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        document.getElementById('floof-boss').onclick = function () {
-          api('POST', '/api/admin/floof/boss', {})
-            .then(function () { toast('floof-toast', 'A BOSS FLOOF APPROACHES!', true); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        document.getElementById('floof-taunt-add').onclick = function () {
-          var inp = document.getElementById('floof-taunt-new');
-          api('POST', '/api/admin/floof/taunt', { text: inp.value })
-            .then(function () { inp.value = ''; toast('floof-toast', 'Taunt added.', true); renderFloof(); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        Array.prototype.forEach.call(document.querySelectorAll('[data-ftaunt]'), function (b) {
-          b.onclick = function () {
-            api('POST', '/api/admin/floof/taunt', { text: b.getAttribute('data-ftaunt'), remove: true })
-              .then(function () { toast('floof-toast', 'Taunt removed.', true); renderFloof(); })
-              .catch(function (e) { toast('floof-toast', e.message, false); });
-          };
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-fboss]'), function (cb) {
-          cb.onchange = function () {
-            api('POST', '/api/admin/floof/image/boss', { name: cb.getAttribute('data-fboss'), boss: cb.checked })
-              .then(function () { toast('floof-toast', cb.checked ? 'Marked as a boss photo.' : 'Back to a normal floof.', true); })
-              .catch(function (e) { cb.checked = !cb.checked; toast('floof-toast', e.message, false); });
-          };
-        });
-        document.getElementById('floof-sim').onclick = function () {
-          api('POST', '/api/admin/floof/simulate-pet', {})
-            .then(function () { toast('floof-toast', 'Simulated a !pet (not scored).', true); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        document.getElementById('floof-upload').onclick = function () {
-          var inp = document.getElementById('floof-file');
-          var file = inp.files && inp.files[0];
-          if (!file) { toast('floof-toast', 'Choose a PNG first.', false); return; }
-          // Raw binary body — no multipart parsing needed on the server.
-          fetch('/api/admin/floof/image?name=' + encodeURIComponent(file.name), {
-            method: 'POST', credentials: 'same-origin', body: file
-          }).then(function (r) {
-            if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
-            return r.json();
-          }).then(function () { toast('floof-toast', 'Uploaded.', true); renderFloof(); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-        Array.prototype.forEach.call(document.querySelectorAll('[data-fdel]'), function (b) {
-          b.onclick = function () {
-            api('POST', '/api/admin/floof/image/delete', { name: b.getAttribute('data-fdel') })
-              .then(function () { toast('floof-toast', 'Deleted.', true); renderFloof(); })
-              .catch(function (e) { toast('floof-toast', e.message, false); });
-          };
-        });
+        floofData = await api('GET', '/api/admin/floof');
       } catch (e) {
         main.innerHTML = '<h2>Pet the Floof</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
+        return;
       }
+      var c = floofData.config;
+      var styles = floofData.styles || [];
+
+      // Photos as a table: one row each, with a checkbox per animation style.
+      var colspan = styles.length + 4;
+      var photoRows = (floofData.images || []).length
+        ? '<table class="floof-table"><thead><tr><th></th><th>Photo</th>' +
+            styles.map(function (s) { return '<th class="mid">' + esc(styleLabel(s)) + '</th>'; }).join('') +
+            '<th class="mid">Taunts</th><th></th></tr></thead><tbody>' +
+          floofData.images.map(function (im, idx) {
+            var none = !(im.styles || []).length;
+            var taunts = im.taunts || [];
+            return '<tr' + (none ? ' class="shelved"' : '') + '>' +
+              '<td><img src="' + esc(im.url) + '" alt="" /></td>' +
+              '<td class="nm">' + esc(im.name) +
+                (none ? '<div class="muted" style="font-size:.75rem">never spawns — no animations enabled</div>' : '') +
+                (taunts.length ? '' : '<div class="muted" style="font-size:.75rem">stays silent — no taunts</div>') + '</td>' +
+              styles.map(function (s) {
+                return '<td class="mid"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
+                  ((im.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /></td>';
+              }).join('') +
+              '<td class="mid"><button type="button" class="pink" data-ftoggle="ft-' + idx + '">' +
+                taunts.length + '</button></td>' +
+              '<td class="mid"><button type="button" class="pink" data-fdel="' + esc(im.name) + '">Delete</button></td>' +
+            '</tr>' +
+            // Editor for this floof's own lines, folded away until asked for.
+            '<tr class="taunt-row hidden" id="ft-' + idx + '"><td colspan="' + colspan + '">' +
+              '<div class="muted" style="font-size:.8rem; margin:0 0 .5rem">Speech-bubble lines for <strong>' + esc(im.name) +
+              '</strong>. One is picked at random each time it goes unpet (never the same line twice running). Remove them all to keep this floof quiet.</div>' +
+              '<div class="chips">' + (taunts.length
+                ? taunts.map(function (t) {
+                    return '<span class="chip">' + esc(t) + '<button type="button" class="chip-x" data-ftaunt="' + esc(t) +
+                      '" data-fname="' + esc(im.name) + '" aria-label="Remove">×</button></span>';
+                  }).join('')
+                : '<span class="muted">none</span>') + '</div>' +
+              '<div class="rowline" style="margin-top:.6rem"><input type="text" maxlength="120" placeholder="add a taunt" data-ftnew="' + esc(im.name) + '" style="flex:1" />' +
+              '<button type="button" class="pink" data-ftadd="' + esc(im.name) + '">Add</button></div>' +
+            '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<span class="muted">No floofs uploaded yet. Add a square PNG to get started.</span>';
+
+      var spawnPicker = '<select id="fl-pick-image"><option value="">Random floof</option>' +
+        (floofData.images || []).map(function (im) {
+          return '<option value="' + esc(im.name) + '">' + esc(im.name) + '</option>';
+        }).join('') + '</select>' +
+        '<select id="fl-pick-style"><option value="">Random animation</option>' +
+        styles.map(function (s) { return '<option value="' + esc(s) + '">' + esc(styleLabel(s)) + '</option>'; }).join('') +
+        '</select>';
+
+      main.innerHTML = '<h2>Pet the Floof</h2>' +
+        '<p class="muted">A floof appears on the overlay and the first chatter to type <code>!pet</code> wins. Each spawn picks a random photo <em>and</em> a random animation style. Add the <strong>Pet the Floof</strong> overlay from the Overlays section as a Browser Source.</p>' +
+
+        // Actions first, so the buttons you reach for most are at the top.
+        '<div class="card"><div class="rowline" style="gap:.6rem; flex-wrap:wrap; align-items:center">' +
+          '<button type="button" class="pink" id="floof-save">Save settings</button>' +
+          '<button type="button" class="pink" id="floof-fire">Spawn Floof</button>' + spawnPicker +
+          '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Spawn Floof</strong> ignores the enable switch and the live check, so you can test any time. <strong>Simulate !pet</strong> plays the win animation without recording a win.</p>' +
+          '<div class="toast" id="floof-toast"></div></div>' +
+
+        '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
+          '<div><strong>Game enabled</strong>' +
+          '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div>' +
+          '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Timing</h3>' +
+          '<div class="grid-fields">' + FLOOF_TIMING.map(function (f) { return floofField(f, c); }).join('') + '</div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.5rem 0 0">With the defaults a floof appears every 16–24 minutes.</p></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Animation styles</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .9rem">One style is picked at random per spawn, from the ones the chosen photo allows.</p>' +
+          FLOOF_ANIM.map(function (g) {
+            return '<div class="anim-group"><h4>' + esc(styleLabel(g.style)) + '</h4>' +
+              '<p class="muted" style="font-size:.8rem; margin:0 0 .5rem">' + esc(g.blurb) + '</p>' +
+              '<div class="grid-fields">' + g.fields.map(function (f) { return floofField(f, c); }).join('') + '</div></div>';
+          }).join('') + '</div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Edge padding</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Pixels kept clear so the floof never clips an edge. Padding also feathers the win effects that cross it, instead of hard-clipping them.</p>' +
+          '<div class="grid-fields">' + FLOOF_PAD.map(function (f) {
+            return '<label class="field"><span>' + esc(f.label) + '</span>' +
+              '<input type="number" id="fl-' + f.key + '" value="' + c[f.key] + '" min="0" max="800" step="2" /></label>';
+          }).join('') + '</div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Floof photos</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Square PNGs up to ' + Math.floor(floofData.maxBytes / 1048576) + 'MB, rendered at 128×128. Untick an animation to stop a photo using it — handy when a pose only reads well one way. A photo with none ticked is never spawned at random. Each floof also has <strong>its own taunts</strong>: hit the number in the Taunts column to edit them.</p>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="floof-file" accept="image/png" />' +
+          '<button type="button" class="pink" id="floof-upload">Upload</button></div>' +
+          '<div style="margin-top:.9rem; overflow-x:auto">' + photoRows + '</div></div>';
+
+      injectFloofCss();
+
+      function collect() {
+        var out = { enabled: document.getElementById('floof-enabled').checked };
+        var all = FLOOF_TIMING.concat(FLOOF_PAD);
+        FLOOF_ANIM.forEach(function (g) { all = all.concat(g.fields); });
+        all.forEach(function (f) { out[f.key] = Number(document.getElementById('fl-' + f.key).value); });
+        return out;
+      }
+
+      document.getElementById('floof-save').onclick = function () {
+        api('POST', '/api/admin/floof', { config: collect() })
+          .then(function () { toast('floof-toast', 'Settings saved.', true); })
+          .catch(function (e) { toast('floof-toast', e.message, false); });
+      };
+      document.getElementById('floof-fire').onclick = function () {
+        var image = document.getElementById('fl-pick-image').value;
+        var style = document.getElementById('fl-pick-style').value;
+        api('POST', '/api/admin/floof/fire', { image: image, style: style })
+          .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
+          .catch(function (e) { toast('floof-toast', e.message, false); });
+      };
+      document.getElementById('floof-sim').onclick = function () {
+        api('POST', '/api/admin/floof/simulate-pet', {})
+          .then(function () { toast('floof-toast', 'Simulated a !pet (not scored).', true); })
+          .catch(function (e) { toast('floof-toast', e.message, false); });
+      };
+      // Per-floof taunts: show/hide the editor, then add/remove lines on that floof.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-ftoggle]'), function (b) {
+        b.onclick = function () {
+          var row = document.getElementById(b.getAttribute('data-ftoggle'));
+          if (row) row.classList.toggle('hidden');
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-ftadd]'), function (b) {
+        var name = b.getAttribute('data-ftadd');
+        var inp = document.querySelector('[data-ftnew="' + name + '"]');
+        var add = function () {
+          api('POST', '/api/admin/floof/taunt', { name: name, text: inp.value })
+            .then(function () { toast('floof-toast', 'Taunt added to ' + name + '.', true); renderFloof(); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        b.onclick = add;
+        inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); add(); } };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-ftaunt]'), function (b) {
+        b.onclick = function () {
+          var name = b.getAttribute('data-fname');
+          api('POST', '/api/admin/floof/taunt', { name: name, text: b.getAttribute('data-ftaunt'), remove: true })
+            .then(function () { toast('floof-toast', 'Taunt removed from ' + name + '.', true); renderFloof(); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-fstyle]'), function (cb) {
+        cb.onchange = function () {
+          var name = cb.getAttribute('data-fname');
+          api('POST', '/api/admin/floof/image/style', { name: name, style: cb.getAttribute('data-fstyle'), on: cb.checked })
+            .then(function (d) {
+              // Re-render only if this photo just became (or stopped being) shelved.
+              var row = cb.closest('tr');
+              var none = !(d.styles || []).length;
+              if (row) row.classList.toggle('shelved', none);
+              toast('floof-toast', 'Animations updated for ' + name + '.', true);
+              if (none || (d.styles || []).length === 1) renderFloof();
+            })
+            .catch(function (e) { cb.checked = !cb.checked; toast('floof-toast', e.message, false); });
+        };
+      });
+      document.getElementById('floof-upload').onclick = function () {
+        var inp = document.getElementById('floof-file');
+        var file = inp.files && inp.files[0];
+        if (!file) { toast('floof-toast', 'Choose a PNG first.', false); return; }
+        // Raw binary body — no multipart parsing needed on the server.
+        fetch('/api/admin/floof/image?name=' + encodeURIComponent(file.name), {
+          method: 'POST', credentials: 'same-origin', body: file
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function () { toast('floof-toast', 'Uploaded.', true); renderFloof(); })
+          .catch(function (e) { toast('floof-toast', e.message, false); });
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-fdel]'), function (b) {
+        b.onclick = function () {
+          api('POST', '/api/admin/floof/image/delete', { name: b.getAttribute('data-fdel') })
+            .then(function () { toast('floof-toast', 'Deleted.', true); renderFloof(); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+      });
+    }
+
+    function injectFloofCss() {
+      if (document.getElementById('floof-css')) return;
+      var st = document.createElement('style');
+      st.id = 'floof-css';
+      st.textContent = '.floof-table{width:100%;border-collapse:collapse;font-size:.9rem}'
+        + '.floof-table th{text-align:left;font-size:.78rem;color:var(--muted);font-weight:600;padding:.3rem .5rem;white-space:nowrap}'
+        + '.floof-table th.mid,.floof-table td.mid{text-align:center}'
+        + '.floof-table td{padding:.35rem .5rem;border-top:1px solid var(--line);vertical-align:middle}'
+        + '.floof-table img{width:52px;height:52px;object-fit:cover;border-radius:8px;background:#0008;display:block}'
+        + '.floof-table td.nm{font-weight:600;word-break:break-all;min-width:9rem}'
+        + '.floof-table tr.shelved td.nm,.floof-table tr.shelved img{opacity:.5}'
+        + '.floof-table tr.taunt-row.hidden{display:none}'
+        + '.floof-table tr.taunt-row td{background:var(--bg);border-top:0;padding:.2rem .6rem .8rem}'
+        + '.anim-group{border-top:1px solid var(--line);padding:.8rem 0 .2rem}'
+        + '.anim-group:first-of-type{border-top:0;padding-top:0}'
+        + '.anim-group h4{margin:0 0 .2rem;font-size:.92rem}'
+        + '@media (max-width:640px){.floof-table th,.floof-table td{padding:.3rem .25rem}'
+        + '.floof-table img{width:40px;height:40px}.floof-table td.nm{min-width:6rem;font-size:.82rem}}';
+      document.head.appendChild(st);
     }
 
 

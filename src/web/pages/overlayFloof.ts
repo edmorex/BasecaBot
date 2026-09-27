@@ -1,21 +1,33 @@
 /**
  * OBS browser-source overlay for "Pet the Floof".
  *
- * A standalone, transparent strip that ADAPTS to whatever size the Browser Source
- * is set to (1600×200 is just the suggested layout). It reads a read-only
- * `?token=` and subscribes to the `floof` WebSocket-hub room:
- *   spawn   -> fade a floof in and start it ping-ponging + rocking
+ * A standalone, transparent surface that ADAPTS to whatever size the Browser
+ * Source is set to. It reads a read-only `?token=` and subscribes to the `floof`
+ * WebSocket-hub room:
+ *   spawn   -> fade a floof in and run the movement style the bot picked
  *   pet     -> stop, bloom pink, resolve into a heart, fade out
  *   despawn -> nobody pet it in time; just fade out
  *
+ * Five movement styles, chosen per spawn by the bot (each photo can opt out of
+ * any of them in the admin panel):
+ *   pingpong  drifts and bounces off the padded edges
+ *   roll      trundles along the floor like a tyre, rotating as it travels
+ *   hop       bounds left and right in arcs, resting between hops
+ *   peek      pops up from random spots along the bottom edge, then ducks away
+ *   ghost     fades in and out on the spot, wagging, without travelling
+ *
+ * Each style is a small object with start/step, so the animation loop itself
+ * knows nothing about any particular behaviour.
+ *
  * Padding values (set in the admin panel) do two things: they inset the travel
- * area the floof bounces inside, AND they define a feather band. Everything is
+ * area the floof moves inside, AND they define a feather band. Everything is
  * drawn through a mask that is fully opaque inside the padded area and ramps to
  * transparent at the real render edge — so the win effects (which bloom well past
  * the floof's own box) fade out instead of hard-clipping in the final composite.
  *
  * Self-contained (inline CSS/JS, no bundler); because this string is a template
- * literal, the embedded script uses plain concatenation and avoids `${` / backticks.
+ * literal, the embedded script uses plain concatenation and avoids dollar-brace
+ * and backtick characters.
  */
 export function floofOverlayPage(): string {
   return `<!doctype html>
@@ -74,54 +86,6 @@ export function floofOverlayPage(): string {
   /* ...and swaps to the bubble's right edge when it sits to the floof's LEFT. */
   #bubble.flip::after{ left:auto; right:-9px; border-right-color:transparent; border-left-color:#fff; }
   #bubble.show{ opacity:1; }
-
-  /* ── Boss battle ───────────────────────────────────────────────────────── */
-  /* Full-width flashing red alert that precedes a boss. */
-  #alert{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    text-align:center; font-weight:900; letter-spacing:.06em; color:#fff;
-    font-size:clamp(28px, 7vh, 72px); text-shadow:0 0 18px #f00, 0 3px 10px rgba(0,0,0,.9);
-    background:radial-gradient(ellipse at center, rgba(190,0,0,.55), rgba(120,0,0,0) 70%); }
-  #alert.go{ display:flex; animation:alertFlash .55s steps(1,end) infinite; }
-  @keyframes alertFlash{ 0%,49%{ opacity:1; } 50%,100%{ opacity:.25; } }
-  /* Boss floofs get an aura that cools from red -> yellow -> green as their life
-     drains (the exact colour is set inline by setBossGlow). */
-  #floof.boss img{ filter:drop-shadow(0 0 16px #ff2d2d) drop-shadow(0 0 40px #b00) saturate(1.3);
-    transition:filter .45s ease; }
-  /* Chat's progress against the boss, pinned under it. */
-  #hp{ position:absolute; left:0; top:0; width:128px; opacity:0; transition:opacity .3s ease;
-    font:800 15px system-ui,sans-serif; color:#fff; text-align:center;
-    text-shadow:0 2px 5px rgba(0,0,0,.9); }
-  #hp.show{ opacity:1; }
-  #hp .track{ height:9px; border-radius:5px; background:rgba(0,0,0,.6);
-    border:1px solid rgba(255,255,255,.35); overflow:hidden; margin-top:3px; }
-  /* Boss life: starts full and drains as chat lands hits. */
-  #hp .fill{ height:100%; width:100%; background:linear-gradient(90deg,#3fb950,#7ee787);
-    transition:width .3s ease, background .3s ease; }
-  /* Shake lives on an INNER element: #hp itself carries the positioning
-     transform, and an animation on it would fight that and snap the bar to 0,0. */
-  #hp-inner.shake{ animation:hpShake .34s ease; }
-  @keyframes hpShake{
-    0%,100%{ transform:translateX(0); }
-    15%{ transform:translateX(-5px); } 35%{ transform:translateX(4px); }
-    55%{ transform:translateX(-3px); } 75%{ transform:translateX(2px); }
-  }
-  /* Damage / miss numbers that float off the bar, like a game. */
-  .float{ position:absolute; font:900 24px system-ui,sans-serif; pointer-events:none;
-    text-shadow:0 2px 6px rgba(0,0,0,.95); animation:floatUp 1s ease-out forwards; }
-  .float.hit{ color:#ff3b3b; }
-  .float.miss{ color:#b9b9c2; font-size:19px; letter-spacing:.06em; }
-  @keyframes floatUp{
-    0%{ opacity:0; transform:translate(-50%, 6px) scale(.8); }
-    18%{ opacity:1; transform:translate(-50%, 0) scale(1.15); }
-    100%{ opacity:0; transform:translate(-50%, -38px) scale(1); }
-  }
-  /* Mocking line after the boss gets away. */
-  #escape{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    text-align:center; font-weight:900; color:#ff5a5a; font-size:clamp(24px, 6vh, 60px);
-    text-shadow:0 0 16px #900, 0 3px 10px rgba(0,0,0,.9); }
-  #escape.go{ display:flex; animation:escapeFade 3.2s ease forwards; }
-  @keyframes escapeFade{ 0%{ opacity:0; transform:scale(.9); } 18%{ opacity:1; transform:scale(1.04); }
-    70%{ opacity:1; } 100%{ opacity:0; transform:scale(1.02); } }
 </style>
 </head>
 <body>
@@ -130,9 +94,6 @@ export function floofOverlayPage(): string {
     <div id="burst"></div>
     <div id="heart">💖</div>
     <div id="bubble"></div>
-    <div id="hp"><div id="hp-inner"><span id="hp-text"></span><div class="track"><div class="fill" id="hp-fill"></div></div></div></div>
-    <div id="alert">A BOSS FLOOF APPROACHES!</div>
-    <div id="escape">FAILURE! BOSS FLOOF ESCAPED!</div>
   </div>
 <script>
 (function(){
@@ -141,12 +102,14 @@ export function floofOverlayPage(): string {
 
   // The source can be any size — read it from the viewport and re-read on resize.
   var W = 0, H = 0, SIZE = 128;
-  // Taunt lines are configured in the admin panel and arrive with each spawn.
-  var TAUNTS = ['!pet me', 'i can haz !pet?', 'i wants !pet'];
+  // Each floof carries its OWN taunt lines, which arrive with the spawn. An empty
+  // list is meaningful: that floof stays silent.
+  var TAUNTS = [];
   var IDLE_MS = 10000;      // unpet time before a taunt
   var BUBBLE_MS = 2500;     // how long the bubble stays up
   var ROCK_DEG = 9;         // happy wiggle amplitude
   var ROCK_HZ = 1.6;
+  var PET_MS = 7600;        // full win sequence before the stage is torn down
 
   var stage = document.getElementById('stage');
   var el = document.getElementById('floof');
@@ -154,18 +117,11 @@ export function floofOverlayPage(): string {
   var heart = document.getElementById('heart');
   var burst = document.getElementById('burst');
   var bubble = document.getElementById('bubble');
-  var PET_MS = 7600;   // full win sequence before the stage is torn down
   var lastTaunt = -1;  // so the bubble never shows the same line twice running
   var pad = { left: 0, right: 0, top: 0, bottom: 0 };
   var bubbleW = 0, bubbleH = 0, bubbleFlipped = null;
-  var isBoss = false;
-  var alertEl = document.getElementById('alert');
-  var escapeEl = document.getElementById('escape');
-  var hp = document.getElementById('hp');
-  var hpInner = document.getElementById('hp-inner');
-  var hpText = document.getElementById('hp-text');
-  var hpFill = document.getElementById('hp-fill');
-  var bossNeeded = 1, bossSpeedStart = 9, bossSpeedEnd = 2;
+  // Animation tuning for every style, replaced wholesale by each spawn.
+  var anim = {};
 
   function syncSize(){
     W = document.documentElement.clientWidth || window.innerWidth || 0;
@@ -181,15 +137,15 @@ export function floofOverlayPage(): string {
   function applyMask(){
     var h = 'linear-gradient(to right, transparent 0px, #000 ' + pad.left + 'px, #000 calc(100% - ' + pad.right + 'px), transparent 100%)';
     var v = 'linear-gradient(to bottom, transparent 0px, #000 ' + pad.top + 'px, #000 calc(100% - ' + pad.bottom + 'px), transparent 100%)';
-    var img = h + ', ' + v;
-    stage.style.webkitMaskImage = img;
-    stage.style.maskImage = img;
+    var m = h + ', ' + v;
+    stage.style.webkitMaskImage = m;
+    stage.style.maskImage = m;
     // Intersect the two so corners feather on both axes.
     stage.style.webkitMaskComposite = 'source-in';
     stage.style.maskComposite = 'intersect';
   }
 
-  var state = null;         // { x, y, vx, vy, pad } while a floof is on screen
+  var state = null;         // position + per-style scratch while a floof is on screen
   var raf = null, lastT = 0, idleTimer = null, bubbleTimer = null, paused = false;
 
   function clearTimers(){
@@ -209,6 +165,12 @@ export function floofOverlayPage(): string {
 
   // Speed slider (1..10) -> pixels/second.
   function pxPerSec(speed){ var s = Math.max(1, Math.min(10, Number(speed) || 5)); return 30 + s * 26; }
+  function rand(lo, hi){ return lo + Math.random() * Math.max(0, hi - lo); }
+  function num(v, fallback){ var n = Number(v); return isFinite(n) ? n : fallback; }
+  /** Ease-out cubic, for the peek slide. */
+  function ease(p){ var q = 1 - p; return 1 - q * q * q; }
+  /** The happy wiggle shared by a few of the styles. */
+  function rock(){ return Math.sin(performance.now() / 1000 * Math.PI * 2 * ROCK_HZ) * ROCK_DEG; }
 
   function bounds(){
     var b = {
@@ -221,9 +183,191 @@ export function floofOverlayPage(): string {
     return b;
   }
 
+  // ── Movement styles ───────────────────────────────────────────────────────
+  // Each has start(b, a) to place itself and step(dt, b, a) to advance one frame,
+  // writing x / y / rot (and opacity, for the ghost) onto state.
+  //   pausable  - whether stopping to taunt should freeze it. Peek and ghost run
+  //               their own appear/disappear cycles, which look broken frozen.
+  //   grounded  - whether the resize clamp may pull it back inside the travel
+  //               area. Peek deliberately sits BELOW it while hidden.
+
+  function beginHop(b, a){
+    state.hopPhase = 'air';
+    state.hopT = 0;
+    state.hopFrom = state.x;
+    var target = state.x + state.hopDir * Math.max(10, num(a.hopDistance, 220));
+    // Turn round at the edges rather than piling into them.
+    if(target < b.minX || target > b.maxX){
+      state.hopDir *= -1;
+      target = state.x + state.hopDir * Math.max(10, num(a.hopDistance, 220));
+    }
+    state.hopTo = Math.max(b.minX, Math.min(b.maxX, target));
+  }
+
+  var MOVERS = {
+    pingpong: {
+      pausable: true, grounded: true,
+      start: function(b, a){
+        var sp = pxPerSec(a.speed);
+        // A shallow diagonal, in a random direction, so no two spawns match.
+        var ang = (Math.random() * 0.6 + 0.2) * Math.PI * (Math.random() < 0.5 ? 1 : -1);
+        state.x = rand(b.minX, b.maxX);
+        state.y = rand(b.minY, b.maxY);
+        state.vx = Math.cos(ang) * sp * (Math.random() < 0.5 ? 1 : -1);
+        state.vy = Math.sin(ang) * sp * 0.45;
+      },
+      step: function(dt, b){
+        state.x += state.vx * dt;
+        state.y += state.vy * dt;
+        if(state.x <= b.minX){ state.x = b.minX; state.vx = Math.abs(state.vx); }
+        if(state.x >= b.maxX){ state.x = b.maxX; state.vx = -Math.abs(state.vx); }
+        if(state.y <= b.minY){ state.y = b.minY; state.vy = Math.abs(state.vy); }
+        if(state.y >= b.maxY){ state.y = b.maxY; state.vy = -Math.abs(state.vy); }
+        state.rot = rock();
+      }
+    },
+
+    roll: {
+      pausable: true, grounded: true,
+      start: function(b, a){
+        state.x = rand(b.minX, b.maxX);
+        state.y = b.maxY;
+        state.vx = pxPerSec(a.rollSpeed) * (Math.random() < 0.5 ? 1 : -1);
+        state.rot = 0;
+      },
+      step: function(dt, b){
+        var dx = state.vx * dt;
+        state.x += dx;
+        state.y = b.maxY;                     // stays on the floor
+        if(state.x <= b.minX){ state.x = b.minX; state.vx = Math.abs(state.vx); }
+        if(state.x >= b.maxX){ state.x = b.maxX; state.vx = -Math.abs(state.vx); }
+        // Rolling without slipping: the angle turned is distance / radius, which
+        // is what makes it read as a tyre rather than a spinning sticker.
+        state.rot += (dx / (SIZE / 2)) * (180 / Math.PI);
+      }
+    },
+
+    hop: {
+      pausable: true, grounded: true,
+      start: function(b, a){
+        state.x = rand(b.minX, b.maxX);
+        state.y = b.maxY;
+        state.hopDir = Math.random() < 0.5 ? -1 : 1;
+        state.hopPhase = 'rest';              // a beat of stillness, then bound away
+        state.hopT = 0;
+        state.rot = 0;
+      },
+      step: function(dt, b, a){
+        state.hopT += dt;
+        if(state.hopPhase === 'rest'){
+          state.y = b.maxY;
+          state.rot = 0;
+          if(state.hopT >= Math.max(0, num(a.hopDelaySeconds, 0.5))) beginHop(b, a);
+          return;
+        }
+        var dur = Math.max(0.2, num(a.hopSeconds, 0.7));
+        var p = Math.min(1, state.hopT / dur);
+        state.x = state.hopFrom + (state.hopTo - state.hopFrom) * p;
+        // Never hop out of the frame: on a short overlay the configured height can
+        // exceed the headroom, so cap it at the top of the padded travel area.
+        var peak = Math.min(Math.max(0, num(a.hopHeight, 120)), b.maxY - b.minY);
+        // 4p(1-p) is a parabola peaking at exactly 1 halfway through the hop.
+        state.y = b.maxY - peak * 4 * p * (1 - p);
+        state.rot = state.hopDir * Math.sin(p * Math.PI) * 14;
+        if(p >= 1){
+          state.x = state.hopTo;
+          state.y = b.maxY;
+          state.hopPhase = 'rest';
+          state.hopT = 0;
+        }
+      }
+    },
+
+    peek: {
+      pausable: false, grounded: false,
+      start: function(b, a){
+        state.x = rand(b.minX, b.maxX);
+        state.peekPhase = 'rise';
+        state.peekT = 0;
+        state.y = peekHidden();
+        state.rot = 0;
+      },
+      step: function(dt, b, a){
+        state.peekT += dt;
+        var hidden = peekHidden();
+        var shown = hidden - Math.max(16, num(a.peekHeight, 96));
+        var rise = Math.max(0.1, num(a.peekRiseSeconds, 0.5));
+        if(state.peekPhase === 'rise'){
+          var p = Math.min(1, state.peekT / rise);
+          state.y = hidden + (shown - hidden) * ease(p);
+          state.rot = 0;
+          if(p >= 1){ state.peekPhase = 'hold'; state.peekT = 0; }
+        } else if(state.peekPhase === 'hold'){
+          state.y = shown;
+          state.rot = rock() * 0.6;           // a gentler wiggle while it watches
+          if(state.peekT >= Math.max(0.2, num(a.peekHoldSeconds, 2.5))){ state.peekPhase = 'drop'; state.peekT = 0; }
+        } else if(state.peekPhase === 'drop'){
+          var q = Math.min(1, state.peekT / rise);
+          state.y = shown + (hidden - shown) * ease(q);
+          state.rot = 0;
+          if(q >= 1){ state.peekPhase = 'wait'; state.peekT = 0; }
+        } else {
+          state.y = hidden;
+          if(state.peekT >= Math.max(0, num(a.peekDelaySeconds, 0.8))){
+            state.x = rand(b.minX, b.maxX);   // somewhere new
+            state.peekPhase = 'rise';
+            state.peekT = 0;
+          }
+        }
+      }
+    },
+
+    ghost: {
+      pausable: false, grounded: true,
+      start: function(b, a){
+        state.x = rand(b.minX, b.maxX);
+        state.y = rand(b.minY, b.maxY);
+        state.ghostPhase = 'in';
+        state.ghostT = 0;
+        state.opacity = 0;
+      },
+      step: function(dt, b, a){
+        state.ghostT += dt;
+        var fade = Math.max(0.2, num(a.ghostFadeSeconds, 1.2));
+        var wagSec = Math.max(0.2, num(a.ghostWagSeconds, 1.4));
+        // Wags on the spot without ever travelling — that is the whole effect.
+        state.rot = Math.sin(performance.now() / 1000 * Math.PI * 2 / wagSec) * Math.max(0, num(a.ghostWagDegrees, 12));
+        if(state.ghostPhase === 'in'){
+          state.opacity = Math.min(1, state.ghostT / fade);
+          if(state.ghostT >= fade){ state.ghostPhase = 'hold'; state.ghostT = 0; state.opacity = 1; }
+        } else if(state.ghostPhase === 'hold'){
+          state.opacity = 1;
+          if(state.ghostT >= Math.max(0.2, num(a.ghostHoldSeconds, 1.6))){ state.ghostPhase = 'out'; state.ghostT = 0; }
+        } else if(state.ghostPhase === 'out'){
+          state.opacity = Math.max(0, 1 - state.ghostT / fade);
+          if(state.ghostT >= fade){ state.ghostPhase = 'wait'; state.ghostT = 0; state.opacity = 0; }
+        } else {
+          state.opacity = 0;
+          if(state.ghostT >= Math.max(0, num(a.ghostDelaySeconds, 0.6))){
+            state.x = rand(b.minX, b.maxX);
+            state.y = rand(b.minY, b.maxY);
+            state.ghostPhase = 'in';
+            state.ghostT = 0;
+          }
+        }
+      }
+    }
+  };
+
+  /** Y at which the floof sits wholly below the padded bottom edge. */
+  function peekHidden(){ return H - pad.bottom; }
+
+  function mover(){ return MOVERS[state && state.style] || MOVERS.pingpong; }
+
   function draw(){
-    var rock = paused ? 0 : Math.sin(performance.now() / 1000 * Math.PI * 2 * ROCK_HZ) * ROCK_DEG;
-    el.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px) rotate(' + rock.toFixed(2) + 'deg)';
+    el.style.transform = 'translate(' + state.x + 'px,' + state.y + 'px) rotate(' + state.rot.toFixed(2) + 'deg)';
+    // Only the ghost drives opacity directly; every other style uses the .in class.
+    if(state.opacity !== null) el.style.opacity = String(state.opacity);
 
     // Put the bubble on the side with room: floof in the right half -> bubble to
     // its LEFT, and vice versa, so the bubble is never pushed off the edge. The
@@ -239,32 +383,24 @@ export function floofOverlayPage(): string {
     bx = Math.max(0, Math.min(W - bubbleW, bx));
     by = Math.max(0, Math.min(H - bubbleH, by));
     bubble.style.transform = 'translate(' + bx + 'px,' + by + 'px)';
-    if(isBoss) hp.style.transform = 'translate(' + state.x + 'px,' + (state.y + SIZE + 6) + 'px)';
   }
 
   function loop(t){
-    if(!state){ return; }
+    if(!state) return;
     var dt = lastT ? Math.min(0.05, (t - lastT) / 1000) : 0;
     lastT = t;
-    if(!paused){
-      var b = bounds();
-      state.x += state.vx * dt;
-      state.y += state.vy * dt;
-      // Ping-pong off the padded edges.
-      if(state.x <= b.minX){ state.x = b.minX; state.vx = Math.abs(state.vx); }
-      if(state.x >= b.maxX){ state.x = b.maxX; state.vx = -Math.abs(state.vx); }
-      if(state.y <= b.minY){ state.y = b.minY; state.vy = Math.abs(state.vy); }
-      if(state.y >= b.maxY){ state.y = b.maxY; state.vy = -Math.abs(state.vy); }
-    }
+    if(!paused) mover().step(dt, bounds(), anim);
     draw();
     raf = requestAnimationFrame(loop);
   }
 
   function scheduleTaunt(){
     clearTimers();
+    if(!TAUNTS.length) return;          // this floof has nothing to say
     idleTimer = setTimeout(function(){
       if(!state) return;
-      paused = true;                                  // pause mid-drift to "speak"
+      // Styles with their own appear/disappear cycle keep moving while they talk.
+      paused = mover().pausable;
       bubble.textContent = pickTaunt();
       // Measure once now the text is set; draw() reuses it instead of forcing a
       // layout every frame.
@@ -289,16 +425,9 @@ export function floofOverlayPage(): string {
     // before disappearing. Killing the transition for this frame avoids that.
     el.style.transition = 'none';
     el.classList.remove('in', 'pet');
+    el.style.opacity = '';          // drop any ghost-driven opacity
     bubble.classList.remove('show', 'flip');
     bubbleFlipped = null;
-    isBoss = false;
-    el.classList.remove('boss');
-    img.style.filter = '';                // drop the inline boss aura
-    hpInner.classList.remove('shake');
-    Array.prototype.forEach.call(stage.querySelectorAll('.float'), function(f){ f.remove(); });
-    hp.classList.remove('show');
-    alertEl.classList.remove('go');
-    escapeEl.classList.remove('go');
     heart.classList.remove('go');
     burst.classList.remove('go');
     void el.offsetWidth;        // flush the change while the transition is off
@@ -310,149 +439,67 @@ export function floofOverlayPage(): string {
     syncSize();
     pad = (d && d.padding) || { left:0, right:0, top:0, bottom:0 };
     applyMask();
-    if(d && Array.isArray(d.taunts) && d.taunts.length) TAUNTS = d.taunts;
-    isBoss = !!(d && d.boss);
-    if(isBoss){
-      el.classList.add('boss');
-      bossNeeded = Math.max(1, Number(d.needed) || 1);
-      bossSpeedStart = Number(d.speedStart) || 9;
-      bossSpeedEnd = Number(d.speedEnd) || 2;
-      setHp(bossNeeded, bossNeeded);            // starts at full life
-      setBossGlow(bossNeeded, bossNeeded);      // ...and full anger
-      hp.classList.add('show');
+    // Always replaced, never merged — otherwise a silent floof would inherit the
+    // previous one's lines.
+    TAUNTS = (d && Array.isArray(d.taunts)) ? d.taunts : [];
+    anim = (d && d.anim) || {};
+
+    var style = (d && d.style) || 'pingpong';
+    if(!MOVERS[style]) style = 'pingpong';
+    state = { style: style, x: 0, y: 0, rot: 0, opacity: null };
+
+    var isGhost = style === 'ghost';
+    if(isGhost){
+      // The ghost owns its own opacity frame by frame, so the CSS fade would only
+      // smear it. .in is left off for the same reason.
+      el.style.transition = 'none';
+      state.opacity = 0;
     }
-    var b = bounds();
-    var speed = pxPerSec(d && d.speed);
-    // Random start + a diagonal heading, so no two spawns look the same.
-    var ang = (Math.random() * 0.6 + 0.2) * Math.PI * (Math.random() < 0.5 ? 1 : -1);
-    state = {
-      x: b.minX + Math.random() * Math.max(1, b.maxX - b.minX),
-      y: b.minY + Math.random() * Math.max(1, b.maxY - b.minY),
-      vx: Math.cos(ang) * speed * (Math.random() < 0.5 ? 1 : -1),
-      vy: Math.sin(ang) * speed * 0.45
-    };
+
+    mover().start(bounds(), anim);
     img.src = d.url;
     draw();
-    requestAnimationFrame(function(){ el.classList.add('in'); });   // fade in
-    if(isBoss) applyBossSpeed(bossNeeded);   // start fast and angry
+    if(!isGhost) requestAnimationFrame(function(){ el.classList.add('in'); });   // fade in
     raf = requestAnimationFrame(loop);
     scheduleTaunt();
-  }
-
-  /** Rescale the current heading to a new pixels-per-second speed. */
-  function setSpeed(px){
-    if(!state) return;
-    var cur = Math.sqrt(state.vx * state.vx + state.vy * state.vy) || 1;
-    var k = px / cur;
-    state.vx *= k; state.vy *= k;
-  }
-
-  /**
-   * Bosses charge about at full health and calm right down as chat wears them
-   * out: speed is interpolated from speedStart (full life) to speedEnd (1 left).
-   */
-  function applyBossSpeed(remaining){
-    if(bossNeeded <= 1) return setSpeed(pxPerSec(bossSpeedEnd));
-    var t = (bossNeeded - remaining) / (bossNeeded - 1);
-    t = Math.max(0, Math.min(1, t));
-    setSpeed(pxPerSec(bossSpeedStart + (bossSpeedEnd - bossSpeedStart) * t));
-  }
-
-  /** Aura cools red -> yellow -> green across the three thirds of its life. */
-  function setBossGlow(remaining, needed){
-    var r = needed > 0 ? remaining / needed : 0;
-    var c = r > 2 / 3 ? ['#ff2d2d', '#b00000']
-          : r > 1 / 3 ? ['#ffd24a', '#c98a00']
-                      : ['#3fb950', '#1f7a33'];
-    img.style.filter = 'drop-shadow(0 0 16px ' + c[0] + ') drop-shadow(0 0 40px ' + c[1] + ') saturate(1.3)';
-  }
-
-  /** Float a damage number (or MISS) off the health bar. */
-  function floatText(text, cls){
-    if(!state) return;
-    if(stage.querySelectorAll('.float').length >= 6) return; // don't let spam flood the screen
-    var d = document.createElement('div');
-    d.className = 'float ' + cls;
-    d.textContent = text;
-    d.style.left = (state.x + SIZE / 2) + 'px';
-    d.style.top = (state.y + SIZE + 2) + 'px';
-    stage.appendChild(d);
-    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 1100);
-  }
-
-  function shakeHp(){
-    hpInner.classList.remove('shake');
-    void hpInner.offsetWidth;          // restart the animation even on rapid hits
-    hpInner.classList.add('shake');
-  }
-
-  /** Draw the boss's REMAINING life; it drains toward zero as chat lands hits. */
-  function setHp(remaining, needed){
-    var pct = Math.max(0, Math.min(100, (remaining / needed) * 100));
-    hpText.textContent = remaining + ' / ' + needed;
-    hpFill.style.width = pct + '%';
-    // Healthy -> hurt -> nearly dead, like a game health bar.
-    hpFill.style.background = pct > 50 ? 'linear-gradient(90deg,#3fb950,#7ee787)'
-      : pct > 25 ? 'linear-gradient(90deg,#d2a106,#f0c000)'
-      : 'linear-gradient(90deg,#b00,#ff2d2d)';
-  }
-
-  /** Red flashing warning shown just before a boss lands. */
-  function bossAlert(d){
-    reset();
-    alertEl.classList.add('go');
-    var ms = ((d && Number(d.seconds)) || 4) * 1000;
-    setTimeout(function(){ alertEl.classList.remove('go'); }, ms);
-  }
-
-  function bossHit(d){
-    if(!isBoss || !state) return;
-    var remaining = Math.max(0, Number(d && d.remaining) || 0);
-    var needed = Math.max(1, Number(d && d.needed) || bossNeeded);
-    bossNeeded = needed;
-    setHp(remaining, needed);
-    setBossGlow(remaining, needed);
-    applyBossSpeed(remaining);
-    shakeHp();
-    floatText('-1', 'hit');
-  }
-
-  /** A pet that bounced off because the chatter is still on cooldown. */
-  function bossMiss(){
-    if(!isBoss || !state) return;
-    floatText('MISS', 'miss');
   }
 
   function pet(){
     if(!state) return;
     clearTimers();
-    paused = true;                 // stop ping-ponging immediately
+    paused = true;                 // stop dead, whatever it was doing
     bubble.classList.remove('show');
+
+    // Whatever the style was mid-way through, make sure the win is fully visible:
+    // a ghost could be mid-fade and a peeking floof mostly below the edge.
+    el.style.transition = '';
+    el.style.opacity = '1';
+    state.opacity = null;
+    var b = bounds();
+    if(state.y > b.maxY) state.y = b.maxY;
+    state.rot = 0;
+    draw();
 
     // Park the effects over the floof using left/top — the keyframes animate
     // transform, so setting transform here would be overridden by them.
     burst.style.left = state.x + 'px'; burst.style.top = state.y + 'px';
     heart.style.left = state.x + 'px'; heart.style.top = state.y + 'px';
 
+    el.classList.add('in');                                         // in case of ghost
     el.classList.add('pet');                                        // bloom
     setTimeout(function(){ burst.classList.add('go'); }, 120);      // shockwave
     setTimeout(function(){ heart.classList.add('go'); }, 700);      // heart: in, pulse 5s, out
     setTimeout(reset, PET_MS);
   }
 
-  function despawn(d){
+  function despawn(){
     if(!state) return;
-    var wasBoss = isBoss || !!(d && d.boss);
     clearTimers();
-    hp.classList.remove('show');
-    el.classList.remove('in');     // just fade away
-    if(wasBoss){
-      // Let it fade out first, then mock chat for letting it escape.
-      setTimeout(function(){ escapeEl.classList.add('go'); }, 900);
-      setTimeout(reset, 4300);
-    } else {
-      setTimeout(reset, 900);
-    }
+    el.style.transition = '';       // a ghost may have had it switched off
+    el.style.opacity = '';
+    state.opacity = null;
+    el.classList.remove('in');      // just fade away
+    setTimeout(reset, 900);
   }
 
   function connect(){
@@ -465,11 +512,7 @@ export function floofOverlayPage(): string {
       if(!m) return;
       if(m.type==='spawn') spawn(m.payload);
       else if(m.type==='pet') pet();
-      else if(m.type==='despawn') despawn(m.payload);
-      else if(m.type==='boss-alert') bossAlert(m.payload);
-      else if(m.type==='boss-hit') bossHit(m.payload);
-      else if(m.type==='boss-miss') bossMiss();
-      else if(m.type==='boss-defeated') pet();
+      else if(m.type==='despawn') despawn();
     }catch(_e){} };
     ws.onerror=function(){ try{ ws.close(); }catch(_e){} };
     ws.onclose=function(ev){ if(!ev || ev.code!==4001) setTimeout(connect,2500); };
@@ -483,7 +526,8 @@ export function floofOverlayPage(): string {
     if(state){
       var b = bounds();
       state.x = Math.max(b.minX, Math.min(b.maxX, state.x));
-      state.y = Math.max(b.minY, Math.min(b.maxY, state.y));
+      // A peeking floof lives below the travel area on purpose, so leave its Y be.
+      if(mover().grounded) state.y = Math.max(b.minY, Math.min(b.maxY, state.y));
       draw();
     }
   });

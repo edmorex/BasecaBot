@@ -1,8 +1,12 @@
 # Pet the Floof
 
-A photo of one of the floofs drifts across a strip at the bottom of the screen;
-the first chatter to type **`!pet`** wins. Wins are tracked, ranked, and feed the
-**Floof Friend I/II/III** achievements.
+A photo of one of the floofs appears on the overlay and the first chatter to type
+**`!pet`** wins. Every spawn picks a random photo *and* a random animation style —
+it might drift, roll, hop, peek up from the bottom edge, or fade in like a ghost.
+Wins are tracked, ranked, and feed the **Floof Friend I/II/III** achievements.
+
+> Group boss fights used to live here. They now have their own game — see
+> [boss-battle.md](boss-battle.md).
 
 | Command | Who | What |
 |---|---|---|
@@ -21,7 +25,9 @@ Add **Pet the Floof** from **Admin → Overlays** as a Browser Source:
   own dimensions and re-reads them if you resize it, so you can give it a taller
   or full-screen area later without changing anything.
 
-The floof is drawn at 128×128 and ping-pongs inside whatever area it's given.
+The floof is drawn at 128×128 and moves inside whatever area it's given. The Roll,
+Hop and Peek styles all work off the **bottom edge**, so give the source enough
+height for them to read — a short strip suits Ping Pong and Ghost best.
 
 ### Padding does two jobs
 
@@ -46,65 +52,79 @@ of `0` on an edge leaves that edge unfeathered (the old behaviour).
 | Base timer | `base` | 960s (16m) | |
 | Random extra | `random` | 480s (8m) | Spawns land randomly in base … base+random (16–24m) |
 | Despawn after | `despawn` | 120s | An un-pet floof gives up and fades out |
-| Speed | `speed` | 5 | 1 (slow) – 10 (fast) |
 | Padding L/R/T/B | `pad-left`, `pad-right`, `pad-top`, `pad-bottom` | 0 | Pixels kept clear at each edge |
-| Pets to defeat | `boss-pets` | 20 | Chatters needed to bring down a Boss Floof |
-| Boss chance | `boss-chance` | 10 | % of scheduled spawns that are a boss |
-| Boss escapes after | `boss-despawn` | 180s | Bosses get longer than a normal floof |
-| Pet cooldown | `boss-cooldown` | 30s | How long a chatter waits between their own hits |
-| Speed at full health | `boss-speed-start` | 9 | Fast and angry when it arrives |
-| Speed at 1 life left | `boss-speed-end` | 2 | Slow and calm as it weakens |
+
+Each animation style has its own tuning:
+
+| Style | Setting | Chat variable | Default |
+|---|---|---|---|
+| Ping Pong | Drift speed | `speed` | 5 (1 slow – 10 fast) |
+| Roll | Roll speed | `roll-speed` | 5 (1 slow – 10 fast) |
+| Hop | Hop distance | `hop-distance` | 220px |
+| Hop | Hop height | `hop-height` | 120px |
+| Hop | Hop duration | `hop-seconds` | 0.7s |
+| Hop | Rest between hops | `hop-delay` | 0.5s |
+| Peek | Peek height | `peek-height` | 96px |
+| Peek | Slide time | `peek-rise` | 0.5s |
+| Peek | Peek duration | `peek-hold` | 2.5s |
+| Peek | Hidden between peeks | `peek-delay` | 0.8s |
+| Ghost | Fade time | `ghost-fade` | 1.2s |
+| Ghost | Visible for | `ghost-hold` | 1.6s |
+| Ghost | Hidden between | `ghost-delay` | 0.6s |
+| Ghost | Wag amount | `ghost-wag` | 12° |
+| Ghost | Wag speed | `ghost-wag-seconds` | 1.4s |
 
 **Floofs only spawn while the stream is live** (and only when enabled). The
-**Fire a floof now** button bypasses *both*, so you can position and test the
-overlay off-stream.
+**Spawn Floof** button bypasses *both*, so you can position and test the overlay
+off-stream. Next to it are two dropdowns — **floof** and **animation** — each
+defaulting to Random, so you can force a specific pairing while tuning it.
 
 ## Taunts
 
-The speech-bubble lines are edited in the admin panel — add or remove them
-freely. The overlay picks one at random every time a bubble appears (and never
-shows the same line twice in a row). If you delete them all, the floof simply
-stays quiet.
+**Every floof has its own lines.** A newly-added photo starts with a single
+`!pet me`, and you edit each one separately — hit the number in the **Taunts**
+column of the photo table to fold out its editor.
 
-## Boss Floof battles
+The overlay picks one of that floof's lines at random every time a bubble appears,
+and never shows the same line twice in a row.
 
-Some spawns are a **Boss Floof**: a group fight for the whole chat.
+> Remove **all** of a floof's taunts and it stays completely silent — useful for a
+> photo where a speech bubble would spoil the shot. An emptied list is remembered
+> as empty; it does not quietly revert to the default.
 
-1. A flashing red **"A BOSS FLOOF APPROACHES!"** alert plays for a few seconds,
-   and the bot warns chat.
-2. The boss arrives with an angry red aura and a **life bar** underneath, which
-   drains from green through yellow to red as chat wears it down.
-3. Chat attacks it with `!pet`. Each hit **drains the boss's life bar**; it goes
-   down when the bar empties (default **20** hits). A chatter can hit it more than
-   once, but only once per **pet cooldown** (default 30s) — so one person *can*
-   solo a boss, but realistically lands only a few blows before it escapes.
-4. Every landed hit **shakes the bar and floats a red `-1`** off it. A `!pet` that
-   bounces off because the chatter is still on cooldown floats a grey **`MISS`**
-   instead, so the audience can see which pets are counting and which aren't.
-5. As its life drains the boss **calms down**: it charges around at
-   `boss-speed-start` on arrival and slows toward `boss-speed-end` with one life
-   left, while its aura cools **red → yellow → green** across the three thirds of
-   its health.
-6. On defeat, everyone who took part is credited and gets the **Defeat Boss
-   Floof** achievement.
-7. If chat runs out of time the boss fades and mocks them:
-   **"FAILURE! BOSS FLOOF ESCAPED!"**
+## Animation styles
 
-Bosses fire on a **percentage of scheduled spawns** (`boss-chance`, default 10%),
-or on demand with the **Fire a BOSS now** button. If no boss photos are marked,
-that spawn falls back to a normal floof.
+Every spawn picks **two** things at random: which photo appears, and how it moves.
 
-> **Note:** everyone who lands at least one hit is credited on a win, however
-> many hits they got in. Lower `boss-pets` if your chat is small.
+| Style | Behaviour |
+|---|---|
+| **Ping Pong** | Drifts in a straight line and bounces off the padded edges |
+| **Roll** | Trundles along the bottom edge like a tyre, rotating in proportion to the distance travelled, and turning round at each end |
+| **Hop** | Bounds left and right in arcs, sitting still for a beat between hops and turning round at the edges |
+| **Peek** | Pops up from a random spot along the bottom edge, looks around, ducks back down, and reappears somewhere else |
+| **Ghost** | Fades in on the spot, wags gently, fades out, and reappears elsewhere — never travelling |
+
+A **Hop** taller than the overlay is capped at the available headroom, so a short
+strip will never launch a floof out of frame.
+
+When a floof stops to taunt, Ping Pong, Roll and Hop freeze mid-motion to speak.
+Peek and Ghost keep running their own appear/disappear cycles, since freezing
+those mid-fade just looks broken.
 
 ## Floof photos
 
-Upload **square PNGs** in the admin panel (max 2 MB). Tick **Boss only** on a
-photo to reserve it for Boss Floof battles — boss and normal pools are kept
-separate, so a boss never shows an ordinary floof (or vice versa). Both live in
-the same folder, so there is nothing extra to mount. The server validates both
+Upload **square PNGs** in the admin panel (max 2 MB). The server validates both
 the PNG signature and squareness from the file's own header, so a non-square or
 non-PNG upload is rejected up front. Images live in `public/assets/floofs/`.
+
+Each photo has a **checkbox per animation style** (all ticked by default) and its
+own **taunt list** (starting with `!pet me`). Untick
+one to stop that photo using it — handy when a pose only reads well one way (a
+floof photographed lying down looks odd rolling like a tyre).
+
+> A photo with **every** style unticked is never spawned at random — which doubles
+> as a way to shelve a photo without deleting it. It can still be spawned by name
+> from the **Spawn Floof** dropdowns.
 
 > ### ⚠️ One-time server setup
 > `public/` is baked into the Docker image, so **without a bind mount every
@@ -121,11 +141,13 @@ non-PNG upload is rejected up front. Images live in `public/assets/floofs/`.
 
 ## How a round plays out
 
-1. The timer elapses (base + random) while enabled and live — or you hit **Fire now**.
-2. A random photo fades in and starts ping-ponging, rocking happily as it goes.
-3. After **10 seconds unpet** it pauses and shows a speech bubble — *"!pet me"*,
-   *"i can haz !pet?"*, *"i wants !pet"* — then fades the bubble and carries on.
-   It keeps doing this until pet or until it despawns.
+1. The timer elapses (base + random) while enabled and live — or you hit **Spawn Floof**.
+2. A random photo fades in and starts moving in one of the five animation styles,
+   picked at random from the ones that photo allows.
+3. After **10 seconds unpet** it shows a speech bubble with one of **its own**
+   taunts, then fades the bubble and carries on. It keeps doing this until pet or
+   until it despawns. (Ping Pong, Roll and Hop stop to speak; Peek and Ghost carry
+   on with their cycle.)
 4. The first `!pet` wins: the floof stops, blooms pink, resolves into a heart, and
    floats away. The bot congratulates the winner in chat and records the win.
 5. If nobody pets it within **despawn** seconds it quietly fades out.
@@ -136,15 +158,19 @@ rate-limited per user so it can't be spammed.
 
 ## Testing without touching the scoreboard
 
-**Fire a floof now** / **Fire a BOSS now** spawn on demand, ignoring the enable
-switch and the live check. **Simulate !pet** then stands in for a chatter:
+**Spawn Floof** spawns on demand, ignoring the enable switch and the live check.
+Its two dropdowns let you force a specific photo and/or animation style rather
+than taking what you are given, which is what makes tuning a single style
+practical.
 
-- against a normal floof, one click plays the win animation;
-- against a boss, each click lands one hit — click through to watch the life bar
-  drain and the defeat fire.
+**Simulate !pet** then stands in for a chatter and plays the win animation. It is
+not scored: no win recorded, no chat announcement, no achievement.
 
-None of it is scored: no wins recorded, no chat announcement, no achievements, and
-a simulated boss kill credits nobody.
+## Upgrading from the shared taunt list
+
+Taunts used to be one list shared by every floof. On first start after this
+change, that list is **copied onto every photo you already have**, so nothing you
+configured is lost. It happens once; later per-floof edits are never clobbered.
 
 ## Achievements
 
@@ -154,11 +180,9 @@ directly and the standard backfill picks them up:
 - 🐾 **Floof Friend I** — win once
 - 🐱 **Floof Friend II** — win 10 times
 - 💖 **Floof Friend III** — win 50 times
-- ⚔️ **Defeat Boss Floof** — take part in a winning Boss Floof battle
 
 ## Chat messages
 
 Every line the game says is editable under **Admin → Text Strings** (feature
-`floof`) — winner announcement, the idle reply, stats, the setter confirmation,
-and the three boss lines (incoming, defeated, escaped). Blanking a string
-disables it.
+`floof`) — winner announcement, the idle reply, stats, and the setter
+confirmation. Blanking a string disables it.
