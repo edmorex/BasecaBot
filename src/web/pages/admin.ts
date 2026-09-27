@@ -734,6 +734,53 @@ export function adminPage(): string {
         '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
     }
 
+    /** The chip list for one floof's taunts; shared by the first render and updates. */
+    function floofTauntChips(name, idx, taunts) {
+      if (!taunts || !taunts.length) return '<span class="muted">none</span>';
+      return taunts.map(function (t) {
+        return '<span class="chip">' + esc(t) +
+          '<button type="button" class="chip-x" data-ftaunt="' + esc(t) + '" data-fname="' + esc(name) +
+          '" data-fidx="' + idx + '" aria-label="Remove">×</button></span>';
+      }).join('');
+    }
+
+    /**
+     * Repaint just one floof's taunts after an edit.
+     *
+     * Deliberately NOT a re-render: rebuilding the section would fold the editor
+     * shut again, which makes adding several lines in a row miserable.
+     */
+    function applyFloofTaunts(name, idx, taunts) {
+      var box = document.getElementById('ftc-' + idx);
+      if (box) {
+        box.innerHTML = floofTauntChips(name, idx, taunts);
+        wireFloofTauntChips(box);
+      }
+      var count = document.querySelector('[data-ftoggle="ft-' + idx + '"]');
+      if (count) count.textContent = taunts.length;
+      var quiet = document.getElementById('ftq-' + idx);
+      if (quiet) quiet.style.display = taunts.length ? 'none' : '';
+      // Keep the cached copy honest, so a later full render agrees with the screen.
+      var im = (floofData.images || []).filter(function (x) { return x.name === name; })[0];
+      if (im) im.taunts = taunts;
+    }
+
+    /** Wire the remove buttons inside a container (they are replaced on each edit). */
+    function wireFloofTauntChips(root) {
+      Array.prototype.forEach.call(root.querySelectorAll('[data-ftaunt]'), function (b) {
+        b.onclick = function () {
+          var name = b.getAttribute('data-fname');
+          var idx = b.getAttribute('data-fidx');
+          api('POST', '/api/admin/floof/taunt', { name: name, text: b.getAttribute('data-ftaunt'), remove: true })
+            .then(function (d) {
+              applyFloofTaunts(name, idx, d.taunts || []);
+              toast('floof-toast', 'Taunt removed from ' + name + '.', true);
+            })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+      });
+    }
+
     function styleLabel(id) {
       return (floofData && floofData.styleLabels && floofData.styleLabels[id]) || id;
     }
@@ -765,7 +812,8 @@ export function adminPage(): string {
               '<td><img src="' + esc(im.url) + '" alt="" /></td>' +
               '<td class="nm">' + esc(im.name) +
                 (none ? '<div class="muted" style="font-size:.75rem">never spawns — no animations enabled</div>' : '') +
-                (taunts.length ? '' : '<div class="muted" style="font-size:.75rem">stays silent — no taunts</div>') + '</td>' +
+                '<div class="muted" id="ftq-' + idx + '" style="font-size:.75rem' +
+                  (taunts.length ? ';display:none' : '') + '">stays silent — no taunts</div>' + '</td>' +
               styles.map(function (s) {
                 return '<td class="mid"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
                   ((im.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /></td>';
@@ -778,14 +826,9 @@ export function adminPage(): string {
             '<tr class="taunt-row hidden" id="ft-' + idx + '"><td colspan="' + colspan + '">' +
               '<div class="muted" style="font-size:.8rem; margin:0 0 .5rem">Speech-bubble lines for <strong>' + esc(im.name) +
               '</strong>. One is picked at random each time it goes unpet (never the same line twice running). Remove them all to keep this floof quiet.</div>' +
-              '<div class="chips">' + (taunts.length
-                ? taunts.map(function (t) {
-                    return '<span class="chip">' + esc(t) + '<button type="button" class="chip-x" data-ftaunt="' + esc(t) +
-                      '" data-fname="' + esc(im.name) + '" aria-label="Remove">×</button></span>';
-                  }).join('')
-                : '<span class="muted">none</span>') + '</div>' +
+              '<div class="chips" id="ftc-' + idx + '">' + floofTauntChips(im.name, idx, taunts) + '</div>' +
               '<div class="rowline" style="margin-top:.6rem"><input type="text" maxlength="120" placeholder="add a taunt" data-ftnew="' + esc(im.name) + '" style="flex:1" />' +
-              '<button type="button" class="pink" data-ftadd="' + esc(im.name) + '">Add</button></div>' +
+              '<button type="button" class="pink" data-ftadd="' + esc(im.name) + '" data-fidx="' + idx + '">Add</button></div>' +
             '</td></tr>';
           }).join('') + '</tbody></table>'
         : '<span class="muted">No floofs uploaded yet. Add a square PNG to get started.</span>';
@@ -875,23 +918,22 @@ export function adminPage(): string {
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-ftadd]'), function (b) {
         var name = b.getAttribute('data-ftadd');
+        var idx = b.getAttribute('data-fidx');
         var inp = document.querySelector('[data-ftnew="' + name + '"]');
         var add = function () {
           api('POST', '/api/admin/floof/taunt', { name: name, text: inp.value })
-            .then(function () { toast('floof-toast', 'Taunt added to ' + name + '.', true); renderFloof(); })
+            .then(function (d) {
+              inp.value = '';
+              applyFloofTaunts(name, idx, d.taunts || []);
+              inp.focus();                    // ready for the next line
+              toast('floof-toast', 'Taunt added to ' + name + '.', true);
+            })
             .catch(function (e) { toast('floof-toast', e.message, false); });
         };
         b.onclick = add;
         inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); add(); } };
       });
-      Array.prototype.forEach.call(document.querySelectorAll('[data-ftaunt]'), function (b) {
-        b.onclick = function () {
-          var name = b.getAttribute('data-fname');
-          api('POST', '/api/admin/floof/taunt', { name: name, text: b.getAttribute('data-ftaunt'), remove: true })
-            .then(function () { toast('floof-toast', 'Taunt removed from ' + name + '.', true); renderFloof(); })
-            .catch(function (e) { toast('floof-toast', e.message, false); });
-        };
-      });
+      wireFloofTauntChips(document);
       Array.prototype.forEach.call(document.querySelectorAll('[data-fstyle]'), function (cb) {
         cb.onchange = function () {
           var name = cb.getAttribute('data-fname');
