@@ -159,6 +159,11 @@ emote names actually match what viewers type) and is likewise never recorded.
 
 ### Settings
 
+> **Changes save as you make them** — no Save button. Edits are written after a
+> short pause and a status line reports *Unsaved changes… → Saving… → Saved*; a
+> failure stays on screen. Building a **boss** is still an explicit Save, since
+> that creates a record rather than adjusting a setting.
+
 | Setting | Default | What it does |
 |---|---|---|
 | Emote cooldown | 30s | How long after a landed hit before that chatter's emotes count again |

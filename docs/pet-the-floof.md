@@ -46,6 +46,11 @@ of `0` on an edge leaves that edge unfeathered (the old behaviour).
 
 ## Settings (Admin → Pet the Floof)
 
+> **Changes save as you make them.** There is no Save button: edits are written
+> after a short pause (so dragging or typing is one write, not dozens) and the
+> status line next to the action buttons shows *Unsaved changes… → Saving… →
+> Saved*. If a save fails the error stays on screen rather than disappearing.
+
 | Setting | Chat variable | Default | Notes |
 |---|---|---|---|
 | Enable the game | `enabled` | off | When off the timer never spawns |

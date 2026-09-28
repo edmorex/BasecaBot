@@ -195,7 +195,197 @@ const SHARED_STYLE = /* css */ `
   button.pink:hover, a.pink:hover, .btn.pink:hover { background: #ff8ad4; }
   button.danger { background: #b0341d; }
   button.danger:hover { background: #d13f24; }
-  input[type=text] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; font-size: 0.95rem; font-family: inherit; }
+  /* ══ Form controls ═══════════════════════════════════════════════════════════
+     Every control is drawn by US rather than the browser, so the site looks the
+     same in Chrome, Safari and Firefox. Native widgets differ in size, corner
+     radius and accent colour between engines, so anything with a native
+     appearance is reset with appearance:none and rebuilt from these tokens.
+     The two exceptions, both unavoidable and both cosmetic-only:
+       - a <select>'s open option list is drawn by the OS (color-scheme: dark
+         keeps it dark, but its metrics are not ours to set);
+       - the native file input is hidden and replaced, see .filepick below.
+     ── */
+  :root { --ctl-radius: 8px; --ctl-pad: 0.5rem 0.7rem; --ctl-font: 0.95rem; --ctl-h: 2.2rem;
+    /* Number fields are a fixed width rather than stretchy, so a row of them reads
+       as a set. Room for 6 digits: 6ch, plus half a digit so the caret and the
+       widest digit still fit once the browser has rounded, plus the left pad and
+       the stepper column. */
+    --ctl-num-w: calc(6.5ch + 0.7rem + 1.9rem + 2px); }
+
+  /* The shared "box" look: text-ish inputs, selects and textareas. Typed out as
+     an explicit list rather than input:not(...) so a new control type is
+     unstyled loudly rather than inheriting something almost-right. */
+  input[type=text], input[type=number], input[type=search], input[type=email],
+  input[type=password], input[type=url], input[type=tel], input[type=date],
+  select, textarea, .sel-btn {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--ctl-radius); padding: var(--ctl-pad); font-size: var(--ctl-font);
+    font-family: inherit; line-height: 1.2; appearance: none; -webkit-appearance: none;
+  }
+  input[type=text]:hover, input[type=number]:hover, select:hover, textarea:hover { border-color: #3d3d42; }
+  textarea { resize: vertical; min-height: 4.5rem; width: 100%; display: block; }
+
+  /* One focus treatment for everything, including the faked controls. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible,
+  button:focus-visible, .btn:focus-visible, .switch input:focus-visible + .slider,
+  .filepick input:focus-visible ~ .filepick-btn {
+    outline: 2px solid var(--pink); outline-offset: 2px;
+  }
+  input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Select ──────────────────────────────────────────────────────────────────
+     A native select's OPTION LIST is drawn by the OS: its position (it opens over
+     the box, not under it), its metrics and its colours are all outside CSS's
+     reach. So the select itself is kept as the value holder and hidden, and
+     .sel-btn + .sel-menu below are a listbox we draw and position ourselves.
+     The bare select rules still apply before the script runs, so the control
+     looks right even if enhancement never happens. ── */
+  /* The chevron. Every background longhand is repeated in the hover rules on
+     purpose: button:hover further up sets the background SHORTHAND, and at
+     specificity (0,1,1) it outranks a plain .sel-btn rule (0,1,0) - which would
+     reset background-repeat to repeat on hover and tile the 12x8 chevron across
+     the whole control. Restating the longhands at (0,2,0) keeps it a single mark. */
+  select, .sel-btn {
+    padding-right: 2rem; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23adadb8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 0.65rem center; background-size: 12px 8px;
+  }
+  /* Hover marks the chevron ONLY — no tint, no border change. */
+  select:hover, .sel .sel-btn:hover, .sel.open .sel-btn {
+    background-color: var(--bg); color: var(--text);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23ff6ec7' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 0.65rem center; background-size: 12px 8px;
+  }
+
+  .sel { position: relative; display: inline-flex; max-width: 100%; min-width: 0; }
+  /* The real select stays in the DOM: it holds the value, it is what page scripts
+     read and write, and screen readers get a real listbox. */
+  .sel select {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .sel-btn {
+    flex: 1 1 auto; min-width: 0; max-width: 100%; text-align: left; font-weight: 400;
+    white-space: nowrap; overflow: hidden;
+  }
+  .sel-btn-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+  /* Holds one hidden copy of every option, so the button's intrinsic width is the
+     WIDEST entry and picking a different one never resizes the control. Zero-height
+     and hidden, but still contributes to max-content width — which is the point. */
+  .sel-sizer { display: block; height: 0; overflow: hidden; visibility: hidden; }
+  .sel-sizer > span { display: block; white-space: nowrap; }
+  /* Positioned per-open in script and parented to <body>, so no ancestor's
+     overflow can clip it and it always lands directly under the button. */
+  .sel-menu {
+    position: fixed; z-index: 120; margin: 0; padding: 0.3rem; list-style: none;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--ctl-radius);
+    box-shadow: 0 12px 34px rgba(0,0,0,.6); max-height: 16rem; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  .sel-menu::-webkit-scrollbar { width: 10px; }
+  .sel-menu::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 3px solid var(--panel); }
+  .sel-opt {
+    padding: 0.45rem 1.6rem 0.45rem 0.6rem; border-radius: 6px; cursor: pointer;
+    font-size: var(--ctl-font); color: var(--text); position: relative;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sel-opt.active { background: #241f2b; }
+  .sel-opt[aria-selected=true] { color: var(--pink); font-weight: 600; }
+  .sel-opt[aria-selected=true]::after {
+    content: ''; position: absolute; right: 0.6rem; top: 50%; width: 0.3rem; height: 0.55rem;
+    border: solid var(--pink); border-width: 0 2px 2px 0; transform: translateY(-65%) rotate(45deg);
+  }
+  .sel-opt[data-disabled=true] { color: var(--off); cursor: not-allowed; }
+
+  /* ── Number: native spinners are unstylable and differ per engine, so they are
+     removed and replaced by the .num stepper the enhancer script builds. ── */
+  input[type=number] { -moz-appearance: textfield; }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  /* font-size is pinned so the ch unit in --ctl-num-w resolves in the same font
+     the input uses, rather than the inherited body size. */
+  .num { position: relative; display: inline-flex; align-items: stretch; flex: none;
+    font-size: var(--ctl-font); width: var(--ctl-num-w); max-width: 100%; }
+  .num > input[type=number] { padding-right: 1.9rem; width: 100%; min-width: 0; }
+  /* Opt-outs for the rare field that really should fill its container. */
+  .num.num-wide { width: 100%; }
+  .num-btns { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 1.5rem;
+    display: flex; flex-direction: column; border-left: 1px solid var(--border);
+    border-radius: 0 var(--ctl-radius) var(--ctl-radius) 0; overflow: hidden; }
+  .num-btns button {
+    flex: 1; padding: 0; margin: 0; border: 0; border-radius: 0; background: #202024;
+    color: var(--muted); font-size: 0.6rem; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; min-height: 0;
+  }
+  .num-btns button:hover { background: var(--pink); color: #1a1220; }
+  .num-btns button + button { border-top: 1px solid var(--border); }
+  .num-btns button:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+
+  /* ── Range: track + thumb drawn for both engines so they match ── */
+  input[type=range] {
+    appearance: none; -webkit-appearance: none; background: none; margin: 0;
+    height: var(--ctl-h); cursor: pointer; padding: 0;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 999px; background: var(--border); border: 1px solid #333338;
+  }
+  input[type=range]::-moz-range-track {
+    height: 6px; border-radius: 999px; background: var(--border); border: 1px solid #333338;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 1.1rem; height: 1.1rem; border-radius: 50%;
+    background: var(--pink); border: 2px solid #1a1220; box-shadow: 0 1px 4px rgba(0,0,0,.6);
+    margin-top: calc((6px - 1.1rem) / 2); /* centre on the track, webkit needs this */
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 1.1rem; height: 1.1rem; border-radius: 50%;
+    background: var(--pink); border: 2px solid #1a1220; box-shadow: 0 1px 4px rgba(0,0,0,.6);
+  }
+  input[type=range]:hover::-webkit-slider-thumb { background: #ff8ad4; }
+  input[type=range]:hover::-moz-range-thumb { background: #ff8ad4; }
+  input[type=range]:disabled::-webkit-slider-thumb { background: var(--off); }
+  input[type=range]:disabled::-moz-range-thumb { background: var(--off); }
+
+  /* ── Checkbox / radio: hand-drawn, because accent-color still leaves each
+     engine's own box shape and size. ── */
+  input[type=checkbox], input[type=radio] {
+    appearance: none; -webkit-appearance: none; margin: 0; flex: none;
+    width: 1.05rem; height: 1.05rem; background: var(--bg);
+    border: 1px solid var(--border); cursor: pointer; position: relative;
+    display: inline-block; vertical-align: -0.18rem;
+  }
+  input[type=checkbox] { border-radius: 4px; }
+  input[type=radio] { border-radius: 50%; }
+  input[type=checkbox]:hover, input[type=radio]:hover { border-color: var(--pink); }
+  input[type=checkbox]:checked, input[type=radio]:checked { background: var(--pink); border-color: var(--pink); }
+  /* The tick: two borders on a rotated box, so no font or image is involved. */
+  input[type=checkbox]:checked::after {
+    content: ''; position: absolute; left: 0.3rem; top: 0.12rem;
+    width: 0.28rem; height: 0.52rem; border: solid #1a1220;
+    border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  input[type=radio]:checked::after {
+    content: ''; position: absolute; inset: 0.22rem; border-radius: 50%; background: #1a1220;
+  }
+  input[type=checkbox]:disabled, input[type=radio]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ── File picker: the native control is replaced outright. Its button label and
+     "no file chosen" text are browser- AND locale-specific, which is exactly the
+     inconsistency we are removing. The real input stays in the DOM (screen
+     readers and the form still need it) but is reduced to a clipped pixel; a
+     <label for> opens it, so no script is needed for the click itself. ── */
+  .filepick { display: inline-flex; align-items: center; gap: 0.6rem; max-width: 100%; }
+  .filepick input[type=file] {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .filepick-btn { flex: none; cursor: pointer; }
+  .filepick-name {
+    color: var(--muted); font-size: 0.88rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
+  .filepick-name.has-file { color: var(--text); }
+
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
   th { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -209,7 +399,11 @@ const SHARED_STYLE = /* css */ `
   /* Enable/disable toggle switch (leftmost custom-command column). */
   .col-toggle { width: 1%; }
   .switch { position: relative; display: inline-block; width: 2.2rem; height: 1.2rem; flex: none; vertical-align: middle; }
-  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  /* The toggle's checkbox is an invisible hit target, so it must not pick up the
+     hand-drawn checkbox styling above. */
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer;
+    appearance: none; -webkit-appearance: none; border: 0; background: none; border-radius: 0; }
+  .switch input::after { content: none; }
   .switch .slider { position: absolute; inset: 0; border-radius: 999px; background: var(--off); transition: background 0.15s; }
   .switch .slider::before { content: ''; position: absolute; height: 0.9rem; width: 0.9rem; left: 0.15rem; top: 0.15rem; border-radius: 50%; background: #fff; transition: transform 0.15s; }
   .switch input:checked + .slider { background: var(--pink); }
@@ -242,8 +436,26 @@ const SHARED_STYLE = /* css */ `
   .chip button:hover { color: #ff6b6b; background: none; }
   .radio-row { display: flex; flex-wrap: nowrap; gap: 0.4rem 0.8rem; overflow-x: auto; }
   .radio-row label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; white-space: nowrap; font-size: 0.85rem; }
-  .radio-row input { accent-color: var(--pink); }
   .rowline { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  /* Labelled-field grid shared by the admin settings panels. */
+  /* Left-packed, not stretched. As a grid of 1fr tracks, a row holding two fields
+     gave each one half the card and the controls drifted far apart; a full row of
+     five looked fine only because the tracks happened to be narrow. Flex with a
+     fixed basis and no grow keeps every row starting at the left, whatever it
+     holds, and still wraps when it runs out of room. */
+  .grid-fields { display: flex; flex-wrap: wrap; gap: 0.7rem; align-items: flex-start; }
+  .grid-fields > .field { flex: 0 1 13rem; }
+  /* Text, selects and textareas do benefit from the extra room, so those still
+     grow to share out whatever is left on their row. */
+  .grid-fields > .field:has(input[type=text]),
+  .grid-fields > .field:has(select),
+  .grid-fields > .field:has(textarea) { flex: 1 1 13rem; }
+  .field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+  .field > span:first-child { font-size: 0.85rem; font-weight: 600; }
+  .field input, .field select, .field textarea, .field .sel { width: 100%; }
+  /* ...but number fields keep their fixed width inside a field grid too. */
+  .field .num { width: var(--ctl-num-w); }
+  .field .num > input[type=number] { width: 100%; }
   /* Admin: users table stays readable, ids/dates don't wrap. */
   table.admin-users { width: 100%; }
   table.admin-users td, table.admin-users th { vertical-align: top; }
@@ -254,6 +466,23 @@ const SHARED_STYLE = /* css */ `
   .sim-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.85rem; }
   .sim-grid .card { padding: 0.85rem; }
   .toast { margin-top: 0.5rem; font-size: 0.9rem; min-height: 1.2em; }
+  /* Live state for a panel that saves itself; sits where its Save button used to. */
+  .save-state { font-size: 0.85rem; color: var(--muted); display: inline-flex; align-items: center;
+    gap: 0.4rem; min-height: 1.2rem; transition: color 0.2s; }
+  /* Nothing to report yet: hide it entirely rather than leaving a stray dot. */
+  .save-state:empty { display: none; }
+  /* Panel heading with its live save state beside it, so both self-saving panels
+     report in the same place. */
+  .panel-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin: 0 0 0.75rem; }
+  .panel-head h2 { margin: 0; }
+  .save-state::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%;
+    background: var(--off); transition: background 0.2s; }
+  .save-state.pending::before { background: var(--muted); }
+  .save-state.saving::before { background: var(--purple); }
+  .save-state.saved { color: var(--green); }
+  .save-state.saved::before { background: var(--green); }
+  .save-state.failed { color: #ff6b6b; }
+  .save-state.failed::before { background: #ff6b6b; }
   .toast.err { color: #ff6b6b; }
   .toast.ok { color: var(--green); }
   /* Shared modal chrome — each <dialog class="modal"> only sets its own width. */
@@ -309,6 +538,340 @@ const SHELL_SCRIPT = /* js */ `
     r.onerror = () => reject(new Error('Could not read the file.'));
     r.readAsText(f);
   });
+  // ── Control enhancers ──────────────────────────────────────────────────────
+  // Number steppers and file pickers are built from markup rather than written by
+  // hand on every page: the admin sections re-render themselves with innerHTML
+  // constantly, so a MutationObserver keeps newly-inserted controls enhanced
+  // without any page needing to remember to call anything.
+
+  let ctlSeq = 0;
+
+  /**
+   * Move sizing that a page put on the native control onto the wrapper we build
+   * around it. Without this, an inline width:100% would resolve against a
+   * shrink-wrapping inline-flex parent and the field would collapse.
+   */
+  const liftBoxStyles = (inp, wrap, props) => {
+    for (const prop of props || ['width', 'margin', 'marginTop', 'marginBottom', 'flex']) {
+      if (inp.style[prop]) { wrap.style[prop] = inp.style[prop]; inp.style[prop] = ''; }
+    }
+  };
+
+  /**
+   * Give a number input our own up/down buttons.
+   *
+   * Native spinners cannot be styled and differ per engine, so the CSS hides them
+   * and these take over. Stepping dispatches input + change so existing handlers
+   * (slider read-outs, the cannon maths) fire exactly as if the value were typed.
+   */
+  const enhanceNumber = (inp) => {
+    if (inp.dataset.ctlDone) return;
+    inp.dataset.ctlDone = '1';
+    const wrap = document.createElement('span');
+    wrap.className = 'num';
+    inp.parentNode.insertBefore(wrap, inp);
+    // Margins follow the control, but NOT width: number fields are deliberately a
+    // uniform 6-digit box, so a page's inline width:100% is dropped rather than
+    // stretching one of them across its container.
+    liftBoxStyles(inp, wrap, ['margin', 'marginTop', 'marginBottom']);
+    inp.style.width = '';
+    wrap.appendChild(inp);
+
+    const step = (dir) => {
+      if (inp.disabled) return;
+      const s = Math.abs(parseFloat(inp.step)) || 1;
+      const min = inp.min === '' ? -Infinity : parseFloat(inp.min);
+      const max = inp.max === '' ? Infinity : parseFloat(inp.max);
+      let v = parseFloat(inp.value);
+      if (!isFinite(v)) v = isFinite(min) ? min : 0;
+      // Round to the step's own precision, or 0.63 + 0.05 lands on 0.6799999999.
+      const dp = (String(s).split('.')[1] || '').length;
+      let next = parseFloat((v + dir * s).toFixed(dp));
+      next = Math.min(max, Math.max(min, next));
+      if (String(next) === inp.value) return;
+      inp.value = String(next);
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    // Typing 9999 into a field capped at 600 would otherwise show 9999 while the
+    // server stored 600. Clamp on commit (blur/Enter) so the box never lies —
+    // which matters most where the panel saves itself with no confirmation step.
+    inp.addEventListener('change', () => {
+      if (inp.value === '') return;
+      const v = parseFloat(inp.value);
+      if (!isFinite(v)) return;
+      const min = inp.min === '' ? -Infinity : parseFloat(inp.min);
+      const max = inp.max === '' ? Infinity : parseFloat(inp.max);
+      const c = Math.min(max, Math.max(min, v));
+      if (c === v) return;
+      inp.value = String(c);
+      // input only: re-dispatching change here would recurse.
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const btns = document.createElement('span');
+    btns.className = 'num-btns';
+    [['▲', 1, 'Increase'], ['▼', -1, 'Decrease']].forEach(([glyph, dir, label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = glyph;
+      b.tabIndex = -1;              // the input itself is the keyboard path (arrow keys)
+      b.setAttribute('aria-label', label);
+      b.addEventListener('click', () => step(dir));
+      btns.appendChild(b);
+    });
+    wrap.appendChild(btns);
+  };
+
+  /**
+   * Replace a file input with a pink button plus a filename.
+   *
+   * The native widget's button text and "no file chosen" wording vary by browser
+   * AND by locale, which is the single most obvious cross-browser difference on
+   * the site. The real input stays in the DOM, clipped to a pixel, so the form and
+   * screen readers are unaffected; a <label for> drives the click natively.
+   */
+  const enhanceFile = (inp) => {
+    if (inp.dataset.ctlDone) return;
+    inp.dataset.ctlDone = '1';
+    if (!inp.id) inp.id = 'ctl-file-' + (++ctlSeq);
+    const wrap = document.createElement('span');
+    wrap.className = 'filepick';
+    inp.parentNode.insertBefore(wrap, inp);
+    liftBoxStyles(inp, wrap);
+    wrap.appendChild(inp);
+
+    const btn = document.createElement('label');
+    btn.className = 'btn pink filepick-btn';
+    btn.setAttribute('for', inp.id);
+    btn.textContent = 'Choose File';
+    const name = document.createElement('span');
+    name.className = 'filepick-name';
+    name.textContent = 'No file chosen';
+    wrap.appendChild(btn);
+    wrap.appendChild(name);
+
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0];
+      name.textContent = f ? f.name : 'No file chosen';
+      name.classList.toggle('has-file', !!f);
+      name.title = f ? f.name : '';
+    });
+  };
+
+  // ── Custom select ──
+  // Only one menu is ever open, and it is parented to <body> so no ancestor's
+  // overflow can clip it.
+  let openSel = null;
+
+  const closeSel = (focusBtn) => {
+    if (!openSel) return;
+    const { wrap, btn, menu } = openSel;
+    openSel = null;
+    menu.remove();
+    wrap.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.removeAttribute('aria-activedescendant');
+    if (focusBtn && btn.isConnected) btn.focus();
+  };
+
+  /**
+   * Replace a select's OS-drawn option list with one we control.
+   *
+   * The select stays in the DOM and remains the single source of truth: page
+   * scripts keep reading and writing .value exactly as before, and picking an
+   * option writes through to it and fires change, so existing onchange handlers
+   * are none the wiser. The value setter is wrapped so a programmatic assignment
+   * (the TTS "reset to defaults" does this) still updates the visible label.
+   */
+  const enhanceSelect = (sel) => {
+    if (sel.dataset.ctlDone || sel.multiple) return;
+    sel.dataset.ctlDone = '1';
+    if (!sel.id) sel.id = 'ctl-sel-' + (++ctlSeq);
+
+    const wrap = document.createElement('span');
+    wrap.className = 'sel';
+    sel.parentNode.insertBefore(wrap, sel);
+    liftBoxStyles(sel, wrap);
+    wrap.appendChild(sel);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sel-btn';
+    btn.id = sel.id + '-btn';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    if (sel.disabled) btn.disabled = true;
+    const label = document.createElement('span');
+    label.className = 'sel-btn-label';
+    const sizer = document.createElement('span');
+    sizer.className = 'sel-sizer';
+    sizer.setAttribute('aria-hidden', 'true');
+    btn.appendChild(label);
+    btn.appendChild(sizer);
+    wrap.appendChild(btn);
+
+    const syncLabel = () => {
+      const o = sel.options[sel.selectedIndex];
+      label.textContent = o ? o.textContent : '';
+      btn.title = o ? o.textContent : '';
+    };
+    /**
+     * Park a hidden copy of every option inside the button so its width is the
+     * widest entry. Cheaper and more exact than measuring text, and it needs no
+     * assumptions about the font. Refreshed whenever the option list might have
+     * changed, since these panels rebuild their selects.
+     */
+    const syncWidth = () => {
+      if (sizer.childElementCount === sel.options.length) {
+        let same = true;
+        for (let i = 0; i < sel.options.length; i++) {
+          if (sizer.children[i].textContent !== sel.options[i].textContent) { same = false; break; }
+        }
+        if (same) return;
+      }
+      sizer.textContent = '';
+      for (let i = 0; i < sel.options.length; i++) {
+        const g = document.createElement('span');
+        g.textContent = sel.options[i].textContent;
+        sizer.appendChild(g);
+      }
+    };
+    syncLabel();
+    syncWidth();
+    sel.addEventListener('change', syncLabel);
+
+    // Catch a plain sel.value = x from page code, which fires no event of its own.
+    const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    if (desc && desc.set) {
+      Object.defineProperty(sel, 'value', {
+        configurable: true,
+        get() { return desc.get.call(this); },
+        set(v) { desc.set.call(this, v); syncWidth(); syncLabel(); },
+      });
+    }
+
+    const choose = (i) => {
+      if (sel.selectedIndex !== i) {
+        sel.selectedIndex = i;
+        syncLabel();
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      closeSel(true);
+    };
+
+    const open = () => {
+      if (openSel) { const same = openSel.btn === btn; closeSel(false); if (same) return; }
+      // Rebuilt every time, so options added or replaced since the last open are
+      // always reflected — in the menu and in the button's fixed width.
+      syncWidth();
+      const menu = document.createElement('ul');
+      menu.className = 'sel-menu';
+      menu.id = sel.id + '-menu';
+      menu.setAttribute('role', 'listbox');
+      let active = Math.max(0, sel.selectedIndex);
+      const items = [];
+      for (let i = 0; i < sel.options.length; i++) {
+        const o = sel.options[i];
+        const li = document.createElement('li');
+        li.className = 'sel-opt';
+        li.id = sel.id + '-opt-' + i;
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', i === sel.selectedIndex ? 'true' : 'false');
+        if (o.disabled) li.setAttribute('data-disabled', 'true');
+        li.textContent = o.textContent;
+        li.addEventListener('mouseenter', () => setActive(i));
+        li.addEventListener('click', () => { if (!o.disabled) choose(i); });
+        menu.appendChild(li);
+        items.push(li);
+      }
+      const setActive = (i) => {
+        if (i < 0 || i >= items.length) return;
+        items.forEach((el) => el.classList.remove('active'));
+        active = i;
+        items[i].classList.add('active');
+        btn.setAttribute('aria-activedescendant', items[i].id);
+        items[i].scrollIntoView({ block: 'nearest' });
+      };
+
+      document.body.appendChild(menu);
+      wrap.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+      btn.setAttribute('aria-controls', menu.id);
+      openSel = { wrap, btn, menu, items, setActive, choose, get active() { return active; } };
+
+      // Directly under the button, matching its width; flipped above only when
+      // there genuinely is not room below.
+      const r = btn.getBoundingClientRect();
+      menu.style.minWidth = r.width + 'px';
+      menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+      const below = window.innerHeight - r.bottom - 8;
+      if (menu.offsetHeight > below && r.top > below) {
+        menu.style.top = Math.max(8, r.top - menu.offsetHeight - 4) + 'px';
+      } else {
+        menu.style.top = (r.bottom + 4) + 'px';
+      }
+      if (sel.selectedIndex >= 0) setActive(sel.selectedIndex);
+    };
+
+    btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (!openSel || openSel.btn !== btn) open();
+      }
+    });
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (!openSel) return;
+    const { items, setActive, choose } = openSel;
+    const i = openSel.active;
+    if (e.key === 'Escape') { e.preventDefault(); closeSel(true); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(items.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(0, i - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActive(items.length - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (items[i] && items[i].getAttribute('data-disabled') !== 'true') choose(i);
+    } else if (e.key === 'Tab') closeSel(false);
+  });
+  document.addEventListener('click', (e) => {
+    if (openSel && !openSel.menu.contains(e.target) && e.target !== openSel.btn) closeSel(false);
+  });
+  // A fixed menu would otherwise drift away from its button.
+  window.addEventListener('scroll', () => closeSel(false), true);
+  window.addEventListener('resize', () => closeSel(false));
+
+  const enhanceControls = (root) => {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('input[type=number]:not([data-ctl-done])').forEach(enhanceNumber);
+    scope.querySelectorAll('input[type=file]:not([data-ctl-done])').forEach(enhanceFile);
+    scope.querySelectorAll('select:not([data-ctl-done])').forEach(enhanceSelect);
+  };
+  window.enhanceControls = enhanceControls;
+  enhanceControls(document);
+  new MutationObserver((records) => {
+    for (const r of records) {
+      for (const node of r.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches && node.matches('input[type=number],input[type=file],select')) {
+          if (node.tagName === 'SELECT') enhanceSelect(node);
+          else if (node.type === 'number') enhanceNumber(node);
+          else enhanceFile(node);
+        } else {
+          enhanceControls(node);
+        }
+      }
+      // A section re-rendering underneath an open menu would leave it orphaned,
+      // pointing at a button that no longer exists.
+      if (r.removedNodes.length && openSel && !openSel.btn.isConnected) closeSel(false);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
   // ── Mobile: top-nav hamburger dropdown ──
   const navToggle = document.getElementById('nav-toggle');
   const navMenu = document.getElementById('nav-menu');

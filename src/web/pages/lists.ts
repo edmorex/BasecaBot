@@ -96,7 +96,7 @@ export function listsPage(): string {
       <h2 style="margin-top:0">Import Lists from CSV</h2>
       <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>List, Display Name, Description, Permission, Created By, Created By ID, List Created At, List Updated At, Entry, Added By, Added By ID, Date Added</code>. <strong>Wipe &amp; replace all is a true backup restore</strong> — it preserves creator IDs and timestamps. A header row is optional.</p>
       <label class="muted">CSV file</label>
-      <input type="file" id="limp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
+      <input type="file" id="limp-file" accept=".csv,text/csv" style="margin:.35rem 0 .8rem" />
       <label class="muted">Mode</label>
       <div style="display:flex; flex-direction:column; gap:.35rem; margin:.35rem 0 .8rem">
         <label><input type="radio" name="limp-mode" value="add" checked /> Add entries to the active list (<code id="limp-active">—</code>)</label>

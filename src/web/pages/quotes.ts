@@ -53,7 +53,7 @@ export function quotesPage(): string {
       <h2 style="margin-top:0">Import Quotes from CSV</h2>
       <p class="muted" style="margin:.2rem 0 .8rem">Columns: <code>ID, Quote, User, Game, Date, Quoted By, Quoted By ID, Created At</code>. Additive keeps existing quotes and assigns new IDs; <strong>wipe &amp; replace is a true backup restore</strong> — it preserves the original IDs and timestamps. A header row is optional.</p>
       <label class="muted">CSV file</label>
-      <input type="file" id="qimp-file" accept=".csv,text/csv" style="width:100%; margin:.35rem 0 .8rem" />
+      <input type="file" id="qimp-file" accept=".csv,text/csv" style="margin:.35rem 0 .8rem" />
       <label class="muted">Mode</label>
       <div class="radio-row" style="margin:.35rem 0 .8rem; flex-wrap:wrap">
         <label><input type="radio" name="qimp-mode" value="add" checked /> Add to existing quotes</label>

@@ -520,7 +520,7 @@ export function adminPage(): string {
           var v = (voice[k.key] != null) ? voice[k.key] : defaults[k.key];
           return '<div class="rowline" style="gap:.6rem; align-items:center; margin:.35rem 0">' +
             '<label style="flex:0 0 13rem">' + esc(k.label) + ' <span class="muted" style="font-size:.76rem">(' + esc(k.hint) + ')</span></label>' +
-            '<input type="range" data-knob="' + k.key + '" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" value="' + v + '" style="flex:1; accent-color:var(--pink)">' +
+            '<input type="range" data-knob="' + k.key + '" min="' + k.min + '" max="' + k.max + '" step="' + k.step + '" value="' + v + '" style="flex:1">' +
             '<span class="muted" data-val="' + k.key + '" style="flex:0 0 3.5em; text-align:right"></span>' +
             '</div>';
         }).join('');
@@ -684,6 +684,59 @@ export function adminPage(): string {
       }
     }
 
+    // ── Autosave ────────────────────────────────────────────────────────────────
+    /**
+     * Save a settings panel as it is edited, instead of behind a Save button.
+     *
+     * Writes are debounced so dragging a slider or holding a stepper is one request,
+     * and serialised so two in-flight saves can never land out of order — the last
+     * state the user left always wins. The id list is explicit rather than
+     * scraped from the DOM, because these panels also hold controls that are NOT
+     * settings (the spawn pickers, the boss picker) and must not trigger a save.
+     */
+    function autoSaver(url, collect, statusId, ids) {
+      var timer = null, inFlight = false, again = false;
+
+      function state(cls, msg) {
+        var el = document.getElementById(statusId);
+        if (!el) return;
+        el.className = 'save-state ' + cls;
+        el.textContent = msg;
+      }
+
+      function flush() {
+        timer = null;
+        if (inFlight) { again = true; return; }   // coalesce into the current save
+        inFlight = true;
+        state('saving', 'Saving…');
+        api('POST', url, { config: collect() })
+          .then(function () { if (!again) state('saved', 'Saved'); })
+          .catch(function (e) { state('failed', e.message || 'Could not save'); })
+          .then(function () {
+            inFlight = false;
+            if (again) { again = false; flush(); }
+          });
+      }
+
+      function queue(immediate) {
+        if (timer) clearTimeout(timer);
+        state('pending', 'Unsaved changes…');
+        timer = setTimeout(flush, immediate ? 0 : 650);
+      }
+
+      ids.forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox' || el.tagName === 'SELECT') {
+          // A toggle or a pick is a finished decision; no reason to wait.
+          el.addEventListener('change', function () { queue(true); });
+        } else {
+          el.addEventListener('input', function () { queue(false); });
+        }
+      });
+      return queue;
+    }
+
     // ── Pet the Floof: settings, manual spawn, and the photo library ────────────
     var FLOOF_TIMING = [
       { key: 'baseSeconds', label: 'Base timer', hint: 'seconds between floofs', min: 10, max: 86400, step: 10 },
@@ -841,12 +894,12 @@ export function adminPage(): string {
         styles.map(function (s) { return '<option value="' + esc(s) + '">' + esc(styleLabel(s)) + '</option>'; }).join('') +
         '</select>';
 
-      main.innerHTML = '<h2>Pet the Floof</h2>' +
+      main.innerHTML = '<div class="panel-head"><h2>Pet the Floof</h2>' +
+        '<span class="save-state" id="floof-status"></span></div>' +
         '<p class="muted">A floof appears on the overlay and the first chatter to type <code>!pet</code> wins. Each spawn picks a random photo <em>and</em> a random animation style. Add the <strong>Pet the Floof</strong> overlay from the Overlays section as a Browser Source.</p>' +
 
         // Actions first, so the buttons you reach for most are at the top.
         '<div class="card"><div class="rowline" style="gap:.6rem; flex-wrap:wrap; align-items:center">' +
-          '<button type="button" class="pink" id="floof-save">Save settings</button>' +
           '<button type="button" class="pink" id="floof-fire">Spawn Floof</button>' + spawnPicker +
           '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
           '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Spawn Floof</strong> ignores the enable switch and the live check, so you can test any time. <strong>Simulate !pet</strong> plays the win animation without recording a win.</p>' +
@@ -892,11 +945,12 @@ export function adminPage(): string {
         return out;
       }
 
-      document.getElementById('floof-save').onclick = function () {
-        api('POST', '/api/admin/floof', { config: collect() })
-          .then(function () { toast('floof-toast', 'Settings saved.', true); })
-          .catch(function (e) { toast('floof-toast', e.message, false); });
-      };
+      // Every settings control, and deliberately NOT the two spawn pickers.
+      var floofIds = ['floof-enabled'];
+      var floofFields = FLOOF_TIMING.concat(FLOOF_PAD);
+      FLOOF_ANIM.forEach(function (g) { floofFields = floofFields.concat(g.fields); });
+      floofFields.forEach(function (f) { floofIds.push('fl-' + f.key); });
+      autoSaver('/api/admin/floof', collect, 'floof-status', floofIds);
       document.getElementById('floof-fire').onclick = function () {
         var image = document.getElementById('fl-pick-image').value;
         var style = document.getElementById('fl-pick-style').value;
@@ -1075,7 +1129,8 @@ export function adminPage(): string {
           '</div></div>';
       }).join('');
 
-      main.innerHTML = '<h2>Boss Battle</h2>' +
+      main.innerHTML = '<div class="panel-head"><h2>Boss Battle</h2>' +
+        '<span class="save-state" id="boss-status"></span></div>' +
         '<p class="muted">Chat fights a boss by spamming the emotes it is weak to. Add the <strong>Boss Battle</strong> overlay from the Overlays section as a full-screen Browser Source, and tick <em>Control audio via OBS</em> so the sound reaches your stream.</p>' +
 
         '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
@@ -1086,9 +1141,9 @@ export function adminPage(): string {
         '<div class="card"><h3 style="margin:0 0 .5rem">Start a battle</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">Hit start before you step away — the boss arrives after the delay.</p>' +
           '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap">' + bossPicker('boss-pick') +
-          '<label class="rowline" style="gap:.5rem; align-items:center; flex:1; min-width:16rem"><span class="muted">Delay</span>' +
-          '<input type="range" id="boss-delay" min="0" max="120" step="1" value="' + c.startDelaySeconds + '" style="flex:1" />' +
-          '<span class="muted" id="boss-delay-val" style="flex:0 0 3.4em; text-align:right"></span></label></div>' +
+          '<label class="rowline" style="gap:.5rem; align-items:center"><span class="muted">Delay</span>' +
+          '<input type="number" id="boss-delay" min="0" max="120" step="1" value="' + c.startDelaySeconds + '" />' +
+          '<span class="muted">seconds</span></label></div>' +
           '<div class="rowline" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap">' +
           '<button type="button" class="pink" id="boss-start">Start Boss Battle</button>' +
           '<button type="button" class="pink" id="boss-cancel">Cancel</button></div></div>' +
@@ -1104,9 +1159,9 @@ export function adminPage(): string {
           '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Dupe</strong> feeds the cannon one chatter\u2019s full allowance, so you can walk it up to a shot on your own.</p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Combat</h3>' +
-          '<label class="rowline" style="gap:.6rem; align-items:center"><span style="flex:0 0 11rem">Emote cooldown</span>' +
-          '<input type="range" id="boss-cooldownSeconds" min="0" max="600" step="1" value="' + c.cooldownSeconds + '" style="flex:1" />' +
-          '<span class="muted" id="boss-cooldownSeconds-val" style="flex:0 0 3.4em; text-align:right"></span></label>' +
+          '<div class="grid-fields">' +
+          numField({ key: 'cooldownSeconds', label: 'Emote cooldown', hint: 'seconds before a chatter lands again', min: 0, max: 600, step: 1 }, c) +
+          '</div>' +
           '<p class="muted" style="font-size:.8rem; margin:.4rem 0 0">How long a chatter waits before their emotes land again. Everything they send while cooling down shows as a MISS — healers are held to the same clock.</p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .3rem">Mega cannon</h3>' +
@@ -1125,8 +1180,6 @@ export function adminPage(): string {
           '<input type="range" id="boss-volumeBgm" min="0" max="100" step="1" value="' + c.volumeBgm + '" style="flex:1" />' +
           '<span class="muted" id="boss-volumeBgm-val" style="flex:0 0 3.4em; text-align:right"></span></label></div>' +
 
-        '<div class="rowline" style="gap:.6rem; margin:.2rem 0 1rem; flex-wrap:wrap">' +
-          '<button type="button" class="pink" id="boss-save">Save settings</button></div>' +
         '<div class="toast" id="boss-toast"></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Sounds</h3>' +
@@ -1140,11 +1193,12 @@ export function adminPage(): string {
       injectBossCss();
 
       // Live value read-outs on the sliders.
-      ['boss-delay', 'boss-cooldownSeconds', 'boss-volumeSfx', 'boss-volumeBgm'].forEach(function (id) {
+      // Only the volume sliders still need a value read-out; the delay and cooldown
+      // are number fields now and show their own value.
+      ['boss-volumeSfx', 'boss-volumeBgm'].forEach(function (id) {
         var r = document.getElementById(id);
         var out = document.getElementById(id + '-val');
-        var unit = id === 'boss-volumeSfx' || id === 'boss-volumeBgm' ? '%' : 's';
-        var sync = function () { out.textContent = r.value + unit; };
+        var sync = function () { out.textContent = r.value + '%'; };
         r.oninput = sync;
         sync();
       });
@@ -1170,17 +1224,19 @@ export function adminPage(): string {
       BOSS_CANNON.forEach(function (f) { document.getElementById('boss-' + f.key).oninput = cannonMath; });
       cannonMath();
 
-      document.getElementById('boss-save').onclick = function () {
+      function bossCollect() {
         var out = { enabled: document.getElementById('boss-enabled').checked,
           cooldownSeconds: Number(document.getElementById('boss-cooldownSeconds').value),
           startDelaySeconds: Number(document.getElementById('boss-delay').value),
           volumeSfx: Number(document.getElementById('boss-volumeSfx').value),
           volumeBgm: Number(document.getElementById('boss-volumeBgm').value) };
         BOSS_ANIM.concat(BOSS_CANNON).forEach(function (f) { out[f.key] = Number(document.getElementById('boss-' + f.key).value); });
-        api('POST', '/api/admin/boss', { config: out })
-          .then(function () { bossToast('Settings saved.', true); })
-          .catch(function (e) { bossToast(e.message, false); });
-      };
+        return out;
+      }
+      // Every settings control, and deliberately NOT the boss picker.
+      var bossIds = ['boss-enabled', 'boss-delay', 'boss-cooldownSeconds', 'boss-volumeSfx', 'boss-volumeBgm'];
+      BOSS_ANIM.concat(BOSS_CANNON).forEach(function (f) { bossIds.push('boss-' + f.key); });
+      autoSaver('/api/admin/boss', bossCollect, 'boss-status', bossIds);
 
       document.getElementById('boss-start').onclick = function () {
         api('POST', '/api/admin/boss/start', { bossId: pickedBoss('boss-pick'), delaySeconds: Number(document.getElementById('boss-delay').value) })
@@ -1440,9 +1496,6 @@ export function adminPage(): string {
         + 'justify-content:center;font-size:.68rem;color:var(--muted);flex:0 0 auto;text-align:center}'
         + '.boss-card .boss-meta{flex:1;min-width:0}'
         + '.boss-card .boss-name{font-weight:600}'
-        + '.grid-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.7rem}'
-        + '.field{display:flex;flex-direction:column;gap:.25rem}'
-        + '.field>span:first-child{font-size:.85rem;font-weight:600}'
         + '.be-preview{width:72px;height:72px;object-fit:cover;border-radius:10px;background:#0008}'
         + '.snd-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;'
         + 'padding:.5rem 0;border-top:1px solid var(--line)}'
