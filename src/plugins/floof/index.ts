@@ -11,6 +11,14 @@ const ROOM = 'floof';
 const IDLE_COOLDOWN_MS = 30_000;
 /** How often the scheduler re-checks when it's waiting (also re-checks live state). */
 const TICK_MS = 15_000;
+/**
+ * Quiet period after a win during which "there is no floof to pet" is NOT said.
+ *
+ * Chat carries on typing `!pet` for a few seconds after someone has already won,
+ * and answering those stragglers with "there is no floof right now" reads as if
+ * the bot lost track of the round it just announced.
+ */
+const POST_WIN_QUIET_MS = 15_000;
 
 /** The currently-visible floof, if any. */
 interface Round {
@@ -43,6 +51,8 @@ export function floofPlugin(): Plugin {
   let round: Round | null = null;
   let nextAt = 0; // epoch ms the next spawn is due
   let tick: ReturnType<typeof setInterval> | undefined;
+  /** When the last floof was claimed, for the post-win quiet period. */
+  let lastWonAt = 0;
   const lastIdlePet = new Map<string, number>();
 
   /** Schedule the next spawn: base + a random slice of the random window. */
@@ -134,6 +144,10 @@ export function floofPlugin(): Plugin {
     if (!round) return 'There is no floof on screen — spawn one first.';
     clearTimeout(round.despawn);
     round = null;
+    // Nothing is scored, but the overlay plays a win, so hold the same quiet
+    // period — otherwise chat gets told there is no floof right after seeing one
+    // get pet.
+    lastWonAt = Date.now();
     ctx.ws.broadcast(ROOM, 'pet', { user: 'Test' });
     ctx.logger.info('floof: simulated pet (not scored)');
     return null;
@@ -180,6 +194,12 @@ export function floofPlugin(): Plugin {
         // Bare "!pet" is a claim on the active floof.
         onUnknown: async (e: CommandEvent) => {
           if (!round || round.claimedBy) {
+            // Stragglers still petting the floof someone just won: say nothing at
+            // all rather than contradicting the win we announced moments ago. The
+            // per-user rate limit is deliberately left untouched, so this window
+            // only ever suppresses a message and changes nothing else.
+            if (Date.now() - lastWonAt < POST_WIN_QUIET_MS) return;
+
             // Nothing to pet — rate-limited so it can't be spammed in chat.
             const now = Date.now();
             if (now - (lastIdlePet.get(e.user.id) ?? 0) < IDLE_COOLDOWN_MS) return;
@@ -193,6 +213,7 @@ export function floofPlugin(): Plugin {
           clearTimeout(round.despawn);
           const current = round;
           round = null;
+          lastWonAt = Date.now();
 
           await ctx.users.touch(e.user);
           const wins = await ctx.floof.recordWin(e.user.id);

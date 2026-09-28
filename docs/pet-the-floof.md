@@ -170,6 +170,12 @@ Only the *first* claim counts — the winner is locked in synchronously, so two
 `!pet`s in the same instant can't both win. The "no floof right now" reply is
 rate-limited per user so it can't be spammed.
 
+For **15 seconds after a win** that reply is suppressed entirely. Chat carries on
+typing `!pet` for a few seconds after someone has already won, and answering those
+stragglers with "there is no floof right now" reads as though the bot had lost
+track of the round it just announced. A floof that simply *despawned* unclaimed
+gets no such grace period — there genuinely is nothing to pet.
+
 ## Testing without touching the scoreboard
 
 **Spawn Floof** spawns on demand, ignoring the enable switch and the live check.
