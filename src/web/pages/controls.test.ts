@@ -224,6 +224,47 @@ describe('form control styling', () => {
   });
 });
 
+describe('custom property references', () => {
+  const PAGE_FILES = ['admin.ts', 'commands.ts', 'lists.ts', 'quotes.ts', 'user.ts', 'welcome.ts', 'commandRow.ts',
+    'overlayFloof.ts', 'overlayBossBattle.ts', 'overlayFirst.ts', 'overlayChatStats.ts', 'overlayAchievement.ts', 'overlayTts.ts'];
+
+  /**
+   * Custom properties a source declares: in CSS (its own :root or inline style),
+   * or at runtime via setProperty, which the achievement overlay uses to colour a
+   * pop by tier.
+   */
+  const declaredIn = (src: string) =>
+    new Set([
+      ...[...src.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!),
+      ...[...src.matchAll(/setProperty\(\s*'(--[\w-]+)'/g)].map((m) => m[1]!),
+    ]);
+  const shared = declaredIn(LAYOUT);
+
+  it.each(PAGE_FILES)('%s only uses custom properties that exist', (file) => {
+    // A var() pointing at an undeclared property is "invalid at computed-value
+    // time": the whole declaration is dropped and the style silently never applies.
+    // Nothing warns — not tsc, not eslint, not the browser console. This caught
+    // four borders in the admin panel referencing a --line token that was never
+    // declared anywhere (the real token is --border), so they simply never drew.
+    const src = readFileSync(path.join(PAGE_DIR, file), 'utf8');
+    const known = new Set([...shared, ...declaredIn(src)]);
+    // Only fallback-less references matter: var(--x, something) degrades to the
+    // fallback by design, so it can never silently drop the declaration.
+    const used = [...src.matchAll(/var\((--[\w-]+)\s*([,)])/g)]
+      .filter((m) => m[2] === ')')
+      .map((m) => m[1]!);
+    const undefinedRefs = [...new Set(used.filter((v) => !known.has(v)))];
+    expect(undefinedRefs, `${file} references undeclared: ${undefinedRefs.join(', ')}`).toEqual([]);
+  });
+
+  it('is actually looking at the shared tokens (a canary on the check above)', () => {
+    for (const token of ['--bg', '--panel', '--border', '--text', '--muted', '--pink']) {
+      expect(shared, `${token} should be declared in layout.ts`).toContain(token);
+    }
+    expect(shared).not.toContain('--line');   // the token that never existed
+  });
+});
+
 describe('inline page scripts', () => {
   it('every page renders script blocks that are syntactically valid JS', () => {
     // The pages build their scripts as strings, so tsc and eslint never parse them.

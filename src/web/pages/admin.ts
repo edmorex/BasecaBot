@@ -856,7 +856,7 @@ export function adminPage(): string {
       var colspan = styles.length + 4;
       var photoRows = (floofData.images || []).length
         ? '<table class="floof-table"><thead><tr><th></th><th>Photo</th>' +
-            styles.map(function (s) { return '<th class="mid">' + esc(styleLabel(s)) + '</th>'; }).join('') +
+            styles.map(function (s) { return '<th class="mid st">' + esc(styleLabel(s)) + '</th>'; }).join('') +
             '<th class="mid">Taunts</th><th></th></tr></thead><tbody>' +
           floofData.images.map(function (im, idx) {
             var none = !(im.styles || []).length;
@@ -868,7 +868,7 @@ export function adminPage(): string {
                 '<div class="muted" id="ftq-' + idx + '" style="font-size:.75rem' +
                   (taunts.length ? ';display:none' : '') + '">stays silent — no taunts</div>' + '</td>' +
               styles.map(function (s) {
-                return '<td class="mid"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
+                return '<td class="mid st"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
                   ((im.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /></td>';
               }).join('') +
               '<td class="mid"><button type="button" class="pink" data-ftoggle="ft-' + idx + '">' +
@@ -898,17 +898,21 @@ export function adminPage(): string {
         '<span class="save-state" id="floof-status"></span></div>' +
         '<p class="muted">A floof appears on the overlay and the first chatter to type <code>!pet</code> wins. Each spawn picks a random photo <em>and</em> a random animation style. Add the <strong>Pet the Floof</strong> overlay from the Overlays section as a Browser Source.</p>' +
 
-        // Actions first, so the buttons you reach for most are at the top.
-        '<div class="card"><div class="rowline" style="gap:.6rem; flex-wrap:wrap; align-items:center">' +
-          '<button type="button" class="pink" id="floof-fire">Spawn Floof</button>' + spawnPicker +
-          '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
-          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Spawn Floof</strong> ignores the enable switch and the live check, so you can test any time. <strong>Simulate !pet</strong> plays the win animation without recording a win.</p>' +
-          '<div class="toast" id="floof-toast"></div></div>' +
-
         '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
           '<div><strong>Game enabled</strong>' +
           '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div>' +
           '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Game control</h3>' +
+          '<div class="rowline" style="gap:.6rem; flex-wrap:wrap; align-items:center">' +
+          '<button type="button" class="pink" id="floof-fire">Spawn Floof</button>' + spawnPicker + '</div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">Spawns on demand, ignoring the enable switch and the live check, so you can test any time. Leave either dropdown on Random to be surprised.</p></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Simulate</h3>' +
+          '<div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
+          '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">Stands in for a chatter and plays the win animation. Records nothing — no win, no chat announcement, no achievement.</p>' +
+          '<div class="toast" id="floof-toast"></div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Timing</h3>' +
           '<div class="grid-fields">' + FLOOF_TIMING.map(function (f) { return floofField(f, c); }).join('') + '</div>' +
@@ -1032,14 +1036,22 @@ export function adminPage(): string {
       st.textContent = '.floof-table{width:100%;border-collapse:collapse;font-size:.9rem}'
         + '.floof-table th{text-align:left;font-size:.78rem;color:var(--muted);font-weight:600;padding:.3rem .5rem;white-space:nowrap}'
         + '.floof-table th.mid,.floof-table td.mid{text-align:center}'
-        + '.floof-table td{padding:.35rem .5rem;border-top:1px solid var(--line);vertical-align:middle}'
+        // Equal fixed columns for the animation checkboxes. Left to size themselves
+        // they follow their header text, so "Ping Pong" made one column far wider
+        // than "Hop" and the row of checkboxes came out unevenly spaced.
+        + '.floof-table th.st,.floof-table td.st{width:4.75rem}'
+        + '.floof-table td{padding:.35rem .5rem;border-top:1px solid var(--border);vertical-align:middle}'
         + '.floof-table img{width:52px;height:52px;object-fit:cover;border-radius:8px;background:#0008;display:block}'
         + '.floof-table td.nm{font-weight:600;word-break:break-all;min-width:9rem}'
         + '.floof-table tr.shelved td.nm,.floof-table tr.shelved img{opacity:.5}'
         + '.floof-table tr.taunt-row.hidden{display:none}'
         + '.floof-table tr.taunt-row td{background:var(--bg);border-top:0;padding:.2rem .6rem .8rem}'
-        + '.anim-group{border-top:1px solid var(--line);padding:.8rem 0 .2rem}'
+        // The divider is each group's border-top, so the gap BELOW it is this
+        // group's padding-top and the gap ABOVE it is the previous group's
+        // padding-bottom. Equal padding on both sides is what centres it.
+        + '.anim-group{border-top:1px solid var(--border);padding:1rem 0}'
         + '.anim-group:first-of-type{border-top:0;padding-top:0}'
+        + '.anim-group:last-of-type{padding-bottom:0}'
         + '.anim-group h4{margin:0 0 .2rem;font-size:.92rem}'
         + '@media (max-width:640px){.floof-table th,.floof-table td{padding:.3rem .25rem}'
         + '.floof-table img{width:40px;height:40px}.floof-table td.nm{min-width:6rem;font-size:.82rem}}';
@@ -1489,7 +1501,7 @@ export function adminPage(): string {
       var st = document.createElement('style');
       st.id = 'boss-css';
       st.textContent = '.boss-list{display:flex;flex-direction:column;gap:.6rem}'
-        + '.boss-card{display:flex;align-items:center;gap:.8rem;background:var(--bg);border:1px solid var(--line);'
+        + '.boss-card{display:flex;align-items:center;gap:.8rem;background:var(--bg);border:1px solid var(--border);'
         + 'border-radius:10px;padding:.55rem .7rem}'
         + '.boss-card img{width:56px;height:56px;object-fit:cover;border-radius:8px;background:#0008;flex:0 0 auto}'
         + '.boss-card .noart{width:56px;height:56px;border-radius:8px;background:#0004;display:flex;align-items:center;'
@@ -1498,7 +1510,7 @@ export function adminPage(): string {
         + '.boss-card .boss-name{font-weight:600}'
         + '.be-preview{width:72px;height:72px;object-fit:cover;border-radius:10px;background:#0008}'
         + '.snd-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;'
-        + 'padding:.5rem 0;border-top:1px solid var(--line)}'
+        + 'padding:.5rem 0;border-top:1px solid var(--border)}'
         + '.snd-row:first-of-type{border-top:0}'
         + '.snd-row input[type=file]{max-width:13rem}'
         + '@media (max-width:640px){.boss-card{flex-wrap:wrap}.snd-row{flex-direction:column;align-items:flex-start}}';
