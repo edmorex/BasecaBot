@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import type { Storage } from './storage/index.js';
 import type { Logger } from './logger.js';
-import { FloofService, FloofError, FLOOF_DIR, FLOOF_STYLES, DEFAULT_TAUNT } from './floof.js';
+import { FloofService, FloofError, FLOOF_DIR, FLOOF_STYLES, DEFAULT_TAUNT, DEFAULT_FLOOF_NAME, MAX_FLOOF_NAME } from './floof.js';
 
 const DB_PATH = path.resolve('prisma/test.db');
 const run = existsSync(DB_PATH) ? describe : describe.skip;
@@ -175,6 +175,55 @@ run('FloofService photos + animation styles (integration)', () => {
       const seen = new Set<string>();
       for (let i = 0; i < 80; i++) seen.add((await svc.pickSpawn()).image.name);
       expect([...seen].sort()).toEqual([A, B].sort());
+    });
+  });
+
+  describe('floof names', () => {
+    it('starts unnamed, and reads as the stand-in until named', async () => {
+      expect(svc.getImageName(A)).toBe('');
+      expect(svc.getImageDisplayName(A)).toBe(DEFAULT_FLOOF_NAME);
+      for (const im of await mine()) {
+        expect(im.label).toBe('');
+        expect(im.displayName).toBe(DEFAULT_FLOOF_NAME);
+      }
+    });
+
+    it('names one floof without touching the others', async () => {
+      await svc.setImageName(A, 'Mochi');
+      expect(svc.getImageName(A)).toBe('Mochi');
+      expect(svc.getImageDisplayName(A)).toBe('Mochi');
+      expect(svc.getImageDisplayName(B)).toBe(DEFAULT_FLOOF_NAME);
+    });
+
+    it('tidies the typed name', async () => {
+      expect(await svc.setImageName(A, '  Sir   Fluffington  ')).toBe('Sir Fluffington');
+      expect(await svc.setImageName(A, 'x'.repeat(200))).toHaveLength(MAX_FLOOF_NAME);
+    });
+
+    it('clears a name back to the stand-in', async () => {
+      await svc.setImageName(A, 'Mochi');
+      expect(await svc.setImageName(A, '   ')).toBe('');
+      expect(svc.getImageDisplayName(A)).toBe(DEFAULT_FLOOF_NAME);
+    });
+
+    it('remembers names across a restart', async () => {
+      await svc.setImageName(A, 'Mochi');
+      const fresh = new FloofService({ prisma } as unknown as Storage, logger);
+      await fresh.init();
+      expect(fresh.getImageDisplayName(A)).toBe('Mochi');
+    });
+
+    it('forgets a deleted floof’s name, so a re-upload is unnamed again', async () => {
+      await svc.setImageName(A, 'Mochi');
+      await svc.deleteImage(A);
+      await writeFile(path.join(FLOOF_DIR, A), squarePng());
+      expect(svc.getImageDisplayName(A)).toBe(DEFAULT_FLOOF_NAME);
+    });
+
+    it('hands the spawning floof its own name', async () => {
+      await svc.setImageName(A, 'Mochi');
+      const got = await svc.pickSpawn(A);
+      expect(got.image).toMatchObject({ label: 'Mochi', displayName: 'Mochi' });
     });
   });
 

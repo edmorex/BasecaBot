@@ -136,8 +136,14 @@ Upload **square PNGs** in the admin panel (max 2 MB). The server validates both
 the PNG signature and squareness from the file's own header, so a non-square or
 non-PNG upload is rejected up front. Images live in `public/assets/floofs/`.
 
-Each photo has a **checkbox per animation style** (all ticked by default) and its
-own **taunt list** (starting with `!pet me`). Untick
+Each photo has a **Name**, a **checkbox per animation style** (all ticked by
+default) and its own **taunt list** (starting with `!pet me`).
+
+Naming a floof is optional — the bot uses the name when it announces a win
+(*"🐾 Mochi got a pet from Alice!"*). Leave it blank and the floof is simply
+called **"The floof"**. Names are trimmed to 40 characters, and the Spawn Floof
+dropdown shows a floof's name once it has one, which makes picking a specific one
+much easier than hunting through filenames. Untick
 one to stop that photo using it — handy when a pose only reads well one way (a
 floof photographed lying down looks odd rolling like a tyre).
 
@@ -211,3 +217,8 @@ directly and the standard backfill picks them up:
 Every line the game says is editable under **Admin → Text Strings** (feature
 `floof`) — winner announcement, the idle reply, stats, and the setter
 confirmation. Blanking a string disables it.
+
+The winner line is `🐾 {floofName} got a pet from {user}! That is {wins} floof
+{plural} for them.` — `{floofName}` is that floof's name, or "The floof" if it has
+none. If you had already customised this string your version is kept as-is; add
+`{floofName}` to it when you want the name included.

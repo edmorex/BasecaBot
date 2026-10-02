@@ -11,6 +11,8 @@ import {
   FLOOF_RANGES,
   FLOOF_STYLES,
   FLOOF_STYLE_LABELS,
+  DEFAULT_FLOOF_NAME,
+  MAX_FLOOF_NAME,
   isFloofStyle,
   type FloofConfig,
 } from '../../services/floof.js';
@@ -281,6 +283,8 @@ export async function getAdminFloof(s: WebServer, req: IncomingMessage, res: Ser
     images,
     styles: FLOOF_STYLES,
     styleLabels: FLOOF_STYLE_LABELS,
+    maxNameLength: MAX_FLOOF_NAME,
+    defaultName: DEFAULT_FLOOF_NAME,
     maxBytes: MAX_IMAGE_BYTES,
   });
 }
@@ -326,6 +330,16 @@ export async function postAdminFloofTaunt(s: WebServer, req: IncomingMessage, re
     if (e instanceof FloofError) throw new HttpError(400, e.message);
     throw e;
   }
+}
+
+/** Name one floof photo (a blank value clears its name). */
+export async function postAdminFloofImageName(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const file = String(body.name ?? '').trim();
+  if (!file) throw new HttpError(400, 'Which floof?');
+  const label = await s.floof.setImageName(file, body.label);
+  s.json(res, 200, { ok: true, label, displayName: label || DEFAULT_FLOOF_NAME });
 }
 
 /** Allow or forbid one animation style for one floof photo. */

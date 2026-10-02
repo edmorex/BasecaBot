@@ -6,9 +6,15 @@ import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/even
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
 import { TextStringsService } from '../../services/textStrings.js';
-import { FLOOF_DEFAULTS, FloofError, type FloofStyle } from '../../services/floof.js';
+import { FLOOF_DEFAULTS, FloofError, DEFAULT_FLOOF_NAME, type FloofStyle } from '../../services/floof.js';
 
-const IMAGE = { name: 'mochi.png', url: '/assets/floofs/mochi.png', bytes: 1, styles: ['pingpong'] as FloofStyle[], taunts: ['!pet me'] };
+const IMAGE = {
+  name: 'mochi.png', url: '/assets/floofs/mochi.png', bytes: 1,
+  styles: ['pingpong'] as FloofStyle[], taunts: ['!pet me'],
+  label: 'Mochi', displayName: 'Mochi',
+};
+/** The same photo, never named — the game should fall back to the stand-in. */
+const UNNAMED = { ...IMAGE, label: '', displayName: DEFAULT_FLOOF_NAME };
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: 'u1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -83,12 +89,29 @@ describe('floof plugin', () => {
   const said = () => say.mock.calls.map((c) => String(c[1]));
   const last = () => said().at(-1) ?? '';
 
-  it('announces the winner and records the win', async () => {
+  it('announces the winner by the floof’s name and records the win', async () => {
     await spawner(null, null);
     await pet();
     expect(recordWin).toHaveBeenCalledWith('u1');
-    expect(last()).toContain('pet the floof first');
+    expect(last()).toBe('🐾 Mochi got a pet from Alice! That is 1 floof pet for them.');
     expect(broadcast).toHaveBeenCalledWith('floof', 'pet', { user: 'Alice' });
+  });
+
+  it('calls an unnamed floof "The floof" rather than leaving a gap', async () => {
+    pickSpawn.mockResolvedValue({ image: UNNAMED, style: 'pingpong' as FloofStyle });
+    await spawner(null, null);
+    await pet();
+    expect(last()).toBe('🐾 The floof got a pet from Alice! That is 1 floof pet for them.');
+  });
+
+  it('names the floof that was actually on screen, not whichever is current', async () => {
+    // The round captures its own name, so a spawn landing between the win and the
+    // announcement cannot put the wrong floof in the message.
+    pickSpawn.mockResolvedValue({ image: { ...IMAGE, label: 'Biscuit', displayName: 'Biscuit' }, style: 'pingpong' as FloofStyle });
+    await spawner(null, null);
+    pickSpawn.mockResolvedValue({ image: IMAGE, style: 'pingpong' as FloofStyle });
+    await pet();
+    expect(last()).toContain('Biscuit got a pet from Alice');
   });
 
   it('tells a chatter there is no floof when none is out', async () => {
@@ -161,7 +184,7 @@ describe('floof plugin', () => {
       await spawner(null, null);          // a new floof lands inside it
       say.mockClear();
       await pet(bob);
-      expect(last()).toContain('pet the floof first');
+      expect(last()).toContain('got a pet from Bob');
     });
   });
 

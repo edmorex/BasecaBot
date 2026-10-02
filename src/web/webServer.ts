@@ -43,7 +43,7 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -294,6 +294,8 @@ export class WebServer {
           return postAdminFloofTaunt(this, req, res);
         case '/api/admin/floof/image/style':
           return postAdminFloofImageStyle(this, req, res);
+        case '/api/admin/floof/image/name':
+          return postAdminFloofImageName(this, req, res);
         case '/api/admin/floof/image':
           return postAdminFloofImage(this, req, res, url);
         case '/api/admin/floof/image/delete':

@@ -23,6 +23,8 @@ const POST_WIN_QUIET_MS = 15_000;
 /** The currently-visible floof, if any. */
 interface Round {
   image: string;
+  /** What to call this floof in chat — its name, or the unnamed stand-in. */
+  displayName: string;
   style: FloofStyle;
   startedAt: number;
   /** Set the moment someone claims it, so only the first !pet can win. */
@@ -95,6 +97,7 @@ export function floofPlugin(): Plugin {
 
     round = {
       image: picked.image.name,
+      displayName: picked.image.displayName,
       style: picked.style,
       startedAt: Date.now(),
       claimedBy: null,
@@ -130,7 +133,7 @@ export function floofPlugin(): Plugin {
         ghostWagSeconds: cfg.ghostWagSeconds,
       },
     });
-    ctx.logger.info({ image: picked.image.name, style: picked.style, manual }, 'floof: spawned');
+    ctx.logger.info({ image: picked.image.name, name: picked.image.displayName, style: picked.style, manual }, 'floof: spawned');
     rearm(cfg); // so the next one is scheduled from now even if this is missed
     return null;
   };
@@ -177,7 +180,7 @@ export function floofPlugin(): Plugin {
       ctx = context;
 
       const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
-        { key: 'win', label: 'Floof pet (winner)', default: '🐾 {user} pet the floof first! That is {wins} floof {plural} for them.', placeholders: ['user', 'wins', 'plural'] },
+        { key: 'win', label: 'Floof pet (winner)', default: '🐾 {floofName} got a pet from {user}! That is {wins} floof {plural} for them.', placeholders: ['floofName', 'user', 'wins', 'plural'] },
         { key: 'idle', label: 'No floof active', default: 'There is no floof to pet right now. Keep watching! 👀', placeholders: [] },
         { key: 'stats', label: 'Stats — line', default: '🐾 {name} has pet the floof {wins} {plural} (rank #{rank}).', placeholders: ['name', 'wins', 'plural', 'rank'] },
         { key: 'noStats', label: 'Stats — no wins', default: '{name} has not pet a floof yet.', placeholders: ['name'] },
@@ -220,7 +223,12 @@ export function floofPlugin(): Plugin {
           ctx.ws.broadcast(ROOM, 'pet', { user: e.user.displayName });
           ctx.logger.info({ user: e.user.login, image: current.image, style: current.style, wins }, 'floof: pet');
 
-          await sayText(e.channel, 'win', { user: e.user.displayName, wins, plural: wins === 1 ? 'pet' : 'pets' });
+          await sayText(e.channel, 'win', {
+            floofName: current.displayName,
+            user: e.user.displayName,
+            wins,
+            plural: wins === 1 ? 'pet' : 'pets',
+          });
           void ctx.achievements
             .evaluate(e.user.id, 'floof')
             .catch((err) => ctx.logger.error({ err }, 'floof: achievements eval failed'));

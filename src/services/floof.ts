@@ -186,10 +186,18 @@ export interface FloofImage {
   styles: FloofStyle[];
   /** This photo's own speech-bubble lines. */
   taunts: string[];
+  /** The floof's name, or '' when it has not been named. */
+  label: string;
+  /** What to call it in chat: its name, or the stand-in for an unnamed floof. */
+  displayName: string;
 }
 
 /** What a newly-added floof starts with; each photo's list is edited separately. */
 export const DEFAULT_TAUNT = '!pet me';
+/** Stands in for an unnamed floof wherever the game refers to one by name. */
+export const DEFAULT_FLOOF_NAME = 'The floof';
+/** Longest name accepted for a floof. */
+export const MAX_FLOOF_NAME = 40;
 
 export interface FloofStatView {
   wins: number;
@@ -237,6 +245,8 @@ export class FloofService {
    *  as the single default taunt; present-but-empty means a deliberately silent
    *  floof, so the two cases must stay distinguishable. */
   private imageTaunts = new Map<string, string[]>();
+  /** Per-photo names. Absent or '' means the floof has not been named. */
+  private imageNames = new Map<string, string>();
   /** Per-photo allowed movement styles. A photo absent from this map allows all
    *  of them, so uploading a floof needs no extra step. */
   private imageStyles = new Map<string, FloofStyle[]>();
@@ -263,7 +273,7 @@ export class FloofService {
     let hadPerImage = false;
     try {
       const rows = await this.db.setting.findMany({
-        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.imageStyles', 'floof.imageTaunts'] } },
+        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.imageStyles', 'floof.imageTaunts', 'floof.imageNames'] } },
       });
       for (const row of rows) {
         if (row.key === 'floof.config') {
@@ -276,6 +286,12 @@ export class FloofService {
           const map = safeJson(row.value) as Record<string, unknown>;
           for (const [name, list] of Object.entries(map ?? {})) {
             if (Array.isArray(list)) this.imageTaunts.set(name, cleanTaunts(list));
+          }
+        } else if (row.key === 'floof.imageNames') {
+          const map = safeJson(row.value) as Record<string, unknown>;
+          for (const [file, label] of Object.entries(map ?? {})) {
+            const clean = cleanFloofName(label);
+            if (clean) this.imageNames.set(file, clean);
           }
         } else if (row.key === 'floof.imageStyles') {
           const map = safeJson(row.value) as Record<string, unknown>;
@@ -366,6 +382,33 @@ export class FloofService {
     return out;
   }
 
+  // ── Names (per photo) ───────────────────────────────────────────────────────
+
+  /** A photo's name as the broadcaster typed it, or '' if it has none. */
+  getImageName(name: string): string {
+    return this.imageNames.get(safeImageName(name)) ?? '';
+  }
+
+  /**
+   * What the game should call this floof — its name, or the stand-in for an
+   * unnamed one. Kept here so chat, the panel and the picker never disagree.
+   */
+  getImageDisplayName(name: string): string {
+    return this.getImageName(name) || DEFAULT_FLOOF_NAME;
+  }
+
+  /** Name a photo, or clear its name by passing a blank string. */
+  async setImageName(name: string, label: unknown): Promise<string> {
+    const key = safeImageName(name);
+    const clean = cleanFloofName(label);
+    if (clean) this.imageNames.set(key, clean);
+    else this.imageNames.delete(key);
+    const obj: Record<string, string> = {};
+    for (const [file, value] of this.imageNames) obj[file] = value;
+    await this.saveSetting('floof.imageNames', JSON.stringify(obj));
+    return clean;
+  }
+
   // ── Taunts (per photo) ──────────────────────────────────────────────────────
 
   /** One photo's speech-bubble lines. A photo never customised gets the default. */
@@ -446,7 +489,11 @@ export class FloofService {
       for (const name of names.sort()) {
         try {
           const buf = await readFile(path.join(FLOOF_DIR, name));
-          out.push({ name, url: FLOOF_URL + name, bytes: buf.length, styles: this.getImageStyles(name), taunts: this.getImageTaunts(name) });
+          out.push({
+            name, url: FLOOF_URL + name, bytes: buf.length,
+            styles: this.getImageStyles(name), taunts: this.getImageTaunts(name),
+            label: this.getImageName(name), displayName: this.getImageDisplayName(name),
+          });
         } catch {
           // skip unreadable file
         }
@@ -507,7 +554,11 @@ export class FloofService {
     await mkdir(FLOOF_DIR, { recursive: true });
     await writeFile(path.join(FLOOF_DIR, name), buf);
     this.logger.info({ name, bytes: buf.length, size: size.width }, 'floof: image uploaded');
-    return { name, url: FLOOF_URL + name, bytes: buf.length, styles: this.getImageStyles(name), taunts: this.getImageTaunts(name) };
+    return {
+      name, url: FLOOF_URL + name, bytes: buf.length,
+      styles: this.getImageStyles(name), taunts: this.getImageTaunts(name),
+      label: this.getImageName(name), displayName: this.getImageDisplayName(name),
+    };
   }
 
   /** Delete an image by name (path-traversal safe). */
@@ -517,6 +568,7 @@ export class FloofService {
       await unlink(path.join(FLOOF_DIR, name));
       if (this.imageStyles.delete(name)) await this.saveImageStyles();
       if (this.imageTaunts.delete(name)) await this.saveImageTaunts();
+      if (this.imageNames.has(name)) await this.setImageName(name, '');
       this.logger.info({ name }, 'floof: image deleted');
     } catch {
       throw new FloofError(`No image called "${name}".`);
@@ -567,6 +619,11 @@ function cleanTaunts(list: unknown[]): string[] {
     if (out.length >= 50) break;
   }
   return out;
+}
+
+/** Trim a floof's name; blank means unnamed. */
+function cleanFloofName(raw: unknown): string {
+  return String(raw ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_FLOOF_NAME);
 }
 
 /** Trim a style list to the known styles, de-duplicated and in canonical order. */

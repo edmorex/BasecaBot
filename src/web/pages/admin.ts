@@ -853,9 +853,9 @@ export function adminPage(): string {
       var styles = floofData.styles || [];
 
       // Photos as a table: one row each, with a checkbox per animation style.
-      var colspan = styles.length + 4;
+      var colspan = styles.length + 5;
       var photoRows = (floofData.images || []).length
-        ? '<table class="floof-table"><thead><tr><th></th><th>Photo</th>' +
+        ? '<table class="floof-table"><thead><tr><th></th><th>Photo</th><th>Name</th>' +
             styles.map(function (s) { return '<th class="mid st">' + esc(styleLabel(s)) + '</th>'; }).join('') +
             '<th class="mid">Taunts</th><th></th></tr></thead><tbody>' +
           floofData.images.map(function (im, idx) {
@@ -867,6 +867,9 @@ export function adminPage(): string {
                 (none ? '<div class="muted" style="font-size:.75rem">never spawns — no animations enabled</div>' : '') +
                 '<div class="muted" id="ftq-' + idx + '" style="font-size:.75rem' +
                   (taunts.length ? ';display:none' : '') + '">stays silent — no taunts</div>' + '</td>' +
+              '<td><input type="text" class="floof-name" data-fnamefor="' + esc(im.name) + '" maxlength="' +
+                (floofData.maxNameLength || 40) + '" value="' + esc(im.label || '') + '" placeholder="' +
+                esc(floofData.defaultName || 'The floof') + '" /></td>' +
               styles.map(function (s) {
                 return '<td class="mid st"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
                   ((im.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /></td>';
@@ -888,7 +891,8 @@ export function adminPage(): string {
 
       var spawnPicker = '<select id="fl-pick-image"><option value="">Random floof</option>' +
         (floofData.images || []).map(function (im) {
-          return '<option value="' + esc(im.name) + '">' + esc(im.name) + '</option>';
+          // Named floofs are easier to pick out of a list than filenames.
+          return '<option value="' + esc(im.name) + '">' + esc(im.label || im.name) + '</option>';
         }).join('') + '</select>' +
         '<select id="fl-pick-style"><option value="">Random animation</option>' +
         styles.map(function (s) { return '<option value="' + esc(s) + '">' + esc(styleLabel(s)) + '</option>'; }).join('') +
@@ -934,7 +938,7 @@ export function adminPage(): string {
           }).join('') + '</div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .3rem">Floof photos</h3>' +
-          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Square PNGs up to ' + Math.floor(floofData.maxBytes / 1048576) + 'MB, rendered at 128×128. Untick an animation to stop a photo using it — handy when a pose only reads well one way. A photo with none ticked is never spawned at random. Each floof also has <strong>its own taunts</strong>: hit the number in the Taunts column to edit them.</p>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Square PNGs up to ' + Math.floor(floofData.maxBytes / 1048576) + 'MB, rendered at 128×128. Untick an animation to stop a photo using it — handy when a pose only reads well one way. A photo with none ticked is never spawned at random. Give a floof a <strong>Name</strong> and the bot uses it when announcing a win; leave it blank and it is just &ldquo;The floof&rdquo;. Each floof also has <strong>its own taunts</strong>: hit the number in the Taunts column to edit them.</p>' +
           '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="floof-file" accept="image/png" />' +
           '<button type="button" class="pink" id="floof-upload">Upload</button></div>' +
           '<div style="margin-top:.9rem; overflow-x:auto">' + photoRows + '</div></div>';
@@ -992,6 +996,21 @@ export function adminPage(): string {
         inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); add(); } };
       });
       wireFloofTauntChips(document);
+      Array.prototype.forEach.call(document.querySelectorAll('[data-fnamefor]'), function (inp) {
+        var file = inp.getAttribute('data-fnamefor');
+        var save = function () {
+          api('POST', '/api/admin/floof/image/name', { name: file, label: inp.value })
+            .then(function (d) {
+              inp.value = d.label || '';          // show it exactly as it was stored
+              var im = (floofData.images || []).filter(function (x) { return x.name === file; })[0];
+              if (im) { im.label = d.label; im.displayName = d.displayName; }
+              toast('floof-toast', d.label ? ('Named ' + d.label + '.') : ('Cleared the name for ' + file + '.'), true);
+            })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+        inp.onchange = save;
+        inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } };
+      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-fstyle]'), function (cb) {
         cb.onchange = function () {
           var name = cb.getAttribute('data-fname');
@@ -1043,6 +1062,7 @@ export function adminPage(): string {
         + '.floof-table td{padding:.35rem .5rem;border-top:1px solid var(--border);vertical-align:middle}'
         + '.floof-table img{width:52px;height:52px;object-fit:cover;border-radius:8px;background:#0008;display:block}'
         + '.floof-table td.nm{font-weight:600;word-break:break-all;min-width:9rem}'
+        + '.floof-table input.floof-name{width:9rem}'
         + '.floof-table tr.shelved td.nm,.floof-table tr.shelved img{opacity:.5}'
         + '.floof-table tr.taunt-row.hidden{display:none}'
         + '.floof-table tr.taunt-row td{background:var(--bg);border-top:0;padding:.2rem .6rem .8rem}'
