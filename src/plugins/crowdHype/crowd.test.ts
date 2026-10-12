@@ -46,7 +46,7 @@ describe('CrowdTracker', () => {
     expect(t.ranking(T0 + 200, 5000)[0]!.name).toBe('NewName');
   });
 
-  it('prunes aged entries so the buffer cannot grow without end', () => {
+  it('prunes aged messages so the rate buffer cannot grow without end', () => {
     const t = new CrowdTracker();
     for (let i = 0; i < 500; i++) t.add({ ts: T0 + i * 100, userId: 'a', name: 'A', emotes: 0 });
     expect(t.size).toBe(500);
@@ -86,6 +86,62 @@ describe('excitementLevel', () => {
   });
 });
 
+describe('CrowdTracker survival horizon', () => {
+  it('keeps a chatter present after their score has decayed to nothing', () => {
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'a', name: 'A', emotes: 4 });
+    const now = T0 + 30_000;
+    t.prune(now, 5000, 60_000);           // 5s rate window, 60s survival
+    const ranked = t.ranking(now, 5000);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]).toMatchObject({ userId: 'a', score: 0, lastAt: T0 });
+    expect(t.size).toBe(0);               // their message is gone from the buffer
+    expect(t.presentCount).toBe(1);       // but they are still on screen
+  });
+
+  it('drops them once the survival horizon passes', () => {
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'a', name: 'A', emotes: 0 });
+    t.prune(T0 + 61_000, 5000, 60_000);
+    expect(t.ranking(T0 + 61_000, 5000)).toEqual([]);
+    expect(t.presentCount).toBe(0);
+  });
+
+  it('ranks the quiet tail below anyone still talking, newest first', () => {
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'loudThen', name: 'LoudThen', emotes: 20 });   // long gone
+    t.add({ ts: T0 + 1000, userId: 'alsoOld', name: 'AlsoOld', emotes: 20 });
+    t.add({ ts: T0 + 58_000, userId: 'quietNow', name: 'QuietNow', emotes: 0 });
+    const now = T0 + 59_000;
+    t.prune(now, 5000, 60_000);
+    expect(t.ranking(now, 5000).map((m) => m.userId)).toEqual(['quietNow', 'alsoOld', 'loudThen']);
+  });
+
+  it('treats a missing survival horizon as the rate window, the old behaviour', () => {
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'a', name: 'A', emotes: 0 });
+    t.prune(T0 + 6000, 5000);
+    expect(t.ranking(T0 + 6000, 5000)).toEqual([]);
+  });
+
+  it('never prunes presence shorter than the rate window', () => {
+    // A survival horizon below the rate window would drop chatters whose messages
+    // are still being counted, i.e. someone scoring but not on screen.
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'a', name: 'A', emotes: 0 });
+    t.prune(T0 + 4000, 5000, 1000);
+    expect(t.ranking(T0 + 4000, 5000)).toHaveLength(1);
+  });
+
+  it('clearing forgets presence as well as messages', () => {
+    const t = new CrowdTracker();
+    t.add({ ts: T0, userId: 'a', name: 'A', emotes: 0 });
+    t.clear();
+    expect(t.presentCount).toBe(0);
+    expect(t.ranking(T0, 5000)).toEqual([]);
+  });
+});
+
 describe('rowCapacity', () => {
   it('alternates full and one-short going back', () => {
     // The short rows sit on the midpoints of the row in front, filling the gaps
@@ -105,15 +161,21 @@ describe('assignRows', () => {
   const OPTS = { rows: 3, perRow: 2, debounceMs: 2000, now: T0 };
   const none = new Map<string, RowSlot>();
 
-  it('seats the loudest in the front row and overflows backwards', () => {
+  it('seats the loudest in the BACK row and overflows forwards', () => {
+    // The farthest row is the prime spot, so rank 1 goes there and the front row
+    // takes whoever is left over.
     const ranked = ['a', 'b', 'c', 'd', 'e', 'f'].map((u, i) => member(u, 100 - i));
     const out = assignRows(ranked, none, OPTS);
-    expect(out.get('a')!.row).toBe(0);
-    expect(out.get('b')!.row).toBe(0);
+    expect(out.get('a')!.row).toBe(2);
+    expect(out.get('b')!.row).toBe(2);
     expect(out.get('c')!.row).toBe(1); // the short row takes one
-    expect(out.get('d')!.row).toBe(2);
-    expect(out.get('e')!.row).toBe(2);
+    expect(out.get('d')!.row).toBe(0);
+    expect(out.get('e')!.row).toBe(0);
     expect(out.has('f')).toBe(false);  // past capacity
+  });
+
+  it('puts a lone chatter in the farthest row', () => {
+    expect(assignRows([member('a', 1)], none, OPTS).get('a')!.row).toBe(2);
   });
 
   it('never seats more than a row can hold', () => {
@@ -141,30 +203,30 @@ describe('assignRows', () => {
   });
 
   it('pins a chatter to their row while the debounce is running', () => {
-    // b was in the front row a moment ago; a surge of new chatters should not
-    // yank them backwards mid-animation.
-    const prev = new Map<string, RowSlot>([['b', { row: 0, since: T0 - 500 }]]);
+    // b was in the back row a moment ago; a surge of new chatters should not
+    // yank them forwards mid-animation.
+    const prev = new Map<string, RowSlot>([['b', { row: 2, since: T0 - 500 }]]);
     const ranked = [member('x', 99), member('y', 98), member('b', 1)];
     const out = assignRows(ranked, prev, OPTS);
-    expect(out.get('b')!.row).toBe(0);
+    expect(out.get('b')!.row).toBe(2);
     // ...and the louder pair take the seats that are left.
-    expect(out.get('x')!.row).toBe(0);
+    expect(out.get('x')!.row).toBe(2);
     expect(out.get('y')!.row).toBe(1);
   });
 
   it('lets them move once the debounce has expired', () => {
-    const prev = new Map<string, RowSlot>([['b', { row: 0, since: T0 - 5000 }]]);
+    const prev = new Map<string, RowSlot>([['b', { row: 2, since: T0 - 5000 }]]);
     const ranked = [member('x', 99), member('y', 98), member('b', 1)];
     const out = assignRows(ranked, prev, OPTS);
-    expect(out.get('x')!.row).toBe(0);
-    expect(out.get('y')!.row).toBe(0);
-    expect(out.get('b')!.row).toBe(1);
+    expect(out.get('x')!.row).toBe(2);
+    expect(out.get('y')!.row).toBe(2);
+    expect(out.get('b')!.row).toBe(1);   // pushed forwards by the louder pair
   });
 
   it('does not restart the clock for a chatter who keeps their row', () => {
     // Otherwise a chatter re-seated in the same row every tick would never become
     // eligible to move, and the debounce would pin them forever.
-    const prev = new Map<string, RowSlot>([['a', { row: 0, since: T0 - 1900 }]]);
+    const prev = new Map<string, RowSlot>([['a', { row: 2, since: T0 - 1900 }]]);
     let out = assignRows([member('a', 10)], prev, OPTS);
     expect(out.get('a')!.since).toBe(T0 - 1900);
     out = assignRows([member('a', 10)], out, { ...OPTS, now: T0 + 200 });
@@ -172,13 +234,13 @@ describe('assignRows', () => {
   });
 
   it('stamps a fresh clock on an actual move', () => {
-    const prev = new Map<string, RowSlot>([['a', { row: 2, since: T0 - 9000 }]]);
+    const prev = new Map<string, RowSlot>([['a', { row: 0, since: T0 - 9000 }]]);
     const out = assignRows([member('a', 10)], prev, OPTS);
-    expect(out.get('a')).toEqual({ row: 0, since: T0 });
+    expect(out.get('a')).toEqual({ row: 2, since: T0 });
   });
 
   it('forgets a chatter who has gone quiet', () => {
-    const prev = new Map<string, RowSlot>([['gone', { row: 0, since: T0 }]]);
+    const prev = new Map<string, RowSlot>([['gone', { row: 2, since: T0 }]]);
     expect(assignRows([member('a', 1)], prev, OPTS).has('gone')).toBe(false);
   });
 
@@ -195,14 +257,14 @@ describe('assignRows', () => {
     // perRow floors at 2, so one row is two seats however small the setting.
     const out = assignRows([member('a', 9), member('b', 8), member('c', 7)], none, { ...OPTS, rows: 1, perRow: 1 });
     expect(out.size).toBe(2);
-    expect(out.get('a')).toEqual({ row: 0, since: T0 });
+    expect(out.get('a')).toEqual({ row: 0, since: T0 });  // the only row is both front and back
     expect(out.has('c')).toBe(false);
   });
 
   it('settles rather than oscillating when two chatters swap rank each tick', () => {
     // The symptom the debounce exists to prevent: with one seat in the front row
     // and two chatters trading places, rows must not flip on every tick.
-    const opts = { rows: 2, perRow: 1, debounceMs: 2000, now: T0 };
+    const opts = { rows: 2, perRow: 2, debounceMs: 2000, now: T0 };
     let slots = new Map<string, RowSlot>();
     const moves: number[] = [];
     for (let tick = 0; tick < 20; tick++) {

@@ -86,12 +86,12 @@ describe('crowd overlay static-style cache', () => {
     const body = functionBody('frame');
     const guard = body.indexOf('if (p.sig !== sig)');
     expect(guard).toBeGreaterThan(-1);
-    const unguarded = body.slice(body.indexOf('for (var id in people)'), guard);
+    const unguarded = body.slice(body.indexOf('for (var key in seats)'), guard);
     const writes = [...unguarded.matchAll(/\.style\.(\w+)\s*=/g)].map((m) => m[1]!);
     expect([...new Set(writes)].sort()).toEqual(['transform']);
   });
 
-  it('applies the guarded styles on a member’s very first frame', () => {
+  it('applies the guarded styles on a seat’s very first frame', () => {
     // An empty starting signature can never equal a real one, so the first
     // comparison always fails and the statics land immediately.
     expect(SRC).toMatch(/sig: ''/);
@@ -100,8 +100,7 @@ describe('crowd overlay static-style cache', () => {
   it('re-applies them when the avatar node is rebuilt', () => {
     // paint() can replace the avatar element; the new one has no sizing yet, so
     // the signature has to be invalidated or it stays at its default size.
-    const body = functionBody('paint');
-    expect(body).toMatch(/p\.sig = ''/);
+    expect(functionBody('paint')).toMatch(/\bseat\.sig = ''/);
   });
 
   it('keeps the constant colour out of the frame loop entirely', () => {
@@ -147,8 +146,81 @@ describe('crowd overlay static-style cache', () => {
 
   it('re-applies the mirror when the artwork is swapped out', () => {
     const body = functionBody('paint');
-    expect(body).toMatch(/p\.art = /);
-    expect(body).toMatch(/p\.flipped = false/);
+    expect(body).toMatch(/\bseat\.art = /);
+    expect(body).toMatch(/\bseat\.flipped = false/);
+  });
+
+  it('builds the crowd from seats, not from people', () => {
+    // A seat owns its position, its artwork and its animation phase; a chatter is
+    // only ever the occupant. This is what keeps the characters still while the
+    // icons move, and what will let artwork be pinned per position later.
+    expect(SRC).toMatch(/function buildSeat\(row, slot\)/);
+    expect(SRC).toMatch(/function artFor\(seat\)/);
+    expect(SRC).toMatch(/var seats = \{\}/);
+    expect(SRC).toMatch(/var assign = \{\}/);
+  });
+
+  it('always honours a pinned seat', () => {
+    // An assignment made in the panel must win outright, before any random draw.
+    const body = functionBody('artFor');
+    expect(body).toMatch(/cfg\.seatArt/);
+    expect(body).toMatch(/seatKey\(seat\.row, seat\.slot\)/);
+    const pinned = body.indexOf('pinned');
+    const random = body.indexOf('Math.random');
+    expect(pinned).toBeGreaterThan(-1);
+    expect(random).toBeGreaterThan(-1);
+    expect(pinned, 'the pin must be checked before the draw').toBeLessThan(random);
+  });
+
+  it('draws an unpinned seat once and keeps it while occupied', () => {
+    // Re-rolling per frame would strobe the character; re-rolling on every
+    // reshuffle would undo the whole point of the seat model. The draw is cached
+    // on the seat and only cleared when it empties.
+    const art = functionBody('artFor');
+    expect(art).toMatch(/seat\.rolled/);
+    expect(art).toMatch(/if \(!seat\.rolled/);
+    const vacate = functionBody('assignSeats');
+    expect(vacate).toMatch(/rolled = null/);
+  });
+
+  it('re-draws if the cached pick is no longer in the library', () => {
+    // Deleting the silhouette a seat happened to draw must not leave it blank.
+    expect(functionBody('artFor')).toMatch(/list\.indexOf\(seat\.rolled\) === -1/);
+  });
+
+  it('gives the animation phase to the seat, not the occupant', () => {
+    // Otherwise a chatter arriving mid-bounce would restart the spot's rhythm.
+    const body = functionBody('buildSeat');
+    for (const key of ['phase', 'driftPhase', 'driftRate', 'rateJitter']) {
+      expect(body, `${key} should belong to the seat`).toMatch(new RegExp(key + ':'));
+    }
+  });
+
+  it('moves only the occupancy when the crowd reshuffles', () => {
+    // assignSeats hands seats a new occupant; it must never move or rebuild the
+    // artwork, or the characters would travel with the people again.
+    const body = functionBody('assignSeats');
+    expect(body).toMatch(/seat\.user = occ\.id/);
+    expect(body).toMatch(/seat\.occupantAvatar = /);
+    expect(body).not.toMatch(/artFor|innerHTML/);
+  });
+
+  it('keeps an emptied seat until the layout drops it', () => {
+    const body = functionBody('assignSeats');
+    // Vacated: fades out but stays, waiting for the next occupant.
+    expect(body).toMatch(/classList\.remove\('in'\)/);
+    // Removed only once the row or slot no longer exists.
+    expect(body).toMatch(/rowCapacity\(s3\.row\)/);
+  });
+
+  it('centres the artwork in its box, so the avatar lines up with it', () => {
+    // The body box is a fixed 0.62 x height but the artwork is width:auto, so its
+    // real width comes from the PNG's aspect ratio. Flush-left artwork put the
+    // avatar off to one side — the direction depending on whether the image was
+    // narrower or wider than the box.
+    const m = /\.sil\{([^}]*)\}/.exec(SRC);
+    expect(m, '.sil rule not found').not.toBeNull();
+    expect(m![1]!).toMatch(/margin:\s*0 auto/);
   });
 
   it('still renders, with JS that compiles', () => {

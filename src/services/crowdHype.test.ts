@@ -16,14 +16,16 @@ const noop = () => {};
 const logger = { info: noop, warn: noop, error: noop, debug: noop, child: () => logger } as unknown as Logger;
 
 /** In-memory Setting table, so these stay unit tests. */
-function storage(seed?: string) {
-  let value = seed;
+function storage(seed?: string, seatSeed?: string) {
+  const rows: Record<string, string> = {};
+  if (seed !== undefined) rows['crowd.config'] = seed;
+  if (seatSeed !== undefined) rows['crowd.seatArt'] = seatSeed;
   return {
     prisma: {
       setting: {
-        findUnique: async () => (value === undefined ? null : { key: 'crowd.config', value }),
-        upsert: async (args: { create: { value: string }; update: { value: string } }) => {
-          value = args.update.value ?? args.create.value;
+        findMany: async () => Object.entries(rows).map(([key, value]) => ({ key, value })),
+        upsert: async (args: { where: { key: string }; create: { value: string }; update: { value: string } }) => {
+          rows[args.where.key] = args.update.value ?? args.create.value;
         },
       },
     },
@@ -124,6 +126,20 @@ describe('CrowdHypeService config', () => {
     }
   });
 
+  it('keeps a chatter for survival x rate windows', async () => {
+    // The documented default: a 6s window and 50 windows is five minutes from a
+    // single message.
+    expect(CROWD_DEFAULTS.rateWindowSeconds).toBe(6);
+    expect(CROWD_DEFAULTS.survivalWindows).toBe(50);
+    expect(CROWD_DEFAULTS.rateWindowSeconds * CROWD_DEFAULTS.survivalWindows).toBe(300);
+  });
+
+  it('clamps the survival horizon to at least one window', async () => {
+    expect((await svc.setConfig({ survivalWindows: 0 })).survivalWindows).toBe(1);
+    expect((await svc.setConfig({ survivalWindows: -5 })).survivalWindows).toBe(1);
+    expect((await svc.setConfig({ survivalWindows: 99999 })).survivalWindows).toBe(1000);
+  });
+
   it('clamps out-of-range values', async () => {
     const c = await svc.setConfig({ rows: 99, glow: -5, rowScale: 9, spewSeconds: 0.01 });
     expect(c.rows).toBe(8);
@@ -161,6 +177,62 @@ describe('CrowdHypeService config', () => {
     const fresh = new CrowdHypeService(storage('not json at all'), logger);
     await fresh.init();
     expect(fresh.getConfig().rows).toBe(CROWD_DEFAULTS.rows);
+  });
+});
+
+describe('CrowdHypeService seat assignments', () => {
+  let svc: CrowdHypeService;
+
+  beforeEach(async () => {
+    svc = new CrowdHypeService(storage(), logger);
+    await svc.init();
+  });
+
+  it('starts with every seat on Random', () => {
+    expect(svc.getSeatArt()).toEqual({});
+  });
+
+  it('pins a seat and remembers it across a restart', async () => {
+    await svc.setSeatArt({ '0:0': 'fan.png', '2:3': 'other.png' });
+    const store = storage(undefined, JSON.stringify(svc.getSeatArt()));
+    const fresh = new CrowdHypeService(store, logger);
+    await fresh.init();
+    expect(fresh.getSeatArt()).toEqual({ '0:0': 'fan.png', '2:3': 'other.png' });
+  });
+
+  it('treats a blank value as back to Random', async () => {
+    await svc.setSeatArt({ '0:0': 'fan.png', '0:1': '', '0:2': '   ' });
+    expect(svc.getSeatArt()).toEqual({ '0:0': 'fan.png' });
+  });
+
+  it('rejects a seat key that is not row:slot', async () => {
+    await svc.setSeatArt({ 'nonsense': 'fan.png', '1:2': 'fan.png', '9999:1': 'fan.png', '1': 'fan.png' });
+    expect(Object.keys(svc.getSeatArt())).toEqual(['1:2']);
+  });
+
+  it('scrubs the filename, so a seat cannot point outside the library', async () => {
+    await svc.setSeatArt({ '0:0': '../../etc/passwd' });
+    expect(svc.getSeatArt()['0:0']).toBe('passwd.png');
+  });
+
+  it('hands out a copy, not the original', async () => {
+    await svc.setSeatArt({ '0:0': 'fan.png' });
+    const got = svc.getSeatArt();
+    got['0:0'] = 'tampered.png';
+    expect(svc.getSeatArt()['0:0']).toBe('fan.png');
+  });
+
+  it('keeps assignments for rows that do not currently exist', async () => {
+    // Shrinking the layout and growing it again should not lose the work.
+    await svc.setSeatArt({ '7:20': 'fan.png' });
+    await svc.setConfig({ rows: 1, perRow: 2 });
+    expect(svc.getSeatArt()['7:20']).toBe('fan.png');
+  });
+
+  it('drops an assignment whose file is gone when resolving for the overlay', async () => {
+    await svc.setSeatArt({ '0:0': 'missing.png' });
+    // listImages reads the real directory, which has no such file.
+    expect(await svc.resolveSeatArt()).toEqual({});
   });
 });
 

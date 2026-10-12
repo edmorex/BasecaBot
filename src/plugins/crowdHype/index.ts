@@ -32,8 +32,6 @@ const SIM_EMOTE_IDS = [
 interface Fighter {
   name: string;
   avatarUrl: string | null;
-  /** Index into the silhouette library, fixed per chatter so their shape is stable. */
-  silhouette: number;
 }
 
 /**
@@ -61,6 +59,8 @@ export function crowdHypePlugin(): Plugin {
   let pendingSpew = new Map<string, string[]>();
   /** Silhouette filenames, refreshed on a slow cadence (uploads are rare). */
   let silhouettes: string[] = [];
+  /** Seat -> silhouette url, for seats the broadcaster has pinned. */
+  let seatArt: Record<string, string> = {};
   let silhouettesAt = 0;
   /** Which clear request we have already acted on. */
   let handledClear = 0;
@@ -129,7 +129,7 @@ export function crowdHypePlugin(): Plugin {
   const seen = (userId: string, name: string): Fighter => {
     let m = members.get(userId);
     if (!m) {
-      m = { name, avatarUrl: avatars.get(userId) ?? null, silhouette: Math.floor(Math.random() * 1000) };
+      m = { name, avatarUrl: avatars.get(userId) ?? null };
       members.set(userId, m);
       queueAvatar(userId);
     }
@@ -196,10 +196,17 @@ export function crowdHypePlugin(): Plugin {
   const refreshSilhouettes = async () => {
     if (Date.now() - silhouettesAt < 15_000) return;
     silhouettesAt = Date.now();
+    // Resolved independently: a failure reading the assignments must not also
+    // blank the silhouette library and leave the whole crowd shapeless.
     try {
       silhouettes = (await ctx.crowd.listImages()).map((i: { url: string }) => i.url);
     } catch {
       silhouettes = [];
+    }
+    try {
+      seatArt = await ctx.crowd.resolveSeatArt();
+    } catch {
+      seatArt = {};
     }
   };
 
@@ -232,7 +239,9 @@ export function crowdHypePlugin(): Plugin {
     if (now < live.pausedUntil) return; // cleared/paused: let the overlay sit still
 
     const windowMs = cfg.rateWindowSeconds * 1000;
-    tracker.prune(now, windowMs);
+    // Presence outlasts activity: a chatter stays in the crowd for this long after
+    // their last message, even though their score drops to zero much sooner.
+    tracker.prune(now, windowMs, windowMs * Math.max(1, cfg.survivalWindows));
     const rate = tracker.rate(now, windowMs);
     const quiesced = now < live.quiescedUntil;
     const level = quiesced ? 1 : excitementLevel(rate, cfg.thresholds);
@@ -245,18 +254,13 @@ export function crowdHypePlugin(): Plugin {
       now,
     });
 
+    // Only the chatter travels between positions now — the silhouette belongs to
+    // the seat, so the overlay picks the art per position from the whole library.
     const roster = ranked
       .filter((m) => slots.has(m.userId))
       .map((m) => {
         const f = seen(m.userId, m.name);
-        const slot = slots.get(m.userId)!;
-        return {
-          id: m.userId,
-          name: m.name,
-          row: slot.row,
-          avatarUrl: f.avatarUrl,
-          silhouette: silhouettes.length ? silhouettes[f.silhouette % silhouettes.length]! : null,
-        };
+        return { id: m.userId, name: m.name, row: slots.get(m.userId)!.row, avatarUrl: f.avatarUrl };
       });
 
     // Forget anyone who has dropped off, so the maps track the crowd not history.
@@ -288,6 +292,8 @@ export function crowdHypePlugin(): Plugin {
         avatarSize: cfg.avatarSize,
         glow: cfg.glow,
         glowColor: cfg.glowColor,
+        silhouettes,
+        seatArt,
         mirrorMode: cfg.mirrorMode,
         emoteSpew: cfg.emoteSpew,
         spewSpeed: cfg.spewSpeed,

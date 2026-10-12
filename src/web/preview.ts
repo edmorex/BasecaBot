@@ -113,7 +113,7 @@ async function collectBuiltins() {
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, getImageTaunts: () => [], getImageName: () => '', getImageDisplayName: () => 'The floof', pickSpawn: async () => null, getImageStyles: () => [], statsFor: async () => ({ wins: 0, rank: null }) },
-    crowd: { getConfig: () => ({}), getLive: () => ({ mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false }), listImages: async () => [] },
+    crowd: { getConfig: () => ({}), getLive: () => ({ mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false, pausedForever: false, quiescedForever: false }), listImages: async () => [], getSeatArt: () => ({}), resolveSeatArt: async () => ({}) },
     boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null, rememberEmotes: async () => {}, lookupEmoteArt: async () => new Map() },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
@@ -262,6 +262,7 @@ const previewFloofImages: MockFloof[] = [
 // Mock Crowd Hype state (exercises the three panel sections + the gallery).
 const previewCrowdConfig: Record<string, unknown> = { ...CROWD_DEFAULTS, enabled: true };
 const previewCrowdLive = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false, pausedForever: false, quiescedForever: false };
+let previewCrowdSeatArt: Record<string, string> = { '2:2': 'fan-b.png' };
 const previewCrowdImages = [
   { name: 'fan-a.png', url: '/assets/logo.png', bytes: 18420, width: 180, height: 300 },
   { name: 'fan-b.png', url: '/assets/logo.png', bytes: 20110, width: 200, height: 320 },
@@ -462,6 +463,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         levels: CROWD_LEVELS,
         live: previewCrowdLive,
         images: previewCrowdImages,
+        seatArt: previewCrowdSeatArt,
         maxBytes: 2 * 1024 * 1024,
       });
     }
@@ -676,9 +678,25 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       previewCrowdLive.quiescedForever = previewCrowdLive.quiescedUntil >= HOLD_FOREVER;
       return json(200, { ok: true, live: previewCrowdLive });
     }
+    if (p === '/api/admin/crowd/seats') {
+      const seats = (body.seats ?? {}) as Record<string, unknown>;
+      const next: Record<string, string> = {};
+      for (const [seat, file] of Object.entries(seats)) {
+        if (!/^\d{1,3}:\d{1,3}$/.test(seat)) continue;
+        const name = String(file ?? '').trim();
+        if (name) next[seat] = name;
+      }
+      previewCrowdSeatArt = next;
+      return json(200, { ok: true, seatArt: previewCrowdSeatArt });
+    }
     if (p === '/api/admin/crowd/image/delete') {
-      const i = previewCrowdImages.findIndex((x) => x.name === String(body.name ?? ''));
+      const name = String(body.name ?? '');
+      const i = previewCrowdImages.findIndex((x) => x.name === name);
       if (i >= 0) previewCrowdImages.splice(i, 1);
+      // Any seat pinned to it goes back to Random, as the service does.
+      for (const [seat, file] of Object.entries(previewCrowdSeatArt)) {
+        if (file === name) delete previewCrowdSeatArt[seat];
+      }
       return json(200, { ok: true });
     }
     if (p === '/api/admin/boss') {

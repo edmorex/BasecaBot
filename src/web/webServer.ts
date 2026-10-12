@@ -45,7 +45,7 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, getAdminCrowd, postAdminCrowd, postAdminCrowdLive, postAdminCrowdImage, postAdminCrowdImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, getAdminCrowd, postAdminCrowd, postAdminCrowdLive, postAdminCrowdSeats, postAdminCrowdImage, postAdminCrowdImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -336,6 +336,8 @@ export class WebServer {
           return postAdminCrowd(this, req, res);
         case '/api/admin/crowd/live':
           return postAdminCrowdLive(this, req, res);
+        case '/api/admin/crowd/seats':
+          return postAdminCrowdSeats(this, req, res);
         case '/api/admin/crowd/image':
           return postAdminCrowdImage(this, req, res, url);
         case '/api/admin/crowd/image/delete':

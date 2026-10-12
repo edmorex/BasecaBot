@@ -605,6 +605,7 @@ export async function getAdminCrowd(s: WebServer, req: IncomingMessage, res: Ser
     levels: CROWD_LEVELS,
     live: s.crowd.getLive(),
     images,
+    seatArt: s.crowd.getSeatArt(),
     maxBytes: CROWD_MAX_IMAGE_BYTES,
   });
 }
@@ -653,6 +654,14 @@ export async function postAdminCrowdLive(s: WebServer, req: IncomingMessage, res
       throw new HttpError(400, 'Unknown live-control action.');
   }
   s.json(res, 200, { ok: true, live });
+}
+
+/** Replace the whole set of seat assignments; a blank value means back to Random. */
+export async function postAdminCrowdSeats(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const seatArt = await s.crowd.setSeatArt(body.seats ?? {});
+  s.json(res, 200, { ok: true, seatArt });
 }
 
 /** Upload a silhouette PNG. Raw binary body + `?name=`, like the other uploaders. */

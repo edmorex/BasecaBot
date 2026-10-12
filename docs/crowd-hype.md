@@ -28,12 +28,25 @@ The overlay renders nothing until chat moves, so it is safe to leave in a scene.
 
 ## How the crowd behaves
 
+**How long they stay.** Being *loud* and being *present* are measured over
+different spans. The **rate window** decides how active someone counts as right
+now; **window survival** decides how long they stay on screen after going quiet —
+`rate window × survival`, so the defaults keep a chatter for **five minutes** from
+a single message. Their score still falls to zero as soon as the rate window
+passes, so a lingering chatter sinks to the back and never outranks someone
+talking now. Survival is not a reservation: once the rows are full, the quiet tail
+is the first to be displaced by a busier chatter.
+
 **Who appears.** Anyone who talks joins the crowd. The front row holds **Per row**
 people and the rows behind alternate one fewer — 6, 5, 6, 5 at the default — with
 the short rows sitting on the **midpoints** of the row in front so they fill the
 gaps between heads rather than lining everyone up in columns. Seats fill from the
 **middle of each row outwards**, so a quiet chat gathers in the centre instead of
-hugging the left edge. The loudest chatters take the front row — "loudest" being
+hugging the left edge.
+
+The **farthest row is the prime spot**: the loudest chatters fill it first and the
+rows in front take the overflow, so a quiet chat appears at the back. The loudest
+chatters take the back row — "loudest" being
 messages plus emotes over the rate window, with ties going to whoever spoke most
 recently. Rows behind sit higher and smaller to fake distance.
 
@@ -123,6 +136,7 @@ profile-picture lookup, and real chat still counts while the simulation runs.
 | Mirror silhouettes | Never flip | When to flip the artwork horizontally (see below) |
 | Row hold | 4s | Before a chatter may change row |
 | Rate window | 6s | Seconds of chat the rate is measured over |
+| Window survival | 50 | Silent rate windows a chatter survives before leaving |
 | Emote spew | on | Throw spammed emotes out of the silhouettes |
 | Launch speed / size / lifetime | 260px/s, 44px, 2.2s | How the spewed emotes fly |
 
@@ -134,6 +148,50 @@ values.
 
 Defaults: level 1 from 0/s, level 2 from 0.5/s, level 3 from 1.5/s, level 4 from
 3/s, level 5 from 6/s.
+
+### Seats, not people
+
+The crowd is built out of **seats**. A seat owns its position, its character
+artwork and its bounce rhythm, and keeps all three for as long as the layout
+holds. A chatter is only ever the *occupant* — the profile picture showing on that
+seat.
+
+So when activity reshuffles the crowd, **only the icons move between positions**.
+The characters stay exactly where they are, and a chatter dropping into a seat
+mid-bounce joins that spot's rhythm rather than restarting it. (This is also the
+groundwork for pinning specific artwork to specific positions.)
+
+Which silhouette a seat wears is either **pinned** by you or **drawn at random**
+when the seat fills — see *Assigning seats* below. Either way it is settled for as
+long as somebody is standing there.
+
+### Assigning seats
+
+**Silhouettes → Assign Seats** opens a grid with one dropdown per seat, laid out
+the way the crowd appears on screen: the farthest row at the top, the front row at
+the bottom, and the short rows inset half a cell because that is where they
+actually sit.
+
+| Choice | Behaviour |
+|---|---|
+| **Random** (the default) | The seat draws a character from the library whenever somebody new stands there |
+| A specific file | That character is used every single time the seat fills |
+
+| Button | Does |
+|---|---|
+| **Save** | Keeps the assignments and returns to the panel |
+| **Cancel** | Returns without saving — nothing is written until you press Save |
+| **Randomize** | Pins every seat to a specific character picked at random, so the crowd is fixed but varied |
+| **Default** | Puts every seat back to Random |
+
+Note the difference between *Random* and *Randomize*: a Random seat re-draws each
+time it fills, while Randomize pins a one-off random choice that then never
+changes.
+
+Two details worth knowing. Assignments for rows or slots that do not currently
+exist are **kept**, so shrinking the layout and growing it again does not lose the
+work. And deleting a silhouette **frees any seat pinned to it** back to Random,
+rather than leaving that seat pointing at a file that is gone.
 
 ### Mirroring
 

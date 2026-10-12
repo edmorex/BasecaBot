@@ -66,6 +66,12 @@ export interface CrowdConfig {
   // ── Excitement ──
   /** Seconds of chat the rate is measured over. */
   rateWindowSeconds: number;
+  /**
+   * How many silent rate windows a chatter survives before being despawned. With
+   * the defaults (6s window, 50) one message keeps them on screen for 5 minutes —
+   * though busier chatters can still displace them once the rows are full.
+   */
+  survivalWindows: number;
   /** Messages+emotes per second needed to reach each level (ascending, 5 entries). */
   thresholds: number[];
   /** Movement per excitement level (5 entries). */
@@ -115,6 +121,7 @@ export const CROWD_DEFAULTS: CrowdConfig = {
   glowColor: '#ff6ec7',
   mirrorMode: 'off',
   rateWindowSeconds: 6,
+  survivalWindows: 50,
   thresholds: [0, 0.5, 1.5, 3, 6],
   levels: LEVEL_DEFAULTS.map((l) => ({ ...l })),
   calm: { jumpPx: 0, bounceHz: 0.35, swayDeg: 6, jitterPx: 0, driftPx: 10 },
@@ -143,6 +150,7 @@ export const CROWD_RANGES: Record<string, readonly [number, number]> = {
   rowDebounceSeconds: [0, 60],
   glow: [0, 80],
   rateWindowSeconds: [1, 60],
+  survivalWindows: [1, 1000],
   spewSpeed: [20, 1200],
   spewSize: [8, 200],
   spewSeconds: [0.3, 10],
@@ -180,6 +188,7 @@ export const CROWD_VARIABLES: Record<string, keyof CrowdConfig> = {
   'glow-color': 'glowColor',
   mirror: 'mirrorMode',
   window: 'rateWindowSeconds',
+  survival: 'survivalWindows',
   spew: 'emoteSpew',
   'spew-speed': 'spewSpeed',
   'spew-size': 'spewSize',
@@ -223,6 +232,17 @@ export interface CrowdLive {
 export class CrowdError extends Error {}
 
 /**
+ * Which silhouette is pinned to which seat, keyed "row:slot".
+ *
+ * A seat with no entry is left on Random, meaning it draws a silhouette when it
+ * next fills. Stale keys for rows or slots that no longer exist are harmless and
+ * kept, so shrinking the layout and growing it again does not lose the work.
+ */
+export type SeatArt = Record<string, string>;
+/** Most assignments kept, well past the largest possible grid (8 x 24). */
+const MAX_SEAT_ART = 512;
+
+/**
  * Crowd Hype — settings, the silhouette library, and the broadcaster's live
  * overrides.
  *
@@ -243,6 +263,7 @@ export class CrowdHypeService {
    * corrupting the saved settings for everyone else.
    */
   private config: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFAULTS));
+  private seatArt: SeatArt = {};
   private live = { mode: 'regular' as 'regular' | 'slow', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false };
 
   constructor(
@@ -256,8 +277,14 @@ export class CrowdHypeService {
 
   async init(): Promise<void> {
     try {
-      const row = await this.db.setting.findUnique({ where: { key: 'crowd.config' } });
-      if (row) this.config = deepFreeze(this.clamp({ ...cloneConfig(CROWD_DEFAULTS), ...(safeJson(row.value) as Partial<CrowdConfig>) }));
+      const rows = await this.db.setting.findMany({ where: { key: { in: ['crowd.config', 'crowd.seatArt'] } } });
+      for (const row of rows) {
+        if (row.key === 'crowd.config') {
+          this.config = deepFreeze(this.clamp({ ...cloneConfig(CROWD_DEFAULTS), ...(safeJson(row.value) as Partial<CrowdConfig>) }));
+        } else {
+          this.seatArt = cleanSeatArt(safeJson(row.value));
+        }
+      }
     } catch (err) {
       this.logger.warn({ err }, 'crowd: could not load settings');
     }
@@ -324,6 +351,38 @@ export class CrowdHypeService {
     const levels = Array.isArray(c.levels) ? c.levels : [];
     out.levels = Array.from({ length: LEVELS }, (_, i) => clampAnim(levels[i], LEVEL_DEFAULTS[i]!));
     out.calm = clampAnim(c.calm, CROWD_DEFAULTS.calm);
+    return out;
+  }
+
+  // ── Seat assignments ────────────────────────────────────────────────────────
+
+  /** Which silhouette each seat is pinned to. Seats absent from this are Random. */
+  getSeatArt(): SeatArt {
+    return { ...this.seatArt };
+  }
+
+  /** Replace the whole set of assignments (a blank value means back to Random). */
+  async setSeatArt(map: unknown): Promise<SeatArt> {
+    this.seatArt = cleanSeatArt(map);
+    await this.db.setting.upsert({
+      where: { key: 'crowd.seatArt' },
+      create: { key: 'crowd.seatArt', value: JSON.stringify(this.seatArt) },
+      update: { value: JSON.stringify(this.seatArt) },
+    });
+    return this.getSeatArt();
+  }
+
+  /**
+   * Seat assignments resolved to URLs, with anything pointing at a file that is
+   * no longer there dropped — so a deleted silhouette degrades the seat to Random
+   * rather than leaving it blank.
+   */
+  async resolveSeatArt(): Promise<Record<string, string>> {
+    const have = new Set((await this.listImages()).map((i) => i.name));
+    const out: Record<string, string> = {};
+    for (const [seat, file] of Object.entries(this.seatArt)) {
+      if (have.has(file)) out[seat] = CROWD_URL + file;
+    }
     return out;
   }
 
@@ -440,10 +499,18 @@ export class CrowdHypeService {
     const name = safeCrowdName(rawName);
     try {
       await unlink(path.join(CROWD_DIR, name));
-      this.logger.info({ name }, 'crowd: silhouette deleted');
     } catch {
       throw new CrowdError(`No silhouette called "${name}".`);
     }
+    // Any seat pinned to it goes back to Random, rather than pointing at nothing.
+    const left: SeatArt = {};
+    let dropped = 0;
+    for (const [seat, file] of Object.entries(this.seatArt)) {
+      if (file === name) dropped++;
+      else left[seat] = file;
+    }
+    if (dropped) await this.setSeatArt(left);
+    this.logger.info({ name, seatsFreed: dropped }, 'crowd: silhouette deleted');
   }
 }
 
@@ -456,6 +523,21 @@ export function safeCrowdName(raw: string): string {
   const stem = base.toLowerCase().endsWith('.png') ? base.slice(0, -4) : base;
   const clean = stem.replace(/^[._-]+/, '') || 'silhouette';
   return `${clean}.png`;
+}
+
+/** Keep only well-formed seat keys pointing at plausible filenames. */
+function cleanSeatArt(raw: unknown): SeatArt {
+  const out: SeatArt = {};
+  if (!raw || typeof raw !== 'object') return out;
+  let n = 0;
+  for (const [seat, file] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d{1,3}:\d{1,3}$/.test(seat)) continue;
+    const name = String(file ?? '').trim();
+    if (!name) continue;                       // blank means Random
+    out[seat] = safeCrowdName(name);
+    if (++n >= MAX_SEAT_ART) break;
+  }
+  return out;
 }
 
 function clampAnim(v: unknown, fallback: CrowdLevelAnim): CrowdLevelAnim {

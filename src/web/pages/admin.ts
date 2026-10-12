@@ -1550,11 +1550,6 @@ export function adminPage(): string {
       { key: 'avatarSize', label: 'Avatar size', hint: 'profile picture diameter', min: 8, max: 200, step: 2 },
       { key: 'glow', label: 'Glow', hint: 'back-light strength; 0 turns it off', min: 0, max: 80, step: 1 },
       { key: 'glowColor', label: 'Glow colour', hint: 'the back-light hue', color: true },
-      { key: 'mirrorMode', label: 'Mirror silhouettes', hint: 'when to flip the artwork horizontally', options: [
-        ['off', 'Never flip'],
-        ['move', 'Flip while drifting right'],
-        ['position', 'Flip on the left half']
-      ] },
       { key: 'rowDebounceSeconds', label: 'Row hold', hint: 'seconds before a chatter may change row', min: 0, max: 60, step: 1 }
     ];
     var CROWD_SPEW = [
@@ -1575,6 +1570,13 @@ export function adminPage(): string {
       { key: 'driftPx', label: 'Drift', hint: 'sideways wander in pixels', min: 0, max: 300, step: 1 }
     ];
     var LEVEL_NAMES = ['Calm', 'Interested', 'Into it', 'Jumping', 'Hype'];
+    // On a row of its own: a select sized to its own options reads better than one
+    // stretched across a grid cell.
+    var CROWD_MIRROR = [
+      ['off', 'Never flip'],
+      ['move', 'Flip while drifting right'],
+      ['position', 'Flip on the left half']
+    ];
     var crowdData = null;
 
     function crowdToast(msg, ok) { toast('crowd-toast', msg, ok); }
@@ -1623,6 +1625,10 @@ export function adminPage(): string {
       } catch (e) {
         main.innerHTML = '<h2>Crowd Hype</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
         return;
+      }
+      if (crowdSeatsOpen) {
+        if (!seatDraft) seatDraft = Object.assign({}, crowdData.seatArt || {});
+        return renderCrowdSeats();
       }
       var c = crowdData.config;
       var live = crowdData.live || {};
@@ -1678,12 +1684,19 @@ export function adminPage(): string {
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Layout</h3>' +
           '<div class="grid-fields">' + CROWD_LAYOUT.map(function (f) { return crowdField(f, c); }).join('') + '</div>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; margin:.9rem 0 0">' +
+            '<span style="font-weight:600; font-size:.85rem">Mirror silhouettes</span>' +
+            '<select id="cr-mirrorMode">' + CROWD_MIRROR.map(function (o) {
+              return '<option value="' + esc(o[0]) + '"' + (c.mirrorMode === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+            }).join('') + '</select>' +
+            '<span class="muted" style="font-size:.78rem">when to flip the artwork horizontally</span></div>' +
           '<p class="muted" style="font-size:.8rem; margin:.6rem 0 0">The front row holds the most active chatters; the rows behind sit higher and smaller to fake distance. <strong>Row hold</strong> is the debounce that stops a chatter ping-ponging between rows as their rank wobbles.</p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .3rem">Excitement</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Five levels, picked from how many messages plus emotes per second chat is producing. Each level has its own movement; <strong>Threshold</strong> is the rate needed to reach it.</p>' +
           '<div class="grid-fields" style="margin:0 0 .9rem">' +
             crowdField({ key: 'rateWindowSeconds', label: 'Rate window', hint: 'seconds of chat the rate is measured over', min: 1, max: 60, step: 1 }, c) +
+            crowdField({ key: 'survivalWindows', label: 'Window survival', hint: 'silent rate windows before a chatter leaves', min: 1, max: 1000, step: 1 }, c) +
           '</div>' +
           [0, 1, 2, 3, 4].map(function (i) { return crowdLevelGroup(i, c); }).join('') +
           '<div class="anim-group"><h4>Slow mode</h4>' +
@@ -1703,7 +1716,9 @@ export function adminPage(): string {
         '<div class="card"><h3 style="margin:0 0 .3rem">Silhouettes</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">PNGs up to ' + Math.floor(crowdData.maxBytes / 1048576) + 'MB, one per crowd member shape. They need not be square — taller than wide suits a person — and each chatter keeps the same shape for as long as they are on screen.</p>' +
           '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="cr-file" accept="image/png" />' +
-          '<button type="button" class="pink" id="cr-upload">Upload</button></div>' +
+          '<button type="button" class="pink" id="cr-upload">Upload</button>' +
+          '<button type="button" class="pink" id="cr-seats">Assign Seats</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">By default each seat draws a character at random whenever somebody new stands there. <strong>Assign Seats</strong> pins specific characters to specific positions.</p>' +
           '<div class="sil-grid" style="margin-top:.9rem">' + gallery + '</div></div>' +
         '<div class="toast" id="crowd-toast"></div>';
 
@@ -1719,6 +1734,8 @@ export function adminPage(): string {
           // The glow colour and the mirror mode are the non-numeric settings here.
           out[f.key] = (f.color || f.options) ? String(el.value) : Number(el.value);
         });
+        out.survivalWindows = Number(document.getElementById('cr-survivalWindows').value);
+        out.mirrorMode = String(document.getElementById('cr-mirrorMode').value);
         out.clearPauseSeconds = Number(document.getElementById('cr-clearSecs').value);
         out.quiescePauseSeconds = Number(document.getElementById('cr-quiesceSecs').value);
         out.thresholds = [0, 1, 2, 3, 4].map(function (i) {
@@ -1736,7 +1753,8 @@ export function adminPage(): string {
       }
 
       // Everything in Configuration autosaves, like the other game panels.
-      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs', 'cr-rateWindowSeconds'];
+      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs',
+        'cr-rateWindowSeconds', 'cr-survivalWindows', 'cr-mirrorMode'];
       CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
       [0, 1, 2, 3, 4].forEach(function (i) {
         ids.push('cr-th' + i);
@@ -1770,6 +1788,11 @@ export function adminPage(): string {
       };
       document.getElementById('cr-resume').onclick = function () { live1({ action: 'resume' }, 'Resumed.'); };
 
+      document.getElementById('cr-seats').onclick = function () {
+        crowdSeatsOpen = true;
+        seatDraft = Object.assign({}, crowdData.seatArt || {});
+        renderCrowdSeats();
+      };
       document.getElementById('cr-upload').onclick = function () {
         var inp = document.getElementById('cr-file');
         var file = inp.files && inp.files[0];
@@ -1806,6 +1829,136 @@ export function adminPage(): string {
       if (live && live.mode === 'slow') bits.push('slow mode');
       if (live && live.sim) bits.push('simulation running');
       el.textContent = bits.length ? 'Currently: ' + bits.join(', ') + '.' : '';
+    }
+
+
+    // ── Seat assignment: one dropdown per seat, laid out like the crowd itself ──
+    var crowdSeatsOpen = false;
+    var seatDraft = null;      // the edits in progress, applied only on Save
+
+    function seatKey(row, slot) { return row + ':' + slot; }
+
+    /** Front row full, the row behind one fewer — mirrors the overlay exactly. */
+    function seatRowCapacity(row, perRow) {
+      var full = Math.max(2, Math.round(perRow));
+      return row % 2 === 1 ? full - 1 : full;
+    }
+
+    function renderCrowdSeats() {
+      var c = crowdData.config;
+      var images = crowdData.images || [];
+      var rows = Math.max(1, Math.round(c.rows));
+      var perRow = Math.max(2, Math.round(c.perRow));
+      var main = document.getElementById('admin-main');
+      document.getElementById('admin-sub').textContent = 'Crowd Hype — pin a character to a seat.';
+
+      if (!images.length) {
+        main.innerHTML = '<div class="panel-head"><h2>Assign seats</h2></div>' +
+          '<div class="card"><p class="muted">No silhouettes have been uploaded yet, so there is nothing to assign. ' +
+          'Upload some PNGs first.</p>' +
+          '<div class="rowline"><button type="button" class="pink" id="seat-back">Back to Crowd Hype</button></div></div>';
+        document.getElementById('seat-back').onclick = function () { crowdSeatsOpen = false; renderCrowd(); };
+        return;
+      }
+
+      function cell(row, slot) {
+        var key = seatKey(row, slot);
+        var picked = seatDraft[key] || '';
+        var opts = '<option value="">Random</option>' + images.map(function (im) {
+          return '<option value="' + esc(im.name) + '"' + (im.name === picked ? ' selected' : '') + '>' + esc(im.name) + '</option>';
+        }).join('');
+        return '<label class="seat-cell"><span class="muted">' + (slot + 1) + '</span>' +
+          '<select data-seat="' + esc(key) + '">' + opts + '</select></label>';
+      }
+
+      // Back row at the top, front row at the bottom, so the grid reads the way
+      // the overlay looks. The short rows are inset half a cell, which is where
+      // they actually sit on screen.
+      var grid = '';
+      for (var row = rows - 1; row >= 0; row--) {
+        var cap = seatRowCapacity(row, perRow);
+        var cells = '';
+        for (var slot = 0; slot < cap; slot++) cells += cell(row, slot);
+        grid += '<div class="seat-row' + (row % 2 === 1 ? ' offset' : '') + '">' +
+          '<span class="seat-label muted">' + (row === 0 ? 'Front row' : 'Row ' + (row + 1)) + '</span>' +
+          '<div class="seat-cells">' + cells + '</div></div>';
+      }
+
+      main.innerHTML = '<div class="panel-head"><h2>Assign seats</h2></div>' +
+        '<p class="muted">Pin a character to a seat and it is used every time that seat fills. Leave a seat on ' +
+        '<strong>Random</strong> and it draws from the library whenever somebody new stands there. ' +
+        'The grid below is laid out as the crowd appears on screen — the farthest row at the top, and the ' +
+        'short rows inset because they sit on the midpoints of the row in front.</p>' +
+        '<div class="card"><div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
+          '<button type="button" class="pink" id="seat-save">Save</button>' +
+          '<button type="button" class="pink" id="seat-cancel">Cancel</button>' +
+          '<button type="button" class="pink" id="seat-random">Randomize</button>' +
+          '<button type="button" class="pink" id="seat-default">Default</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Randomize</strong> pins every seat to a ' +
+          'specific character picked at random, so the crowd is fixed but varied. <strong>Default</strong> puts every ' +
+          'seat back to Random.</p>' +
+          '<div class="toast" id="seat-toast"></div></div>' +
+        '<div class="card"><div class="seat-grid">' + grid + '</div></div>';
+
+      injectSeatCss();
+
+      // Reading straight from the DOM on save would lose any row that is hidden
+      // by a later layout change, so edits land in the draft as they are made.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-seat]'), function (sel) {
+        sel.onchange = function () {
+          var key = sel.getAttribute('data-seat');
+          if (sel.value) seatDraft[key] = sel.value;
+          else delete seatDraft[key];
+        };
+      });
+
+      document.getElementById('seat-save').onclick = function () {
+        api('POST', '/api/admin/crowd/seats', { seats: seatDraft })
+          .then(function (d) {
+            crowdData.seatArt = d.seatArt;
+            crowdSeatsOpen = false;
+            renderCrowd();
+            crowdToast('Seat assignments saved.', true);
+          })
+          .catch(function (e) { toast('seat-toast', e.message, false); });
+      };
+      document.getElementById('seat-cancel').onclick = function () {
+        crowdSeatsOpen = false;
+        seatDraft = null;
+        renderCrowd();
+      };
+      document.getElementById('seat-random').onclick = function () {
+        for (var row = 0; row < rows; row++) {
+          var cap = seatRowCapacity(row, perRow);
+          for (var slot = 0; slot < cap; slot++) {
+            seatDraft[seatKey(row, slot)] = images[Math.floor(Math.random() * images.length)].name;
+          }
+        }
+        renderCrowdSeats();
+        toast('seat-toast', 'Every seat pinned to a random character — Save to keep it.', true);
+      };
+      document.getElementById('seat-default').onclick = function () {
+        seatDraft = {};
+        renderCrowdSeats();
+        toast('seat-toast', 'Every seat back to Random — Save to keep it.', true);
+      };
+    }
+
+    function injectSeatCss() {
+      if (document.getElementById('seat-css')) return;
+      var st = document.createElement('style');
+      st.id = 'seat-css';
+      st.textContent = '.seat-grid{display:flex;flex-direction:column;gap:.7rem}'
+        + '.seat-row{display:flex;align-items:center;gap:.6rem}'
+        + '.seat-label{flex:0 0 5.5rem;font-size:.78rem;text-align:right}'
+        + '.seat-cells{display:flex;gap:.5rem;flex-wrap:wrap}'
+        // Half a cell of inset, mirroring where the short rows sit on screen.
+        + '.seat-row.offset .seat-cells{margin-left:5.25rem}'
+        + '.seat-cell{display:flex;align-items:center;gap:.3rem}'
+        + '.seat-cell>span{font-size:.72rem;min-width:1rem;text-align:right}'
+        + '@media (max-width:860px){.seat-row{align-items:flex-start;flex-direction:column;gap:.3rem}'
+        + '.seat-label{text-align:left;flex:none}.seat-row.offset .seat-cells{margin-left:0}}';
+      document.head.appendChild(st);
     }
 
     function injectCrowdCss() {

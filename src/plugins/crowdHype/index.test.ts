@@ -24,6 +24,8 @@ describe('crowd hype plugin', () => {
   let config: CrowdConfig;
   let live: CrowdLive;
   let registeredCommands: string[];
+  let seatArt: Record<string, string>;
+  let seatArtFails: boolean;
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -36,6 +38,8 @@ describe('crowd hype plugin', () => {
       ids.map((id) => ({ id, name: id, displayName: id, profilePictureUrl: 'https://cdn/' + id + '.png' })),
     );
     registeredCommands = [];
+    seatArt = {};
+    seatArtFails = false;
     config = { ...CROWD_DEFAULTS, enabled: true, rows: 2, perRow: 2, rowDebounceSeconds: 0 };
     live = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false, pausedForever: false, quiescedForever: false };
 
@@ -50,6 +54,10 @@ describe('crowd hype plugin', () => {
         getConfig: () => config,
         getLive: () => live,
         listImages: async () => [{ url: '/assets/crowd/a.png' }, { url: '/assets/crowd/b.png' }],
+        resolveSeatArt: async () => {
+          if (seatArtFails) throw new Error('disk on fire');
+          return seatArt;
+        },
       },
       commands: { registerGroup: (name: string) => registeredCommands.push(name) },
       config: { twitch: { channel: 'test', botUsername: 'basecabot' } },
@@ -72,7 +80,7 @@ describe('crowd hype plugin', () => {
   /** Spews are flushed on the first tick after a burst, so look across frames. */
   const spewsFor = (id: string) =>
     frames().flatMap((f) => ((f.spews ?? []) as { id: string; urls: string[] }[])).filter((s) => s.id === id);
-  const latest = () => frames().at(-1) as { members: { id: string; row: number; avatarUrl: string | null; silhouette: string | null }[]; level: number; enabled: boolean; mode: string; quiesced: boolean; spews: { id: string; urls: string[] }[]; config: Record<string, unknown> };
+  const latest = () => frames().at(-1) as { members: { id: string; row: number; avatarUrl: string | null }[]; level: number; enabled: boolean; mode: string; quiesced: boolean; spews: { id: string; urls: string[] }[]; config: Record<string, unknown> };
 
   it('is a passive guest-channel feature with no commands of its own', () => {
     expect(registerFeature).toHaveBeenCalledWith({ id: 'crowd-hype', consumesRawChat: true });
@@ -84,19 +92,46 @@ describe('crowd hype plugin', () => {
     await settle();
     const m = latest().members;
     expect(m).toHaveLength(1);
-    expect(m[0]).toMatchObject({ id: 'u1', row: 0, avatarUrl: 'https://cdn/u1.png' });
-    expect(m[0]!.silhouette).toMatch(/assets\/crowd/);
+    // A lone chatter takes the farthest row, which is now the prime spot.
+    expect(m[0]).toMatchObject({ id: 'u1', row: 1, avatarUrl: 'https://cdn/u1.png' });
   });
 
-  it('seats the loudest chatters in the front row', async () => {
+  it('sends the seat assignments so the overlay can honour them', async () => {
+    seatArt = { '1:0': '/assets/crowd/b.png' };
+    await bus.publish(chat());
+    await settle();
+    expect(latest().config.seatArt).toEqual({ '1:0': '/assets/crowd/b.png' });
+  });
+
+  it('keeps the silhouette library even if the assignments cannot be read', async () => {
+    // The two reads are independent: one failing must not leave the whole crowd
+    // shapeless, only un-pinned.
+    seatArtFails = true;
+    await bus.publish(chat());
+    await settle();
+    expect(latest().config.silhouettes).toHaveLength(2);
+    expect(latest().config.seatArt).toEqual({});
+  });
+
+  it('sends the silhouette library, not one shape per chatter', async () => {
+    // The overlay decides which artwork each POSITION wears, so that characters
+    // stay put while the icons move between them.
+    await bus.publish(chat());
+    await settle();
+    expect(latest().members[0]).not.toHaveProperty('silhouette');
+    expect(latest().config.silhouettes).toEqual(['/assets/crowd/a.png', '/assets/crowd/b.png']);
+  });
+
+  it('seats the loudest chatters in the farthest row', async () => {
+    // rows 2, perRow 2 -> capacities [2, 1]; the back row fills first.
     await bus.publish(chat(user({ id: 'loud', displayName: 'Loud' }), [em('Kappa', 9)]));
     await bus.publish(chat(user({ id: 'mid', displayName: 'Mid' }), [em('Kappa', 3)]));
     await bus.publish(chat(user({ id: 'quiet', displayName: 'Quiet' })));
     await settle();
     const rows = Object.fromEntries(latest().members.map((m) => [m.id, m.row]));
-    expect(rows.loud).toBe(0);
+    expect(rows.loud).toBe(1);   // the back row is the prime spot
     expect(rows.mid).toBe(0);
-    expect(rows.quiet).toBe(1);
+    expect(rows.quiet).toBe(0);
   });
 
   it('never puts more people on screen than the rows can hold', async () => {
@@ -318,12 +353,67 @@ describe('crowd hype plugin', () => {
 
     it('stops inventing once switched off', async () => {
       live = { ...live, sim: true };
-      config = { ...config, simChatRate: 30, simEmoteRate: 0, rateWindowSeconds: 1 };
+      // survivalWindows of 1 so they age out as soon as their activity does;
+      // the lingering behaviour has its own tests below.
+      config = { ...config, simChatRate: 30, simEmoteRate: 0, rateWindowSeconds: 1, survivalWindows: 1 };
       await settle(1500);
       expect(latest().members.length).toBeGreaterThan(0);
       live = { ...live, sim: false };
       await settle(3000);
       expect(latest().members).toEqual([]);
+    });
+  });
+
+  describe('window survival', () => {
+    it('keeps a chatter on screen long after their activity has aged out', async () => {
+      config = { ...config, rateWindowSeconds: 1, survivalWindows: 20 };  // 20s of grace
+      await bus.publish(chat());
+      await settle();
+      expect(latest().members.map((m) => m.id)).toEqual(['u1']);
+
+      // Their score is long gone, so the crowd has calmed right down...
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(latest().level).toBe(1);
+      // ...but they are still standing there.
+      expect(latest().members.map((m) => m.id)).toEqual(['u1']);
+    });
+
+    it('despawns them once the survival horizon passes', async () => {
+      config = { ...config, rateWindowSeconds: 1, survivalWindows: 3 };
+      await bus.publish(chat());
+      await settle();
+      expect(latest().members).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(latest().members).toEqual([]);
+    });
+
+    it('still lets a busier chatter take a lingering one’s seat', async () => {
+      // Survival is not a reservation: when the rows are full the quiet tail is
+      // the first to be displaced.
+      config = { ...config, rows: 1, perRow: 2, rateWindowSeconds: 1, survivalWindows: 50 };
+      await bus.publish(chat(user({ id: 'old1' })));
+      await bus.publish(chat(user({ id: 'old2' })));
+      await settle();
+      expect(latest().members.map((m) => m.id).sort()).toEqual(['old1', 'old2']);
+
+      await vi.advanceTimersByTimeAsync(3000);   // both now silent, score 0
+      await bus.publish(chat(user({ id: 'loud' }), [em('Kappa', 5)]));
+      await settle();
+      const ids = latest().members.map((m) => m.id);
+      expect(ids, 'the active chatter must get a seat').toContain('loud');
+      expect(ids).toHaveLength(2);
+    });
+
+    it('ranks a lingering chatter below anyone still talking', async () => {
+      config = { ...config, rows: 2, perRow: 2, rateWindowSeconds: 1, survivalWindows: 50, rowDebounceSeconds: 0 };
+      await bus.publish(chat(user({ id: 'stale' }), [em('Kappa', 9)]));  // very loud, then quiet
+      await settle();
+      await vi.advanceTimersByTimeAsync(3000);
+      await bus.publish(chat(user({ id: 'fresh' })));
+      await settle();
+      // The roster is in rank order, and a big score from four seconds ago must
+      // not outrank a single message sent just now.
+      expect(latest().members.map((m) => m.id)).toEqual(['fresh', 'stale']);
     });
   });
 

@@ -8,12 +8,19 @@
  * Authored against 1280x720 and scaled to whatever the Browser Source is set to,
  * so every number below is a design pixel.
  *
+ * The crowd is built out of SEATS, not people. A seat owns its position, its
+ * silhouette and its animation phase, and it keeps all three for as long as the
+ * layout holds; a chatter is simply the occupant whose profile picture is showing.
+ * So when activity reshuffles the crowd, only the icons move between seats — the
+ * characters themselves stay put. (That is also what will let specific artwork be
+ * pinned to specific positions later.)
+ *
  * The bot owns the arithmetic — the rate, the excitement level, who stands in
  * which row — and sends it with the settings on every tick. This page only draws,
  * with two exceptions it is better placed to handle:
- *   - horizontal slots within a row are kept sticky here, so a member whose rank
- *     wobbles does not slide sideways every tick;
- *   - each member gets a random phase, so the crowd does not move in lockstep.
+ *   - which slot within a row a chatter takes, kept sticky so a wobbling rank
+ *     does not slide anyone sideways every tick;
+ *   - each seat gets a random phase, so the crowd does not move in lockstep.
  *
  * Self-contained (inline CSS/JS, no bundler); because this string is a template
  * literal, the embedded script uses plain concatenation and avoids dollar-brace
@@ -40,7 +47,11 @@ export function crowdHypeOverlayPage(): string {
     transition:opacity .45s ease; will-change:transform; }
   .member.in{ opacity:1; }
   .body{ position:relative; transform-origin:50% 100%; color:rgba(8,6,12,.96); }
-  .sil{ display:block; height:100%; width:auto; }
+  /* Auto margins matter: the body box is a fixed 0.62 x height, but the artwork is
+     width:auto so its real width comes from the image's own aspect ratio. Without
+     centring it sits flush against the box's left edge while the avatar below is
+     centred on the box — which reads as the profile picture being off to the left. */
+  .sil{ display:block; height:100%; width:auto; margin:0 auto; }
   /* The profile picture sits at the silhouette's bottom centre. */
   .av{ position:absolute; left:50%; bottom:0; border-radius:50%;
     transform:translate(-50%,28%); background:#241a2b center/cover no-repeat;
@@ -79,10 +90,11 @@ export function crowdHypeOverlayPage(): string {
   // ── State ─────────────────────────────────────────────────────────────────
   var cfg = {
     rows:3, rowSpacing:46, perRow:6, rowScale:.86, silhouetteHeight:190, avatarSize:46,
-    glow:18, glowColor:'#ff6ec7', mirrorMode:'off', emoteSpew:true, spewSpeed:260, spewSize:44, spewSeconds:2.2,
+    glow:18, glowColor:'#ff6ec7', mirrorMode:'off', silhouettes:[], seatArt:{}, emoteSpew:true, spewSpeed:260, spewSize:44, spewSeconds:2.2,
     anim:{ jumpPx:10, bounceHz:1.6, swayDeg:7, jitterPx:2, driftPx:20 }
   };
-  var people = {};        // id -> { el, body, row, slot, phase, jitter, jitterAt, name }
+  var seats = {};         // "row:slot" -> a seat, which owns its art and phase
+  var assign = {};        // userId -> "row:slot"
   var enabled = false;
   var started = performance.now();
 
@@ -92,119 +104,161 @@ export function crowdHypeOverlayPage(): string {
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
-  // ── Roster ────────────────────────────────────────────────────────────────
-  function build(m){
+  // ── Seats ─────────────────────────────────────────────────────────────────
+  function seatKey(row, slot){ return row + ':' + slot; }
+
+  /**
+   * Which silhouette a seat wears.
+   *
+   * A seat the broadcaster has pinned always uses that artwork. An unpinned seat
+   * draws one at random — but only when it FILLS, which is what keeps a character
+   * in place for as long as somebody is standing there. Re-rolling every frame, or
+   * on every reshuffle, is the thing to avoid.
+   */
+  function artFor(seat){
+    var pinned = (cfg.seatArt || {})[seatKey(seat.row, seat.slot)];
+    if (pinned) return pinned;
+    var list = cfg.silhouettes || [];
+    if (!list.length) return null;
+    if (!seat.rolled || list.indexOf(seat.rolled) === -1){
+      seat.rolled = list[Math.floor(Math.random() * list.length)];
+    }
+    return seat.rolled;
+  }
+
+  function buildSeat(row, slot){
     var el = document.createElement('div');
     el.className = 'member';
     var body = document.createElement('div');
     body.className = 'body';
     el.appendChild(body);
     crowd.appendChild(el);
-    var p = {
-      el: el, body: body, row: m.row, slot: -1, name: m.name,
-      // A random phase and rate wobble stop the whole crowd moving as one.
+    return {
+      el: el, body: body, row: row, slot: slot,
+      // The phase belongs to the seat, so a chatter arriving mid-bounce drops
+      // into the rhythm of the spot rather than restarting it.
       phase: Math.random() * Math.PI * 2,
       rateJitter: 0.85 + Math.random() * 0.3,
-      // The sideways wander runs on its own slower clock, so drifting and
-      // bouncing are not locked together.
       driftPhase: Math.random() * Math.PI * 2,
       driftRate: 0.18 + Math.random() * 0.22,
       jitter: { x:0, y:0 }, jitterAt: 0,
-      sil: null, avatar: null,
-      // The flip goes on the artwork, not on .body, so the profile picture is
-      // never mirrored with it.
-      art: null, flipped: false,
-      // No signature yet, so applyStatic runs on this member's first frame.
-      sig: ''
+      art: null, sil: null, flipped: false, sig: '',
+      // The random draw for an unpinned seat, taken when it fills.
+      rolled: null,
+      avatar: null, avatarUrl: undefined, user: null, name: ''
     };
-    people[m.id] = p;
-    requestAnimationFrame(function(){ el.classList.add('in'); });
-    return p;
   }
 
-  /** Redraw a member's artwork only when it has actually changed. */
-  function paint(p, m){
-    if (p.sil !== m.silhouette){
-      p.sil = m.silhouette;
-      p.body.innerHTML = m.silhouette
-        ? '<img class="sil" src="' + esc(m.silhouette) + '" alt="" />'
+  function getSeat(row, slot){
+    var key = seatKey(row, slot);
+    var s = seats[key];
+    if (!s){ s = buildSeat(row, slot); seats[key] = s; }
+    return s;
+  }
+
+  /** Draw a seat's own artwork, and the avatar of whoever is in it. */
+  function paint(seat){
+    var art = artFor(seat);
+    if (seat.sil !== art){
+      seat.sil = art;
+      seat.body.innerHTML = art
+        ? '<img class="sil" src="' + esc(art) + '" alt="" />'
         : '<span class="stand-in"></span>';
-      p.avatar = null;   // the avatar node went with it
-      // ...and so did the element the mirror was applied to.
-      p.art = p.body.firstChild;
-      p.flipped = false;
+      seat.art = seat.body.firstChild;
+      seat.flipped = false;
+      seat.avatar = null;         // the avatar node went with it
     }
-    if (!p.avatar){
+    if (!seat.avatar){
       var av = document.createElement('div');
       av.className = 'av';
-      p.body.appendChild(av);
-      p.avatar = av;
-      p.avatarUrl = undefined;
-      p.sig = '';   // a fresh avatar node needs its sizing applied again
+      seat.body.appendChild(av);
+      seat.avatar = av;
+      seat.avatarUrl = undefined;
+      seat.sig = '';              // a fresh avatar node needs its sizing applied again
     }
-    if (p.avatarUrl !== m.avatarUrl){
-      p.avatarUrl = m.avatarUrl;
-      if (m.avatarUrl){
-        p.avatar.style.backgroundImage = 'url("' + m.avatarUrl + '")';
-        p.avatar.textContent = '';
+    if (seat.avatarUrl !== seat.occupantAvatar){
+      seat.avatarUrl = seat.occupantAvatar;
+      if (seat.occupantAvatar){
+        seat.avatar.style.backgroundImage = 'url("' + seat.occupantAvatar + '")';
+        seat.avatar.textContent = '';
       } else {
-        p.avatar.style.backgroundImage = '';
-        p.avatar.textContent = String(m.name || '?').charAt(0).toUpperCase();
+        seat.avatar.style.backgroundImage = '';
+        seat.avatar.textContent = String(seat.name || '?').charAt(0).toUpperCase();
       }
     }
-  }
-
-  function remove(id){
-    var p = people[id];
-    if (!p) return;
-    delete people[id];
-    p.el.classList.remove('in');
-    setTimeout(function(){ if (p.el.parentNode) p.el.parentNode.removeChild(p.el); }, 500);
   }
 
   /**
-   * Seat everyone. Rows come from the bot; the horizontal slot within a row is
-   * decided here and kept sticky — a member who holds their row keeps their spot,
-   * and only genuinely new arrivals take the gaps. Without that, a rank wobble
-   * would slide the whole row sideways several times a second.
+   * Seat everyone the bot sent.
+   *
+   * Rows come from the bot; the slot within a row is decided here and kept sticky,
+   * so a chatter who holds their row keeps their exact spot. Only the occupancy
+   * changes hands — the seats, and the characters sitting in them, stay where they
+   * are.
    */
-  function seat(list){
-    var taken = {};     // "row:slot" -> id
+  function assignSeats(list){
+    var taken = {};
+    var next = {};
     var needs = [];
-    var orders = {};    // row -> centre-out slot order, built once per update
+    var orders = {};
 
     for (var i = 0; i < list.length; i++){
       var m = list[i];
-      var p = people[m.id] || build(m);
-      paint(p, m);
-      p.name = m.name;
-      if (p.row === m.row && p.slot >= 0 && p.slot < rowCapacity(m.row) && !taken[m.row + ':' + p.slot]){
-        taken[m.row + ':' + p.slot] = m.id;
-      } else {
-        p.slot = -1;
-        needs.push(m.id);
+      var cur = assign[m.id];
+      if (cur){
+        var parts = cur.split(':');
+        if (Number(parts[0]) === m.row && Number(parts[1]) < rowCapacity(m.row) && !taken[cur]){
+          taken[cur] = m.id; next[m.id] = cur; continue;
+        }
       }
-      p.row = m.row;
+      needs.push(m);
     }
     for (var j = 0; j < needs.length; j++){
-      var id = needs[j];
-      var q = people[id];
-      if (!orders[q.row]) orders[q.row] = slotOrder(rowCapacity(q.row));
-      var order = orders[q.row];
+      var who = needs[j];
+      if (!orders[who.row]) orders[who.row] = slotOrder(rowCapacity(who.row));
+      var order = orders[who.row];
       for (var k = 0; k < order.length; k++){
-        var s = order[k];
-        if (!taken[q.row + ':' + s]){ q.slot = s; taken[q.row + ':' + s] = id; break; }
+        var key = seatKey(who.row, order[k]);
+        if (!taken[key]){ taken[key] = who.id; next[who.id] = key; break; }
       }
     }
-    // Anyone the bot no longer lists has left the crowd.
-    var present = {};
-    for (var k = 0; k < list.length; k++) present[list[k].id] = true;
-    for (var existing in people) if (!present[existing]) remove(existing);
+
+    // Hand each seat its occupant, or none.
+    var byKey = {};
+    for (var n = 0; n < list.length; n++) if (next[list[n].id]) byKey[next[list[n].id]] = list[n];
+    for (var key2 in byKey){
+      var occ = byKey[key2];
+      var bits = key2.split(':');
+      var seat = getSeat(Number(bits[0]), Number(bits[1]));
+      seat.user = occ.id;
+      seat.name = occ.name;
+      seat.occupantAvatar = occ.avatarUrl || null;
+      paint(seat);
+      seat.el.classList.add('in');
+    }
+    for (var key3 in seats){
+      var s3 = seats[key3];
+      if (byKey[key3]) continue;
+      // Empty seats fade out rather than being torn down: the character belongs to
+      // the position, so it is waiting for the next occupant.
+      if (s3.user !== null){
+        s3.user = null;
+        s3.occupantAvatar = null;
+        s3.rolled = null;        // next time it fills, an unpinned seat draws again
+        s3.el.classList.remove('in');
+      }
+      // Drop a seat only once the layout no longer has room for it.
+      if (s3.row >= Math.max(1, Math.round(cfg.rows)) || s3.slot >= rowCapacity(s3.row)){
+        if (s3.el.parentNode) s3.el.parentNode.removeChild(s3.el);
+        delete seats[key3];
+      }
+    }
+    assign = next;
   }
 
   // ── Emote spew ────────────────────────────────────────────────────────────
   function spew(id, urls){
-    var p = people[id];
+    var p = seats[assign[id]];
     if (!p || !urls || !urls.length) return;
     if (crowd.querySelectorAll('.spew').length > 120) return;   // keep a lid on it
     var base = anchor(p);
@@ -365,8 +419,9 @@ export function crowdHypeOverlayPage(): string {
     deps.glow = Math.max(0, num(cfg.glow, 0));
     deps.glowColor = cfg.glowColor || '#ff6ec7';
 
-    for (var id in people){
-      var p = people[id];
+    for (var key in seats){
+      var p = seats[key];
+      if (p.user === null) continue;   // an empty seat is mid fade-out
       var base = anchor(p);
       // Hop: abs(sin) so they spring off the floor rather than sinking through it.
       var beat = t * hz * p.rateJitter * Math.PI + p.phase;
@@ -420,18 +475,20 @@ export function crowdHypeOverlayPage(): string {
   // ── Messages ──────────────────────────────────────────────────────────────
   function onCrowd(d){
     enabled = !!(d && d.enabled);
-    if (!enabled){
-      for (var id in people) remove(id);
-      return;
-    }
-    if (d.config) for (var k in d.config) cfg[k] = d.config[k];
-    seat((d && d.members) || []);
+    if (d && d.config) for (var k in d.config) cfg[k] = d.config[k];
+    if (!enabled){ assignSeats([]); return; }
+    assignSeats((d && d.members) || []);
     var spews = (d && d.spews) || [];
     if (cfg.emoteSpew) for (var i = 0; i < spews.length; i++) spew(spews[i].id, spews[i].urls);
   }
 
   function onClear(){
-    for (var id in people) remove(id);
+    // Tear the seats down outright, so a cleared overlay is genuinely empty.
+    for (var key in seats){
+      if (seats[key].el.parentNode) seats[key].el.parentNode.removeChild(seats[key].el);
+    }
+    seats = {};
+    assign = {};
     var nodes = crowd.querySelectorAll('.spew');
     for (var i = 0; i < nodes.length; i++) nodes[i].remove();
   }
