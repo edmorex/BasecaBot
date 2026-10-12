@@ -18,6 +18,7 @@ import { GuestChannelService } from './services/guestChannels.js';
 import { AchievementService } from './services/achievements.js';
 import { FloofService } from './services/floof.js';
 import { BossBattleService } from './services/bossBattle.js';
+import { CrowdHypeService } from './services/crowdHype.js';
 import { StreamService } from './services/stream.js';
 import { TwurpleChatService } from './services/chat.js';
 import { WsHub } from './web/wsHub.js';
@@ -84,6 +85,7 @@ async function main(): Promise<void> {
   const achievements = new AchievementService(storage, bus, config, scopedLogger('achievements'));
   const floof = new FloofService(storage, scopedLogger('floof'));
   const boss = new BossBattleService(storage, scopedLogger('boss'));
+  const crowd = new CrowdHypeService(storage, scopedLogger('crowd'));
   await floof.init(); // load persisted settings + ensure the image directory
   chatAdapter.setGuestPolicy(guests);
   commands.setGuestPolicy(guests);
@@ -100,6 +102,7 @@ async function main(): Promise<void> {
   // ── Text-to-Speech (Piper) ──────────────────────────────────────────────────
   const tts = new TtsService(storage, ws, config, scopedLogger('tts'));
   await boss.init();
+  await crowd.init();
   await tts.init(); // load persisted mute + voice settings, read the model's speakers
 
   // ── Web dashboard + "Login with Twitch" ────────────────────────────────────
@@ -108,7 +111,7 @@ async function main(): Promise<void> {
     log.warn({ user: config.twitch.broadcasterUsername }, 'broadcaster not found; relationship checks will be limited');
   }
   const relationships = new ChannelRelationshipService(api, config, broadcasterUser?.id ?? '');
-  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text, tts, achievements, ws, floof, boss);
+  const webServer = new WebServer(config, relationships, users, customCommands, commands, lists, quotes, points, bus, timers, first, text, tts, achievements, ws, floof, boss, crowd);
   webServer.start();
 
   // ── Plugins ────────────────────────────────────────────────────────────────
@@ -129,6 +132,7 @@ async function main(): Promise<void> {
     achievements,
     floof,
     boss,
+    crowd,
     stream,
     storage,
     ws,

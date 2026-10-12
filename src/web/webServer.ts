@@ -17,6 +17,7 @@ import type { AchievementService } from '../services/achievements.js';
 import type { WsHub } from './wsHub.js';
 import type { FloofService } from '../services/floof.js';
 import type { BossBattleService } from '../services/bossBattle.js';
+import type { CrowdHypeService } from '../services/crowdHype.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -36,6 +37,7 @@ import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
 import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
+import { crowdHypeOverlayPage } from './pages/overlayCrowdHype.js';
 
 import { handleLogin, handleCallback, handleLogout, getMe, getMyAchievements, postDisplayName, postAlias } from './routes/authRoutes.js';
 import { getCommands, postCommand, createCommand, deleteCommand, addCommandAlias, updateCommandAlias, removeCommandAlias, exportCommands, importCommands } from './routes/commandsRoutes.js';
@@ -43,14 +45,14 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, getAdminCrowd, postAdminCrowd, postAdminCrowdLive, postAdminCrowdImage, postAdminCrowdImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
 const MAX_BODY_BYTES = 16 * 1024;
 
 /** Subdirectories of public/assets that may be served (uploads live here). */
-const ASSET_SUBDIRS = new Set(['floofs', 'boss']);
+const ASSET_SUBDIRS = new Set(['floofs', 'boss', 'crowd']);
 
 const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -97,6 +99,7 @@ export class WebServer {
     readonly ws: WsHub,
     readonly floof: FloofService,
     readonly boss: BossBattleService,
+    readonly crowd: CrowdHypeService,
   ) {}
 
   start(): void {
@@ -167,6 +170,9 @@ export class WebServer {
         case '/overlays/boss-battle':
           // OBS Boss Battle raid (1920x1080). Public HTML; inert without ?token=.
           return this.html(res, bossBattleOverlayPage());
+        case '/overlays/crowd':
+          // OBS Crowd Hype audience (1280x720). Public HTML; inert without ?token=.
+          return this.html(res, crowdHypeOverlayPage());
         case '/auth/login':
           return handleLogin(this, res);
         case '/auth/callback':
@@ -207,6 +213,8 @@ export class WebServer {
           return getAdminFloof(this, req, res);
         case '/api/admin/boss':
           return getAdminBoss(this, req, res);
+        case '/api/admin/crowd':
+          return getAdminCrowd(this, req, res);
         case '/api/admin/tts/preview':
           return getAdminTtsPreview(this, req, res, url);
         case '/healthz':
@@ -324,6 +332,14 @@ export class WebServer {
           return postAdminBossSound(this, req, res, url);
         case '/api/admin/boss/sound/delete':
           return postAdminBossSoundDelete(this, req, res);
+        case '/api/admin/crowd':
+          return postAdminCrowd(this, req, res);
+        case '/api/admin/crowd/live':
+          return postAdminCrowdLive(this, req, res);
+        case '/api/admin/crowd/image':
+          return postAdminCrowdImage(this, req, res, url);
+        case '/api/admin/crowd/image/delete':
+          return postAdminCrowdImageDelete(this, req, res);
         default:
           return this.send(res, 404, 'text/plain', 'Not Found');
       }

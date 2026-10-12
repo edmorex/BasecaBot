@@ -1,0 +1,465 @@
+import { readdir, readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import type { Storage } from './storage/index.js';
+import type { Logger } from './logger.js';
+import { readPngSize } from './floof.js';
+
+/** Where uploaded silhouette PNGs live (bind-mounted in production — see docs). */
+export const CROWD_DIR = path.resolve('public', 'assets', 'crowd');
+/** Public URL prefix the overlay loads silhouettes from. */
+export const CROWD_URL = '/assets/crowd/';
+/** Largest silhouette accepted, in bytes. */
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** Excitement runs level 1 (calm) to level 5 (hype). */
+export const LEVELS = 5;
+
+/** The crowd's movement at one excitement level. */
+export interface CrowdLevelAnim {
+  /** Peak hop height in pixels. 0 keeps them on the floor. */
+  jumpPx: number;
+  /** Hops per second. */
+  bounceHz: number;
+  /** How far they rock either side, in degrees. */
+  swayDeg: number;
+  /** Random twitch, in pixels. */
+  jitterPx: number;
+}
+
+/** Everything the overlay's look is driven by (persisted as one JSON blob). */
+export interface CrowdConfig {
+  /** Master switch. When off the overlay draws nothing, whatever chat does. */
+  enabled: boolean;
+
+  // ── Layout ──
+  /** How many rows of silhouettes. */
+  rows: number;
+  /** Pixels each row sits above the one in front of it. */
+  rowSpacing: number;
+  /** Silhouettes per row. */
+  perRow: number;
+  /** Size multiplier applied per row back, faking distance. */
+  rowScale: number;
+  /** Front-row silhouette height, in pixels. */
+  silhouetteHeight: number;
+  /** Diameter of the profile picture, in pixels. */
+  avatarSize: number;
+  /** How long a chatter is pinned to a row before they may be moved. */
+  rowDebounceSeconds: number;
+  /** Back-light strength, 0 to disable. */
+  glow: number;
+
+  // ── Excitement ──
+  /** Seconds of chat the rate is measured over. */
+  rateWindowSeconds: number;
+  /** Messages+emotes per second needed to reach each level (ascending, 5 entries). */
+  thresholds: number[];
+  /** Movement per excitement level (5 entries). */
+  levels: CrowdLevelAnim[];
+  /** Movement while the broadcaster has forced Slow Mode. */
+  calm: CrowdLevelAnim;
+
+  // ── Emote spew ──
+  emoteSpew: boolean;
+  /** Launch speed in pixels per second. */
+  spewSpeed: number;
+  /** Rendered emote size in pixels. */
+  spewSize: number;
+  /** Seconds before a spewed emote fades out. */
+  spewSeconds: number;
+
+  // ── Live-control defaults ──
+  /** Seconds the overlay stays cleared and paused. */
+  clearPauseSeconds: number;
+  /** Seconds the crowd stays quiesced before it may ramp up again. */
+  quiescePauseSeconds: number;
+
+  // ── Simulation ──
+  simChatters: number;
+  simChatRate: number;
+  simEmoteRate: number;
+}
+
+const LEVEL_DEFAULTS: CrowdLevelAnim[] = [
+  { jumpPx: 0, bounceHz: 0.5, swayDeg: 2, jitterPx: 0 },   // 1 — barely awake
+  { jumpPx: 4, bounceHz: 1.0, swayDeg: 4, jitterPx: 1 },   // 2 — nodding along
+  { jumpPx: 10, bounceHz: 1.6, swayDeg: 7, jitterPx: 2 },  // 3 — into it
+  { jumpPx: 20, bounceHz: 2.3, swayDeg: 10, jitterPx: 3 }, // 4 — jumping
+  { jumpPx: 34, bounceHz: 3.0, swayDeg: 14, jitterPx: 5 }, // 5 — hype
+];
+
+export const CROWD_DEFAULTS: CrowdConfig = {
+  enabled: false,
+  rows: 3,
+  rowSpacing: 46,
+  perRow: 6,
+  rowScale: 0.86,
+  silhouetteHeight: 190,
+  avatarSize: 46,
+  rowDebounceSeconds: 4,
+  glow: 18,
+  rateWindowSeconds: 6,
+  thresholds: [0, 0.5, 1.5, 3, 6],
+  levels: LEVEL_DEFAULTS.map((l) => ({ ...l })),
+  calm: { jumpPx: 0, bounceHz: 0.35, swayDeg: 6, jitterPx: 0 },
+  emoteSpew: true,
+  spewSpeed: 260,
+  spewSize: 44,
+  spewSeconds: 2.2,
+  clearPauseSeconds: 30,
+  quiescePauseSeconds: 30,
+  simChatters: 12,
+  simChatRate: 2,
+  simEmoteRate: 3,
+};
+
+/** The defaults, frozen once so the exported object cannot be edited by accident. */
+const FROZEN_DEFAULTS: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFAULTS));
+
+/** [min, max] bounds for the flat numeric settings. */
+export const CROWD_RANGES: Record<string, readonly [number, number]> = {
+  rows: [1, 8],
+  rowSpacing: [0, 300],
+  perRow: [1, 24],
+  rowScale: [0.4, 1],
+  silhouetteHeight: [40, 600],
+  avatarSize: [8, 200],
+  rowDebounceSeconds: [0, 60],
+  glow: [0, 80],
+  rateWindowSeconds: [1, 60],
+  spewSpeed: [20, 1200],
+  spewSize: [8, 200],
+  spewSeconds: [0.3, 10],
+  clearPauseSeconds: [0, 600],
+  quiescePauseSeconds: [0, 600],
+  simChatters: [1, 200],
+  simChatRate: [0, 50],
+  simEmoteRate: [0, 200],
+};
+
+/** [min, max] bounds for each per-level animation value. */
+export const CROWD_ANIM_RANGES: Record<keyof CrowdLevelAnim, readonly [number, number]> = {
+  jumpPx: [0, 300],
+  bounceHz: [0, 12],
+  swayDeg: [0, 45],
+  jitterPx: [0, 60],
+};
+
+/** Settings that are meaningful as fractions; the rest are rounded. */
+const FRACTIONAL = new Set(['rowScale', 'spewSeconds', 'simChatRate', 'simEmoteRate', 'rateWindowSeconds']);
+const FRACTIONAL_ANIM = new Set<keyof CrowdLevelAnim>(['bounceHz']);
+
+/** Chat-facing setter names -> config keys. */
+export const CROWD_VARIABLES: Record<string, keyof CrowdConfig> = {
+  enabled: 'enabled',
+  rows: 'rows',
+  'row-spacing': 'rowSpacing',
+  'per-row': 'perRow',
+  'row-scale': 'rowScale',
+  height: 'silhouetteHeight',
+  'avatar-size': 'avatarSize',
+  debounce: 'rowDebounceSeconds',
+  glow: 'glow',
+  window: 'rateWindowSeconds',
+  spew: 'emoteSpew',
+  'spew-speed': 'spewSpeed',
+  'spew-size': 'spewSize',
+  'spew-seconds': 'spewSeconds',
+};
+
+export interface CrowdImage {
+  name: string;
+  url: string;
+  bytes: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A hold with no end, parked far enough in the future that the plugin's plain
+ * `now < pausedUntil` checks need no special case. MAX_SAFE_INTEGER rather than
+ * Infinity because this crosses JSON to the admin panel, and Infinity does not
+ * survive the trip (it serialises to null).
+ */
+export const HOLD_FOREVER = Number.MAX_SAFE_INTEGER;
+
+/** How the broadcaster is currently overriding the crowd. Not persisted. */
+export interface CrowdLive {
+  /** 'slow' swaps every level for the calm animation values. */
+  mode: 'regular' | 'slow';
+  /** Epoch ms until which the overlay takes no new updates. */
+  pausedUntil: number;
+  /** Epoch ms of the most recent clear request, so the plugin can act on a new one. */
+  clearedAt: number;
+  /** Epoch ms until which excitement is held at level 1. */
+  quiescedUntil: number;
+  /** Whether synthetic chat is being generated. */
+  sim: boolean;
+  /** True when the hold runs until Resume rather than expiring. For display. */
+  pausedForever: boolean;
+  quiescedForever: boolean;
+}
+
+/** A user-facing problem (bad upload); safe to show in the UI. */
+export class CrowdError extends Error {}
+
+/**
+ * Crowd Hype — settings, the silhouette library, and the broadcaster's live
+ * overrides.
+ *
+ * The live controls are deliberately plain state rather than callbacks into the
+ * plugin: the plugin reads them on its own tick, so a control works the same
+ * whether it was flipped from the panel, from chat, or while the plugin was
+ * between ticks. Only the config is persisted — mode, pauses and the simulation
+ * all start clean on a restart, which is what you want from a live override.
+ */
+export class CrowdHypeService {
+  /**
+   * The canonical config, deep-frozen.
+   *
+   * Handed to callers as-is rather than cloned per call: the plugin asks for it
+   * on every tick and on every emote-bearing message, so a fresh copy each time
+   * was pure garbage. Freezing is what makes sharing it safe — a caller that
+   * tries to mutate it throws here (modules are strict mode) instead of quietly
+   * corrupting the saved settings for everyone else.
+   */
+  private config: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFAULTS));
+  private live = { mode: 'regular' as 'regular' | 'slow', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false };
+
+  constructor(
+    private readonly storage: Storage,
+    private readonly logger: Logger,
+  ) {}
+
+  private get db() {
+    return this.storage.prisma;
+  }
+
+  async init(): Promise<void> {
+    try {
+      const row = await this.db.setting.findUnique({ where: { key: 'crowd.config' } });
+      if (row) this.config = deepFreeze(this.clamp({ ...cloneConfig(CROWD_DEFAULTS), ...(safeJson(row.value) as Partial<CrowdConfig>) }));
+    } catch (err) {
+      this.logger.warn({ err }, 'crowd: could not load settings');
+    }
+    try {
+      await mkdir(CROWD_DIR, { recursive: true });
+    } catch (err) {
+      this.logger.warn({ err, dir: CROWD_DIR }, 'crowd: could not create image directory');
+    }
+  }
+
+  // ── Settings ────────────────────────────────────────────────────────────────
+
+  /** The live settings. Frozen — treat it as read-only and clone if you must edit. */
+  getConfig(): Readonly<CrowdConfig> {
+    return this.config;
+  }
+
+  get defaults(): Readonly<CrowdConfig> {
+    return FROZEN_DEFAULTS;
+  }
+
+  async setConfig(partial: Partial<CrowdConfig>): Promise<Readonly<CrowdConfig>> {
+    this.config = deepFreeze(this.clamp({ ...this.config, ...partial }));
+    await this.db.setting.upsert({
+      where: { key: 'crowd.config' },
+      create: { key: 'crowd.config', value: JSON.stringify(this.config) },
+      update: { value: JSON.stringify(this.config) },
+    });
+    return this.config;
+  }
+
+  private clamp(c: Readonly<CrowdConfig>): CrowdConfig {
+    const out = cloneConfig(CROWD_DEFAULTS);
+    out.enabled = !!c.enabled;
+    out.emoteSpew = !!c.emoteSpew;
+    for (const key of Object.keys(CROWD_RANGES) as (keyof CrowdConfig)[]) {
+      const [lo, hi] = CROWD_RANGES[key]!;
+      const raw = Number(c[key]);
+      const num = FRACTIONAL.has(key) ? Math.round(raw * 100) / 100 : Math.round(raw);
+      (out[key] as number) = Number.isFinite(num) ? Math.min(hi, Math.max(lo, num)) : (CROWD_DEFAULTS[key] as number);
+    }
+    // Thresholds are forced ascending: a level you could never reach because the
+    // one above it is lower would just be a dead setting.
+    const thresholds = Array.isArray(c.thresholds) ? c.thresholds : [];
+    out.thresholds = [];
+    let floor = 0;
+    for (let i = 0; i < LEVELS; i++) {
+      const fallback = CROWD_DEFAULTS.thresholds[i]!;
+      const raw = Number(thresholds[i]);
+      let v = Number.isFinite(raw) ? Math.max(0, Math.round(raw * 100) / 100) : fallback;
+      if (i === 0) v = 0; // level 1 is where everyone starts
+      if (v < floor) v = floor;
+      out.thresholds.push(v);
+      floor = v;
+    }
+    const levels = Array.isArray(c.levels) ? c.levels : [];
+    out.levels = Array.from({ length: LEVELS }, (_, i) => clampAnim(levels[i], LEVEL_DEFAULTS[i]!));
+    out.calm = clampAnim(c.calm, CROWD_DEFAULTS.calm);
+    return out;
+  }
+
+  // ── Live controls ───────────────────────────────────────────────────────────
+
+  getLive(): CrowdLive {
+    return {
+      ...this.live,
+      // Derived rather than stored, so the timestamp stays the single source of
+      // truth and the panel never has to know the sentinel.
+      pausedForever: this.live.pausedUntil >= HOLD_FOREVER,
+      quiescedForever: this.live.quiescedUntil >= HOLD_FOREVER,
+    };
+  }
+
+  setMode(mode: string): CrowdLive {
+    this.live.mode = mode === 'slow' ? 'slow' : 'regular';
+    this.logger.info({ mode: this.live.mode }, 'crowd: mode changed');
+    return this.getLive();
+  }
+
+  /** Empty the overlay and stop taking updates for a while. */
+  clearAndPause(seconds?: number): CrowdLive {
+    const secs = this.pauseSeconds(seconds, this.config.clearPauseSeconds);
+    const now = Date.now();
+    this.live.clearedAt = now;
+    this.live.pausedUntil = now + secs * 1000;
+    this.logger.info({ seconds: secs }, 'crowd: cleared and paused');
+    return this.getLive();
+  }
+
+  /** Empty the overlay and leave it that way until Resume. */
+  clearAndWait(): CrowdLive {
+    this.live.clearedAt = Date.now();
+    this.live.pausedUntil = HOLD_FOREVER;
+    this.logger.info('crowd: cleared and waiting for resume');
+    return this.getLive();
+  }
+
+  /** Hold the crowd calm until Resume. */
+  quiesceAndWait(): CrowdLive {
+    this.live.quiescedUntil = HOLD_FOREVER;
+    this.logger.info('crowd: quiesced until resume');
+    return this.getLive();
+  }
+
+  /** Ramp the crowd down to calm and hold it there for a while. */
+  quiesceAndPause(seconds?: number): CrowdLive {
+    const secs = this.pauseSeconds(seconds, this.config.quiescePauseSeconds);
+    this.live.quiescedUntil = Date.now() + secs * 1000;
+    this.logger.info({ seconds: secs }, 'crowd: quiesced');
+    return this.getLive();
+  }
+
+  /** Cancel any clear/quiesce hold immediately. */
+  resume(): CrowdLive {
+    this.live.pausedUntil = 0;
+    this.live.quiescedUntil = 0;
+    return this.getLive();
+  }
+
+  setSim(on: boolean): CrowdLive {
+    this.live.sim = !!on;
+    this.logger.info({ sim: this.live.sim }, 'crowd: simulation toggled');
+    return this.getLive();
+  }
+
+  private pauseSeconds(requested: number | undefined, fallback: number): number {
+    const [lo, hi] = CROWD_RANGES.clearPauseSeconds!;
+    const n = Math.round(Number(requested));
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback;
+  }
+
+  // ── Silhouette library ──────────────────────────────────────────────────────
+
+  /**
+   * Every silhouette available. Unlike floof photos these are NOT required to be
+   * square — a crowd member is taller than they are wide — so the dimensions are
+   * reported and the overlay scales by height.
+   */
+  async listImages(): Promise<CrowdImage[]> {
+    try {
+      const names = (await readdir(CROWD_DIR)).filter((n) => n.toLowerCase().endsWith('.png'));
+      const out: CrowdImage[] = [];
+      for (const name of names.sort()) {
+        try {
+          const buf = await readFile(path.join(CROWD_DIR, name));
+          const size = readPngSize(buf);
+          out.push({ name, url: CROWD_URL + name, bytes: buf.length, width: size?.width ?? 0, height: size?.height ?? 0 });
+        } catch {
+          // unreadable file — skip it
+        }
+      }
+      return out;
+    } catch {
+      return []; // directory missing (bind mount not set up yet)
+    }
+  }
+
+  async saveImage(rawName: string, buf: Buffer): Promise<CrowdImage> {
+    if (buf.length === 0) throw new CrowdError('That file is empty.');
+    if (buf.length > MAX_IMAGE_BYTES) throw new CrowdError(`Image is too large (max ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB).`);
+    const size = readPngSize(buf);
+    if (!size) throw new CrowdError('That file is not a PNG.');
+
+    const name = safeCrowdName(rawName);
+    await mkdir(CROWD_DIR, { recursive: true });
+    await writeFile(path.join(CROWD_DIR, name), buf);
+    this.logger.info({ name, bytes: buf.length, size }, 'crowd: silhouette uploaded');
+    return { name, url: CROWD_URL + name, bytes: buf.length, width: size.width, height: size.height };
+  }
+
+  async deleteImage(rawName: string): Promise<void> {
+    const name = safeCrowdName(rawName);
+    try {
+      await unlink(path.join(CROWD_DIR, name));
+      this.logger.info({ name }, 'crowd: silhouette deleted');
+    } catch {
+      throw new CrowdError(`No silhouette called "${name}".`);
+    }
+  }
+}
+
+/**
+ * Reduce an uploaded filename to something safe to write + serve: drop any path,
+ * scrub to the charset the asset route allows, and force a single `.png`.
+ */
+export function safeCrowdName(raw: string): string {
+  const base = path.basename(String(raw ?? '')).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const stem = base.toLowerCase().endsWith('.png') ? base.slice(0, -4) : base;
+  const clean = stem.replace(/^[._-]+/, '') || 'silhouette';
+  return `${clean}.png`;
+}
+
+function clampAnim(v: unknown, fallback: CrowdLevelAnim): CrowdLevelAnim {
+  const src = (v ?? {}) as Partial<CrowdLevelAnim>;
+  const out = { ...fallback };
+  for (const key of Object.keys(CROWD_ANIM_RANGES) as (keyof CrowdLevelAnim)[]) {
+    const [lo, hi] = CROWD_ANIM_RANGES[key]!;
+    const raw = Number(src[key]);
+    const num = FRACTIONAL_ANIM.has(key) ? Math.round(raw * 100) / 100 : Math.round(raw);
+    out[key] = Number.isFinite(num) ? Math.min(hi, Math.max(lo, num)) : fallback[key];
+  }
+  return out;
+}
+
+/** Freeze a config and everything nested inside it. */
+function deepFreeze(c: CrowdConfig): Readonly<CrowdConfig> {
+  Object.freeze(c.thresholds);
+  for (const level of c.levels) Object.freeze(level);
+  Object.freeze(c.levels);
+  Object.freeze(c.calm);
+  return Object.freeze(c);
+}
+
+function cloneConfig(c: Readonly<CrowdConfig>): CrowdConfig {
+  return { ...c, thresholds: [...c.thresholds], levels: c.levels.map((l) => ({ ...l })), calm: { ...c.calm } };
+}
+
+function safeJson(s: string): unknown {
+  try {
+    const o = JSON.parse(s) as unknown;
+    return o && typeof o === 'object' ? o : {};
+  } catch {
+    return {};
+  }
+}

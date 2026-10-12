@@ -471,6 +471,13 @@ const SHARED_STYLE = /* css */ `
     gap: 0.4rem; min-height: 1.2rem; transition: color 0.2s; }
   /* Nothing to report yet: hide it entirely rather than leaving a stray dot. */
   .save-state:empty { display: none; }
+  /* A setting with its toggle on the LEFT, so the switch sits next to the label it
+     belongs to rather than floating at the far edge of a wide card. Aligned to the
+     first line, not the block's centre, so a two-line description does not drag
+     the switch down past its own title. */
+  .toggle-row { display: flex; align-items: flex-start; gap: 0.7rem; }
+  .toggle-row > .switch { margin-top: 0.12rem; }
+
   /* Panel heading with its live save state beside it, so both self-saving panels
      report in the same place. */
   .panel-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin: 0 0 0.75rem; }

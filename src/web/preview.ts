@@ -14,7 +14,9 @@ import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
 import { BOSS_DEFAULTS, BOSS_RANGES, SOUND_SLOTS, SIZES, STYLES } from '../services/bossBattle.js';
 import { FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, DEFAULT_TAUNT, DEFAULT_FLOOF_NAME, MAX_FLOOF_NAME } from '../services/floof.js';
+import { CROWD_DEFAULTS, CROWD_RANGES, CROWD_ANIM_RANGES, LEVELS as CROWD_LEVELS, HOLD_FOREVER } from '../services/crowdHype.js';
 import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
+import { crowdHypeOverlayPage } from './pages/overlayCrowdHype.js';
 import { VOICE_DEFAULTS } from '../services/tts.js';
 import { ACHIEVEMENTS } from '../services/achievementCatalog.js';
 import { toCsv, parseCsv, mapCsvRows, QUOTE_CSV_SPEC, LIST_CSV_SPEC, COMMAND_CSV_SPEC } from '../services/csv.js';
@@ -111,6 +113,7 @@ async function collectBuiltins() {
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, getImageTaunts: () => [], getImageName: () => '', getImageDisplayName: () => 'The floof', pickSpawn: async () => null, getImageStyles: () => [], statsFor: async () => ({ wins: 0, rank: null }) },
+    crowd: { getConfig: () => ({}), getLive: () => ({ mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false }), listImages: async () => [] },
     boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null, rememberEmotes: async () => {}, lookupEmoteArt: async () => new Map() },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
@@ -256,6 +259,14 @@ const previewFloofImages: MockFloof[] = [
   { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, styles: ['ghost'], taunts: [], label: 'Dread Floof', displayName: 'Dread Floof' },
 ];
 
+// Mock Crowd Hype state (exercises the three panel sections + the gallery).
+const previewCrowdConfig: Record<string, unknown> = { ...CROWD_DEFAULTS, enabled: true };
+const previewCrowdLive = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false, pausedForever: false, quiescedForever: false };
+const previewCrowdImages = [
+  { name: 'fan-a.png', url: '/assets/logo.png', bytes: 18420, width: 180, height: 300 },
+  { name: 'fan-b.png', url: '/assets/logo.png', bytes: 20110, width: 200, height: 320 },
+];
+
 // Mock Boss Battle state (exercises the settings, sound slots, roster + editor).
 const previewBossConfig: Record<string, unknown> = { ...BOSS_DEFAULTS, enabled: true };
 const previewBossImages = [
@@ -387,6 +398,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/overlays/achievement') return html(achievementOverlayPage());
     if (p === '/overlays/floof') return html(floofOverlayPage());
     if (p === '/overlays/boss-battle') return html(bossBattleOverlayPage());
+    if (p === '/overlays/crowd') return html(crowdHypeOverlayPage());
     if (p === '/api/admin/users') return json(200, { users: mockAdminUsers });
     if (p === '/api/me') return loggedOut ? json(401, { error: 'unauthenticated' }) : json(200, me);
     if (p === '/api/me/achievements') {
@@ -424,6 +436,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         { id: 'achievement', name: 'Achievement — unlock pop', url: base + '/overlays/achievement?token=preview-token' },
         { id: 'floof', name: 'Pet the Floof', url: base + '/overlays/floof?token=preview-token' },
         { id: 'boss-battle', name: 'Boss Battle (full screen, 1920×1080)', url: base + '/overlays/boss-battle?token=preview-token' },
+        { id: 'crowd', name: 'Crowd Hype (audience, 1280×720)', url: base + '/overlays/crowd?token=preview-token' },
       ] });
     }
     if (p === '/api/admin/strings') return json(200, { groups: previewText.list() });
@@ -437,6 +450,18 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         styleLabels: FLOOF_STYLE_LABELS,
         maxNameLength: MAX_FLOOF_NAME,
         defaultName: DEFAULT_FLOOF_NAME,
+        maxBytes: 2 * 1024 * 1024,
+      });
+    }
+    if (p === '/api/admin/crowd') {
+      return json(200, {
+        config: previewCrowdConfig,
+        defaults: CROWD_DEFAULTS,
+        ranges: CROWD_RANGES,
+        animRanges: CROWD_ANIM_RANGES,
+        levels: CROWD_LEVELS,
+        live: previewCrowdLive,
+        images: previewCrowdImages,
         maxBytes: 2 * 1024 * 1024,
       });
     }
@@ -630,6 +655,31 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
     if (p === '/api/admin/floof') {
       Object.assign(previewFloofConfig, (body.config ?? body) as Record<string, unknown>);
       return json(200, { ok: true, config: previewFloofConfig });
+    }
+    if (p === '/api/admin/crowd') {
+      Object.assign(previewCrowdConfig, (body.config ?? body) as Record<string, unknown>);
+      return json(200, { ok: true, config: previewCrowdConfig });
+    }
+    if (p === '/api/admin/crowd/live') {
+      const action = String(body.action ?? '');
+      const secs = Number(body.seconds) || 0;
+      const now = Date.now();
+      if (action === 'mode') previewCrowdLive.mode = body.mode === 'slow' ? 'slow' : 'regular';
+      else if (action === 'clear') { previewCrowdLive.clearedAt = now; previewCrowdLive.pausedUntil = now + secs * 1000; }
+      else if (action === 'clear-wait') { previewCrowdLive.clearedAt = now; previewCrowdLive.pausedUntil = HOLD_FOREVER; }
+      else if (action === 'quiesce') previewCrowdLive.quiescedUntil = now + secs * 1000;
+      else if (action === 'quiesce-wait') previewCrowdLive.quiescedUntil = HOLD_FOREVER;
+      else if (action === 'resume') { previewCrowdLive.pausedUntil = 0; previewCrowdLive.quiescedUntil = 0; }
+      else if (action === 'sim') previewCrowdLive.sim = !!body.on;
+      else return json(400, { error: 'Unknown live-control action.' });
+      previewCrowdLive.pausedForever = previewCrowdLive.pausedUntil >= HOLD_FOREVER;
+      previewCrowdLive.quiescedForever = previewCrowdLive.quiescedUntil >= HOLD_FOREVER;
+      return json(200, { ok: true, live: previewCrowdLive });
+    }
+    if (p === '/api/admin/crowd/image/delete') {
+      const i = previewCrowdImages.findIndex((x) => x.name === String(body.name ?? ''));
+      if (i >= 0) previewCrowdImages.splice(i, 1);
+      return json(200, { ok: true });
     }
     if (p === '/api/admin/boss') {
       Object.assign(previewBossConfig, (body.config ?? body) as Record<string, unknown>);

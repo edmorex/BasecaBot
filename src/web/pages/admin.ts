@@ -104,6 +104,7 @@ export function adminPage(): string {
       { id: 'achievements', label: 'Achievements' },
       { id: 'floof', label: 'Pet the Floof' },
       { id: 'boss', label: 'Boss Battle' },
+      { id: 'crowd', label: 'Crowd Hype' },
     ];
     var section = 'users';
     var users = [];
@@ -393,6 +394,7 @@ export function adminPage(): string {
       else if (section === 'achievements') renderAchievements();
       else if (section === 'floof') renderFloof();
       else if (section === 'boss') renderBoss();
+      else if (section === 'crowd') renderCrowd();
       else renderSim();
     }
 
@@ -902,10 +904,10 @@ export function adminPage(): string {
         '<span class="save-state" id="floof-status"></span></div>' +
         '<p class="muted">A floof appears on the overlay and the first chatter to type <code>!pet</code> wins. Each spawn picks a random photo <em>and</em> a random animation style. Add the <strong>Pet the Floof</strong> overlay from the Overlays section as a Browser Source.</p>' +
 
-        '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
+        '<div class="card"><div class="toggle-row">' +
+          '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
           '<div><strong>Game enabled</strong>' +
-          '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div>' +
-          '<label class="switch"><input type="checkbox" id="floof-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+          '<div class="muted" style="font-size:.82rem">When off, floofs never spawn on the timer. Floofs only appear while the stream is live.</div></div></div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .5rem">Game control</h3>' +
           '<div class="rowline" style="gap:.6rem; flex-wrap:wrap; align-items:center">' +
@@ -1165,10 +1167,10 @@ export function adminPage(): string {
         '<span class="save-state" id="boss-status"></span></div>' +
         '<p class="muted">Chat fights a boss by spamming the emotes it is weak to. Add the <strong>Boss Battle</strong> overlay from the Overlays section as a full-screen Browser Source, and tick <em>Control audio via OBS</em> so the sound reaches your stream.</p>' +
 
-        '<div class="card"><div class="rowline" style="justify-content:space-between; align-items:center">' +
+        '<div class="card"><div class="toggle-row">' +
+          '<label class="switch"><input type="checkbox" id="boss-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
           '<div><strong>Game enabled</strong>' +
-          '<div class="muted" style="font-size:.82rem">The buttons below always work; this switch gates any automatic trigger.</div></div>' +
-          '<label class="switch"><input type="checkbox" id="boss-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label></div></div>' +
+          '<div class="muted" style="font-size:.82rem">The buttons below always work; this switch gates any automatic trigger.</div></div></div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .5rem">Start a battle</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .7rem">Hit start before you step away — the boss arrives after the delay.</p>' +
@@ -1534,6 +1536,268 @@ export function adminPage(): string {
         + '.snd-row:first-of-type{border-top:0}'
         + '.snd-row input[type=file]{max-width:13rem}'
         + '@media (max-width:640px){.boss-card{flex-wrap:wrap}.snd-row{flex-direction:column;align-items:flex-start}}';
+      document.head.appendChild(st);
+    }
+
+
+    // ── Crowd Hype: live controls, simulation, and the look of the audience ─────
+    var CROWD_LAYOUT = [
+      { key: 'rows', label: 'Rows', hint: 'rows of silhouettes', min: 1, max: 8, step: 1 },
+      { key: 'perRow', label: 'Per row', hint: 'silhouettes in one row', min: 1, max: 24, step: 1 },
+      { key: 'rowSpacing', label: 'Space between rows', hint: 'pixels each row sits higher', min: 0, max: 300, step: 2 },
+      { key: 'rowScale', label: 'Row scale', hint: 'size multiplier per row back', min: 0.4, max: 1, step: 0.02 },
+      { key: 'silhouetteHeight', label: 'Silhouette height', hint: 'front-row height in pixels', min: 40, max: 600, step: 5 },
+      { key: 'avatarSize', label: 'Avatar size', hint: 'profile picture diameter', min: 8, max: 200, step: 2 },
+      { key: 'glow', label: 'Glow', hint: 'back-light strength; 0 turns it off', min: 0, max: 80, step: 1 },
+      { key: 'rowDebounceSeconds', label: 'Row hold', hint: 'seconds before a chatter may change row', min: 0, max: 60, step: 1 }
+    ];
+    var CROWD_SPEW = [
+      { key: 'spewSpeed', label: 'Launch speed', hint: 'pixels per second', min: 20, max: 1200, step: 10 },
+      { key: 'spewSize', label: 'Emote size', hint: 'pixels', min: 8, max: 200, step: 2 },
+      { key: 'spewSeconds', label: 'Emote lifetime', hint: 'seconds before it fades', min: 0.3, max: 10, step: 0.1 }
+    ];
+    var CROWD_SIM = [
+      { key: 'simChatters', label: 'Chatters', hint: 'how many fake chatters', min: 1, max: 200, step: 1 },
+      { key: 'simChatRate', label: 'Chat rate', hint: 'messages per second', min: 0, max: 50, step: 0.5 },
+      { key: 'simEmoteRate', label: 'Emote rate', hint: 'emotes per second', min: 0, max: 200, step: 0.5 }
+    ];
+    var CROWD_ANIM_FIELDS = [
+      { key: 'jumpPx', label: 'Jump', hint: 'hop height in pixels', min: 0, max: 300, step: 1 },
+      { key: 'bounceHz', label: 'Bounce', hint: 'hops per second', min: 0, max: 12, step: 0.05 },
+      { key: 'swayDeg', label: 'Sway', hint: 'degrees either side', min: 0, max: 45, step: 1 },
+      { key: 'jitterPx', label: 'Jitter', hint: 'random twitch in pixels', min: 0, max: 60, step: 1 }
+    ];
+    var LEVEL_NAMES = ['Calm', 'Interested', 'Into it', 'Jumping', 'Hype'];
+    var crowdData = null;
+
+    function crowdToast(msg, ok) { toast('crowd-toast', msg, ok); }
+
+    function crowdField(f, cfg, prefix) {
+      var id = (prefix || 'cr-') + f.key;
+      return '<label class="field"><span>' + esc(f.label) + '</span>' +
+        '<input type="number" id="' + id + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+        '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
+    }
+
+    /** One excitement level's four animation values, plus its rate threshold. */
+    function crowdLevelGroup(i, c) {
+      var anim = (c.levels && c.levels[i]) || {};
+      var fields = CROWD_ANIM_FIELDS.map(function (f) {
+        return '<label class="field"><span>' + esc(f.label) + '</span>' +
+          '<input type="number" id="cr-lv' + i + '-' + f.key + '" value="' + anim[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+          '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
+      }).join('');
+      var threshold = i === 0
+        ? '<label class="field"><span>Threshold</span><input type="number" value="0" disabled />' +
+            '<span class="muted" style="font-size:.78rem">where everyone starts</span></label>'
+        : '<label class="field"><span>Threshold</span>' +
+            '<input type="number" id="cr-th' + i + '" value="' + ((c.thresholds || [])[i]) + '" min="0" max="500" step="0.1" />' +
+            '<span class="muted" style="font-size:.78rem">messages+emotes per second to reach it</span></label>';
+      return '<div class="anim-group"><h4>Level ' + (i + 1) + ' — ' + esc(LEVEL_NAMES[i] || '') + '</h4>' +
+        '<div class="grid-fields">' + threshold + fields + '</div></div>';
+    }
+
+    async function renderCrowd() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent = 'Crowd Hype — chat as a concert audience.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>Crowd Hype</h2><p class="muted">Loading…</p>';
+      try {
+        crowdData = await api('GET', '/api/admin/crowd');
+      } catch (e) {
+        main.innerHTML = '<h2>Crowd Hype</h2><p class="muted">Could not load: ' + esc(e.message) + '</p>';
+        return;
+      }
+      var c = crowdData.config;
+      var live = crowdData.live || {};
+      var slow = live.mode === 'slow';
+
+      var gallery = (crowdData.images || []).length
+        ? crowdData.images.map(function (im) {
+            return '<div class="sil-card">' +
+              '<img src="' + esc(im.url) + '" alt="" />' +
+              '<div class="muted" style="font-size:.74rem; text-align:center; word-break:break-all">' + esc(im.name) + '</div>' +
+              '<div class="muted" style="font-size:.7rem">' + im.width + '×' + im.height + '</div>' +
+              '<button type="button" class="pink" data-crdel="' + esc(im.name) + '">Delete</button></div>';
+          }).join('')
+        : '<span class="muted">No silhouettes uploaded yet — the crowd falls back to a plain head-and-shoulders shape until you add some.</span>';
+
+      main.innerHTML = '<div class="panel-head"><h2>Crowd Hype</h2>' +
+        '<span class="save-state" id="crowd-status"></span></div>' +
+        '<p class="muted">Chat appears as an audience along the bottom of the screen, and the crowd gets more excited the faster chat moves. Add the <strong>Crowd Hype</strong> overlay from the Overlays section as a 1280×720 Browser Source. While the bot is connected to a guest channel the crowd follows <em>that</em> chat, so it can front a collab.</p>' +
+
+        '<div class="card"><div class="toggle-row">' +
+          '<label class="switch"><input type="checkbox" id="cr-enabled"' + (c.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
+          '<div><strong>Overlay enabled</strong>' +
+          '<div class="muted" style="font-size:.82rem">When off the overlay draws nothing at all, whatever chat is doing.</div></div></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Live control</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Overrides for while you are on air. None of these are saved — the crowd comes back in regular mode after a restart.</p>' +
+          '<div class="toggle-row" style="margin:0 0 .8rem">' +
+            '<label class="switch"><input type="checkbox" id="cr-slow"' + (slow ? ' checked' : '') + '><span class="slider"></span></label>' +
+            '<div><strong>Slow mode</strong>' +
+            '<div class="muted" style="font-size:.82rem">Swap the hopping for a gentle sway, whatever chat is doing.</div></div></div>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap">' +
+            '<button type="button" class="pink" id="cr-clear">Clear and pause</button>' +
+            '<input type="number" id="cr-clearSecs" value="' + c.clearPauseSeconds + '" min="0" max="600" step="5" />' +
+            '<span class="muted">seconds</span>' +
+            '<button type="button" class="pink" id="cr-clear-wait">Clear and wait</button></div>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.6rem">' +
+            '<button type="button" class="pink" id="cr-quiesce">Quiesce and pause</button>' +
+            '<input type="number" id="cr-quiesceSecs" value="' + c.quiescePauseSeconds + '" min="0" max="600" step="5" />' +
+            '<span class="muted">seconds</span>' +
+            '<button type="button" class="pink" id="cr-quiesce-wait">Quiesce and wait</button></div>' +
+          '<div class="rowline" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap">' +
+            '<button type="button" class="pink" id="cr-resume">Resume now</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Clear</strong> empties the overlay and stops taking updates. <strong>Quiesce</strong> leaves everyone on screen but holds them at level 1 so they settle. The <strong>wait</strong> variants hold until you press <strong>Resume</strong>; the <strong>pause</strong> ones lift on their own after the given number of seconds.</p>' +
+          '<div class="muted" id="cr-live-state" style="font-size:.82rem; margin-top:.5rem"></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Simulation</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Feeds the overlay invented chat so you can judge the settings without an audience. Nothing is recorded, and real chat still counts while it runs.</p>' +
+          '<div class="toggle-row" style="margin:0 0 .8rem">' +
+            '<label class="switch"><input type="checkbox" id="cr-sim"' + (live.sim ? ' checked' : '') + '><span class="slider"></span></label>' +
+            '<div><strong>Running</strong>' +
+            '<div class="muted" style="font-size:.82rem">Generates fake chatters at the rates below.</div></div></div>' +
+          '<div class="grid-fields">' + CROWD_SIM.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .6rem">Layout</h3>' +
+          '<div class="grid-fields">' + CROWD_LAYOUT.map(function (f) { return crowdField(f, c); }).join('') + '</div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.6rem 0 0">The front row holds the most active chatters; the rows behind sit higher and smaller to fake distance. <strong>Row hold</strong> is the debounce that stops a chatter ping-ponging between rows as their rank wobbles.</p></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Excitement</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .6rem">Five levels, picked from how many messages plus emotes per second chat is producing. Each level has its own movement; <strong>Threshold</strong> is the rate needed to reach it.</p>' +
+          '<div class="grid-fields" style="margin:0 0 .9rem">' +
+            crowdField({ key: 'rateWindowSeconds', label: 'Rate window', hint: 'seconds of chat the rate is measured over', min: 1, max: 60, step: 1 }, c) +
+          '</div>' +
+          [0, 1, 2, 3, 4].map(function (i) { return crowdLevelGroup(i, c); }).join('') +
+          '<div class="anim-group"><h4>Slow mode</h4>' +
+            '<p class="muted" style="font-size:.8rem; margin:0 0 .5rem">Used instead of every level above while Slow mode is on.</p>' +
+            '<div class="grid-fields">' + CROWD_ANIM_FIELDS.map(function (f) {
+              return '<label class="field"><span>' + esc(f.label) + '</span>' +
+                '<input type="number" id="cr-calm-' + f.key + '" value="' + ((c.calm || {})[f.key]) + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+                '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
+            }).join('') + '</div></div></div>' +
+
+        '<div class="card"><div class="toggle-row" style="margin:0 0 .6rem">' +
+          '<label class="switch"><input type="checkbox" id="cr-emoteSpew"' + (c.emoteSpew ? ' checked' : '') + '><span class="slider"></span></label>' +
+          '<div><strong>Emote spew</strong>' +
+          '<div class="muted" style="font-size:.82rem">Throw the emotes a chatter is spamming up out of their silhouette.</div></div></div>' +
+          '<div class="grid-fields">' + CROWD_SPEW.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Silhouettes</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">PNGs up to ' + Math.floor(crowdData.maxBytes / 1048576) + 'MB, one per crowd member shape. They need not be square — taller than wide suits a person — and each chatter keeps the same shape for as long as they are on screen.</p>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="cr-file" accept="image/png" />' +
+          '<button type="button" class="pink" id="cr-upload">Upload</button></div>' +
+          '<div class="sil-grid" style="margin-top:.9rem">' + gallery + '</div></div>' +
+        '<div class="toast" id="crowd-toast"></div>';
+
+      injectCrowdCss();
+      showLiveState(live);
+
+      function collect() {
+        var out = { enabled: document.getElementById('cr-enabled').checked, emoteSpew: document.getElementById('cr-emoteSpew').checked };
+        var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
+        flat.forEach(function (f) {
+          var el = document.getElementById('cr-' + f.key);
+          if (el) out[f.key] = Number(el.value);
+        });
+        out.clearPauseSeconds = Number(document.getElementById('cr-clearSecs').value);
+        out.quiescePauseSeconds = Number(document.getElementById('cr-quiesceSecs').value);
+        out.thresholds = [0, 1, 2, 3, 4].map(function (i) {
+          var el = document.getElementById('cr-th' + i);
+          return el ? Number(el.value) : 0;
+        });
+        out.levels = [0, 1, 2, 3, 4].map(function (i) {
+          var lv = {};
+          CROWD_ANIM_FIELDS.forEach(function (f) { lv[f.key] = Number(document.getElementById('cr-lv' + i + '-' + f.key).value); });
+          return lv;
+        });
+        out.calm = {};
+        CROWD_ANIM_FIELDS.forEach(function (f) { out.calm[f.key] = Number(document.getElementById('cr-calm-' + f.key).value); });
+        return out;
+      }
+
+      // Everything in Configuration autosaves, like the other game panels.
+      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs', 'cr-rateWindowSeconds'];
+      CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
+      [0, 1, 2, 3, 4].forEach(function (i) {
+        ids.push('cr-th' + i);
+        CROWD_ANIM_FIELDS.forEach(function (f) { ids.push('cr-lv' + i + '-' + f.key); });
+      });
+      CROWD_ANIM_FIELDS.forEach(function (f) { ids.push('cr-calm-' + f.key); });
+      autoSaver('/api/admin/crowd', collect, 'crowd-status', ids);
+
+      function live1(body, msg) {
+        api('POST', '/api/admin/crowd/live', body)
+          .then(function (d) { showLiveState(d.live); crowdToast(msg, true); })
+          .catch(function (e) { crowdToast(e.message, false); });
+      }
+      document.getElementById('cr-slow').onchange = function () {
+        live1({ action: 'mode', mode: this.checked ? 'slow' : 'regular' }, this.checked ? 'Slow mode on.' : 'Back to regular mode.');
+      };
+      document.getElementById('cr-sim').onchange = function () {
+        live1({ action: 'sim', on: this.checked }, this.checked ? 'Simulation running.' : 'Simulation stopped.');
+      };
+      document.getElementById('cr-clear').onclick = function () {
+        live1({ action: 'clear', seconds: Number(document.getElementById('cr-clearSecs').value) }, 'Cleared and paused.');
+      };
+      document.getElementById('cr-quiesce').onclick = function () {
+        live1({ action: 'quiesce', seconds: Number(document.getElementById('cr-quiesceSecs').value) }, 'Quiesced.');
+      };
+      document.getElementById('cr-clear-wait').onclick = function () {
+        live1({ action: 'clear-wait' }, 'Cleared — waiting for Resume.');
+      };
+      document.getElementById('cr-quiesce-wait').onclick = function () {
+        live1({ action: 'quiesce-wait' }, 'Quiesced — waiting for Resume.');
+      };
+      document.getElementById('cr-resume').onclick = function () { live1({ action: 'resume' }, 'Resumed.'); };
+
+      document.getElementById('cr-upload').onclick = function () {
+        var inp = document.getElementById('cr-file');
+        var file = inp.files && inp.files[0];
+        if (!file) { crowdToast('Choose a PNG first.', false); return; }
+        fetch('/api/admin/crowd/image?name=' + encodeURIComponent(file.name), {
+          method: 'POST', credentials: 'same-origin', body: file
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (j) { throw new Error((j && j.error) || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function () { crowdToast('Uploaded.', true); renderCrowd(); })
+          .catch(function (e) { crowdToast(e.message, false); });
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-crdel]'), function (b) {
+        b.onclick = function () {
+          api('POST', '/api/admin/crowd/image/delete', { name: b.getAttribute('data-crdel') })
+            .then(function () { crowdToast('Deleted.', true); renderCrowd(); })
+            .catch(function (e) { crowdToast(e.message, false); });
+        };
+      });
+    }
+
+    /** Spell out any hold that is currently in force, so it is never a mystery. */
+    function showLiveState(live) {
+      var el = document.getElementById('cr-live-state');
+      if (!el) return;
+      var bits = [];
+      var now = Date.now();
+      // An endless hold is a sentinel timestamp, not a real deadline — reporting
+      // the arithmetic would print a count of seconds in the millions.
+      if (live && live.pausedForever) bits.push('cleared until you resume');
+      else if (live && live.pausedUntil > now) bits.push('paused for ' + Math.ceil((live.pausedUntil - now) / 1000) + 's');
+      if (live && live.quiescedForever) bits.push('held calm until you resume');
+      else if (live && live.quiescedUntil > now) bits.push('held calm for ' + Math.ceil((live.quiescedUntil - now) / 1000) + 's');
+      if (live && live.mode === 'slow') bits.push('slow mode');
+      if (live && live.sim) bits.push('simulation running');
+      el.textContent = bits.length ? 'Currently: ' + bits.join(', ') + '.' : '';
+    }
+
+    function injectCrowdCss() {
+      if (document.getElementById('crowd-css')) return;
+      var st = document.createElement('style');
+      st.id = 'crowd-css';
+      st.textContent = '.sil-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(7rem,1fr));gap:.7rem}'
+        + '.sil-card{display:flex;flex-direction:column;gap:.35rem;align-items:center;background:var(--bg);'
+        + 'border:1px solid var(--border);border-radius:10px;padding:.5rem}'
+        + '.sil-card img{width:72px;height:96px;object-fit:contain;background:#0006;border-radius:8px}';
       document.head.appendChild(st);
     }
 

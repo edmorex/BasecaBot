@@ -27,6 +27,14 @@ import {
   type BossConfig,
   type BossInput,
 } from '../../services/bossBattle.js';
+import {
+  CrowdError,
+  CROWD_RANGES,
+  CROWD_ANIM_RANGES,
+  LEVELS as CROWD_LEVELS,
+  MAX_IMAGE_BYTES as CROWD_MAX_IMAGE_BYTES,
+  type CrowdConfig,
+} from '../../services/crowdHype.js';
 import { PermissionLevel } from '../../core/events.js';
 import { buildSimEvent, isSimEventType } from '../../services/eventSimulator.js';
 
@@ -582,4 +590,101 @@ async function readRawBody(req: IncomingMessage, limit: number, what: string): P
     chunks.push(buf);
   }
   return Buffer.concat(chunks);
+}
+
+// ── Crowd Hype ────────────────────────────────────────────────────────────────
+
+export async function getAdminCrowd(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const images = await s.crowd.listImages();
+  s.json(res, 200, {
+    config: s.crowd.getConfig(),
+    defaults: s.crowd.defaults,
+    ranges: CROWD_RANGES,
+    animRanges: CROWD_ANIM_RANGES,
+    levels: CROWD_LEVELS,
+    live: s.crowd.getLive(),
+    images,
+    maxBytes: CROWD_MAX_IMAGE_BYTES,
+  });
+}
+
+export async function postAdminCrowd(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const config = await s.crowd.setConfig((body.config ?? body) as Partial<CrowdConfig>);
+  s.json(res, 200, { ok: true, config });
+}
+
+/**
+ * The live controls: mode, clear, quiesce, resume and the simulation switch.
+ * One endpoint because they are all the same shape — a nudge to the live state
+ * that the plugin picks up on its next tick.
+ */
+export async function postAdminCrowdLive(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const action = String(body.action ?? '');
+  const seconds = body.seconds === undefined ? undefined : Number(body.seconds);
+  let live;
+  switch (action) {
+    case 'mode':
+      live = s.crowd.setMode(String(body.mode ?? 'regular'));
+      break;
+    case 'clear':
+      live = s.crowd.clearAndPause(seconds);
+      break;
+    case 'clear-wait':
+      live = s.crowd.clearAndWait();
+      break;
+    case 'quiesce':
+      live = s.crowd.quiesceAndPause(seconds);
+      break;
+    case 'quiesce-wait':
+      live = s.crowd.quiesceAndWait();
+      break;
+    case 'resume':
+      live = s.crowd.resume();
+      break;
+    case 'sim':
+      live = s.crowd.setSim(!!body.on);
+      break;
+    default:
+      throw new HttpError(400, 'Unknown live-control action.');
+  }
+  s.json(res, 200, { ok: true, live });
+}
+
+/** Upload a silhouette PNG. Raw binary body + `?name=`, like the other uploaders. */
+export async function postAdminCrowdImage(s: WebServer, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  s.requireAdmin(req);
+  const name = url.searchParams.get('name') ?? 'silhouette.png';
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const c of req) {
+    const buf = c as Buffer;
+    total += buf.length;
+    if (total > CROWD_MAX_IMAGE_BYTES) {
+      throw new HttpError(413, `Image is too large (max ${Math.floor(CROWD_MAX_IMAGE_BYTES / 1024 / 1024)}MB).`);
+    }
+    chunks.push(buf);
+  }
+  try {
+    s.json(res, 200, { ok: true, image: await s.crowd.saveImage(name, Buffer.concat(chunks)) });
+  } catch (e) {
+    if (e instanceof CrowdError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+export async function postAdminCrowdImageDelete(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    await s.crowd.deleteImage(String(body.name ?? ''));
+    s.json(res, 200, { ok: true });
+  } catch (e) {
+    if (e instanceof CrowdError) throw new HttpError(400, e.message);
+    throw e;
+  }
 }

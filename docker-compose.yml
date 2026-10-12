@@ -41,6 +41,9 @@ services:
       # the host: mkdir -p /opt/boss
       # See docs/boss-battle.md.
       - /opt/boss:/app/public/assets/boss
+      # Crowd Hype silhouettes, same story. Create it once on the host:
+      # mkdir -p /opt/crowd   —   see docs/crowd-hype.md.
+      - /opt/crowd:/app/public/assets/crowd
     expose:
       - '8080' # WebSocket hub — reached by the edge Caddy over the `edge` network
       - '8090' # HTTP server (dashboard + OAuth + API) — also via the edge Caddy

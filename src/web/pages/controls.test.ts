@@ -224,6 +224,45 @@ describe('form control styling', () => {
   });
 });
 
+describe('toggle rows', () => {
+  const ADMIN = readFileSync(path.join(PAGE_DIR, 'admin.ts'), 'utf8');
+  // The settings whose switch sits to the LEFT of its label.
+  const LEFT_ALIGNED = ['floof-enabled', 'boss-enabled', 'cr-enabled', 'cr-slow', 'cr-sim', 'cr-emoteSpew'];
+
+  /** The markup around one switch, from its row's opening div. */
+  function rowFor(id: string): string {
+    const at = ADMIN.indexOf('id="' + id + '"');
+    expect(at, `${id} not found`).toBeGreaterThan(-1);
+    return ADMIN.slice(ADMIN.lastIndexOf("'<div class=", at), at + 400);
+  }
+
+  it.each(LEFT_ALIGNED)('%s puts its switch before its label', (id) => {
+    const row = rowFor(id);
+    expect(row.slice(0, 200), `${id} is not in a .toggle-row`).toContain('toggle-row');
+    const sw = row.indexOf('class="switch"');
+    const label = row.indexOf('<strong>');
+    expect(sw).toBeGreaterThan(-1);
+    expect(label).toBeGreaterThan(-1);
+    // A switch pushed to the far edge of a wide card reads as unrelated to the
+    // setting it controls, so it goes first and the text follows it.
+    expect(sw, `${id} still has its switch after the label`).toBeLessThan(label);
+  });
+
+  it.each(LEFT_ALIGNED)('%s no longer pushes the switch to the far edge', (id) => {
+    expect(rowFor(id).slice(0, 200)).not.toContain('space-between');
+  });
+
+  it('aligns the switch to the first line, not the middle of the block', () => {
+    // These rows carry a title plus a description; centring would drag the switch
+    // below its own title whenever the description wraps.
+    const i = LAYOUT.indexOf('.toggle-row {');
+    expect(i).toBeGreaterThan(-1);
+    const rule = LAYOUT.slice(i, LAYOUT.indexOf('}', i));
+    expect(rule).toContain('align-items: flex-start');
+    expect(rule).toContain('display: flex');
+  });
+});
+
 describe('custom property references', () => {
   const PAGE_FILES = ['admin.ts', 'commands.ts', 'lists.ts', 'quotes.ts', 'user.ts', 'welcome.ts', 'commandRow.ts',
     'overlayFloof.ts', 'overlayBossBattle.ts', 'overlayFirst.ts', 'overlayChatStats.ts', 'overlayAchievement.ts', 'overlayTts.ts'];

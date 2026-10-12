@@ -33,6 +33,7 @@ export async function getAdminOverlays(s: WebServer, req: IncomingMessage, res: 
           { id: 'achievement', name: 'Achievement — unlock pop', url: `${base}/overlays/achievement?token=${encodeURIComponent(token)}` },
           { id: 'floof', name: 'Pet the Floof', url: `${base}/overlays/floof?token=${encodeURIComponent(token)}` },
           { id: 'boss-battle', name: 'Boss Battle (full screen, 1920×1080)', url: `${base}/overlays/boss-battle?token=${encodeURIComponent(token)}` },
+          { id: 'crowd', name: 'Crowd Hype (audience, 1280×720)', url: `${base}/overlays/crowd?token=${encodeURIComponent(token)}` },
         ]
       : [],
   });
