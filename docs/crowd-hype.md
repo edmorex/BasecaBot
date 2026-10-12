@@ -28,8 +28,12 @@ The overlay renders nothing until chat moves, so it is safe to leave in a scene.
 
 ## How the crowd behaves
 
-**Who appears.** Anyone who talks joins the crowd. Capacity is `rows × per row`
-(18 by default), and the loudest chatters take the front row — "loudest" being
+**Who appears.** Anyone who talks joins the crowd. The front row holds **Per row**
+people and the rows behind alternate one fewer — 6, 5, 6, 5 at the default — with
+the short rows sitting on the **midpoints** of the row in front so they fill the
+gaps between heads rather than lining everyone up in columns. Seats fill from the
+**middle of each row outwards**, so a quiet chat gathers in the centre instead of
+hugging the left edge. The loudest chatters take the front row — "loudest" being
 messages plus emotes over the rate window, with ties going to whoever spoke most
 recently. Rows behind sit higher and smaller to fake distance.
 
@@ -40,8 +44,17 @@ gap rather than shoving someone aside mid-animation.
 
 **Excitement.** Five levels, chosen from how many **messages plus emotes per
 second** chat is producing over the rate window. Each level has its own jump
-height, bounce rate, sway and jitter, so the crowd goes from barely nodding to
-genuinely bouncing. Every member gets a random phase so they don't move as one.
+height, bounce rate, sway, jitter and **drift**, so the crowd goes from barely
+nodding to genuinely bouncing. Every member gets a random phase so they don't move
+as one.
+
+**Drift** is the sideways wander, and it runs on its own slower clock than the
+bouncing. At the higher levels it is deliberately wide enough that neighbours
+**overlap** — a crowd rubbing shoulders rather than a row of pegs. How much drift
+it takes to overlap depends on your layout: a 6-wide row on a 1280-wide overlay
+gives ~213px lanes against a ~118px silhouette, so shoulders start meeting around
+46px of drift. Narrower lanes (more per row) overlap far sooner. Members at the
+far left and right are clamped so they never hang half off the stage.
 
 **Emote spew.** When someone spams emotes, those same emotes are thrown up and
 outward from their silhouette. The art comes straight from the message's own
@@ -91,33 +104,50 @@ audience: a number of fake chatters, a messages-per-second rate and an
 emotes-per-second rate. Arrival is bursty rather than metronomic, which looks far
 more like real chat.
 
-Nothing is recorded, fake chatters never trigger a profile-picture lookup, and
-real chat still counts while the simulation runs.
+The fake chatters throw **real Twitch global emotes**, so the spew is visible
+while you tune it. Nothing is recorded, fake chatters never trigger a
+profile-picture lookup, and real chat still counts while the simulation runs.
 
 ### Configuration
 
 | Setting | Default | What it does |
 |---|---|---|
 | Rows | 3 | Rows of silhouettes |
-| Per row | 6 | Silhouettes in one row |
+| Per row | 6 | Front-row silhouettes (minimum 2); rows behind alternate one fewer |
 | Space between rows | 46px | How much higher each row sits |
 | Row scale | 0.86 | Size multiplier per row back |
 | Silhouette height | 190px | Front-row height |
 | Avatar size | 46px | Profile-picture diameter |
 | Glow | 18 | Back-light strength; 0 turns it off |
+| Glow colour | `#ff6ec7` | The back-light hue |
+| Mirror silhouettes | Never flip | When to flip the artwork horizontally (see below) |
 | Row hold | 4s | Before a chatter may change row |
 | Rate window | 6s | Seconds of chat the rate is measured over |
 | Emote spew | on | Throw spammed emotes out of the silhouettes |
 | Launch speed / size / lifetime | 260px/s, 44px, 2.2s | How the spewed emotes fly |
 
 Plus, per excitement level: a **threshold** (the rate needed to reach it) and
-**jump**, **bounce**, **sway** and **jitter** values. Thresholds are forced
+**jump**, **bounce**, **sway**, **jitter** and **drift** values. Thresholds are forced
 ascending on save — a level you could never reach because the one above it is
 lower would just be a dead setting. **Slow mode** has its own set of the same four
 values.
 
 Defaults: level 1 from 0/s, level 2 from 0.5/s, level 3 from 1.5/s, level 4 from
 3/s, level 5 from 6/s.
+
+### Mirroring
+
+Silhouettes can be flipped horizontally so a crowd built from one or two shapes
+does not look like a row of clones:
+
+| Mode | Behaviour |
+|---|---|
+| **Never flip** | The uploaded artwork, always. The default, so nothing changes until you ask for it |
+| **Flip while drifting right** | As-uploaded while a member drifts left, mirrored while they drift right — they appear to turn into the direction they are moving |
+| **Flip on the left half** | Mirrored on the left of the screen, as-uploaded on the right, so the whole crowd faces inward |
+
+The flip is applied to the silhouette only — never to the profile picture, which
+would mirror any text or logo in someone's avatar.
 
 ### Silhouettes
 

@@ -13,6 +13,10 @@ export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 /** Excitement runs level 1 (calm) to level 5 (hype). */
 export const LEVELS = 5;
 
+/** How a silhouette may be mirrored horizontally. */
+export const MIRROR_MODES = ['off', 'move', 'position'] as const;
+export type MirrorMode = (typeof MIRROR_MODES)[number];
+
 /** The crowd's movement at one excitement level. */
 export interface CrowdLevelAnim {
   /** Peak hop height in pixels. 0 keeps them on the floor. */
@@ -23,6 +27,8 @@ export interface CrowdLevelAnim {
   swayDeg: number;
   /** Random twitch, in pixels. */
   jitterPx: number;
+  /** How far they wander left and right, in pixels. Neighbours may overlap. */
+  driftPx: number;
 }
 
 /** Everything the overlay's look is driven by (persisted as one JSON blob). */
@@ -47,6 +53,15 @@ export interface CrowdConfig {
   rowDebounceSeconds: number;
   /** Back-light strength, 0 to disable. */
   glow: number;
+  /** Back-light colour, as #rrggbb. */
+  glowColor: string;
+  /**
+   * Whether to mirror a silhouette, and on what:
+   *   'off'      - always the uploaded artwork
+   *   'move'     - mirrored while drifting right, as-uploaded while drifting left
+   *   'position' - mirrored on the left half of the screen, as-uploaded on the right
+   */
+  mirrorMode: MirrorMode;
 
   // ── Excitement ──
   /** Seconds of chat the rate is measured over. */
@@ -80,11 +95,11 @@ export interface CrowdConfig {
 }
 
 const LEVEL_DEFAULTS: CrowdLevelAnim[] = [
-  { jumpPx: 0, bounceHz: 0.5, swayDeg: 2, jitterPx: 0 },   // 1 — barely awake
-  { jumpPx: 4, bounceHz: 1.0, swayDeg: 4, jitterPx: 1 },   // 2 — nodding along
-  { jumpPx: 10, bounceHz: 1.6, swayDeg: 7, jitterPx: 2 },  // 3 — into it
-  { jumpPx: 20, bounceHz: 2.3, swayDeg: 10, jitterPx: 3 }, // 4 — jumping
-  { jumpPx: 34, bounceHz: 3.0, swayDeg: 14, jitterPx: 5 }, // 5 — hype
+  { jumpPx: 0, bounceHz: 0.5, swayDeg: 2, jitterPx: 0, driftPx: 4 },    // 1 — barely awake
+  { jumpPx: 4, bounceHz: 1.0, swayDeg: 4, jitterPx: 1, driftPx: 14 },   // 2 — nodding along
+  { jumpPx: 10, bounceHz: 1.6, swayDeg: 7, jitterPx: 2, driftPx: 28 },  // 3 — into it
+  { jumpPx: 20, bounceHz: 2.3, swayDeg: 10, jitterPx: 3, driftPx: 46 }, // 4 — jumping, shoulders meeting
+  { jumpPx: 34, bounceHz: 3.0, swayDeg: 14, jitterPx: 5, driftPx: 66 }, // 5 — hype, properly jostling
 ];
 
 export const CROWD_DEFAULTS: CrowdConfig = {
@@ -97,10 +112,12 @@ export const CROWD_DEFAULTS: CrowdConfig = {
   avatarSize: 46,
   rowDebounceSeconds: 4,
   glow: 18,
+  glowColor: '#ff6ec7',
+  mirrorMode: 'off',
   rateWindowSeconds: 6,
   thresholds: [0, 0.5, 1.5, 3, 6],
   levels: LEVEL_DEFAULTS.map((l) => ({ ...l })),
-  calm: { jumpPx: 0, bounceHz: 0.35, swayDeg: 6, jitterPx: 0 },
+  calm: { jumpPx: 0, bounceHz: 0.35, swayDeg: 6, jitterPx: 0, driftPx: 10 },
   emoteSpew: true,
   spewSpeed: 260,
   spewSize: 44,
@@ -119,7 +136,7 @@ const FROZEN_DEFAULTS: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFA
 export const CROWD_RANGES: Record<string, readonly [number, number]> = {
   rows: [1, 8],
   rowSpacing: [0, 300],
-  perRow: [1, 24],
+  perRow: [2, 24],
   rowScale: [0.4, 1],
   silhouetteHeight: [40, 600],
   avatarSize: [8, 200],
@@ -142,6 +159,7 @@ export const CROWD_ANIM_RANGES: Record<keyof CrowdLevelAnim, readonly [number, n
   bounceHz: [0, 12],
   swayDeg: [0, 45],
   jitterPx: [0, 60],
+  driftPx: [0, 300],
 };
 
 /** Settings that are meaningful as fractions; the rest are rounded. */
@@ -159,6 +177,8 @@ export const CROWD_VARIABLES: Record<string, keyof CrowdConfig> = {
   'avatar-size': 'avatarSize',
   debounce: 'rowDebounceSeconds',
   glow: 'glow',
+  'glow-color': 'glowColor',
+  mirror: 'mirrorMode',
   window: 'rateWindowSeconds',
   spew: 'emoteSpew',
   'spew-speed': 'spewSpeed',
@@ -273,6 +293,14 @@ export class CrowdHypeService {
     const out = cloneConfig(CROWD_DEFAULTS);
     out.enabled = !!c.enabled;
     out.emoteSpew = !!c.emoteSpew;
+    // A bad colour would make the glow filter invalid and drop it silently, so
+    // anything that is not a plain hex triple falls back to the default.
+    out.glowColor = /^#[0-9a-fA-F]{6}$/.test(String(c.glowColor))
+      ? String(c.glowColor).toLowerCase()
+      : CROWD_DEFAULTS.glowColor;
+    out.mirrorMode = (MIRROR_MODES as readonly string[]).includes(String(c.mirrorMode))
+      ? (String(c.mirrorMode) as MirrorMode)
+      : CROWD_DEFAULTS.mirrorMode;
     for (const key of Object.keys(CROWD_RANGES) as (keyof CrowdConfig)[]) {
       const [lo, hi] = CROWD_RANGES[key]!;
       const raw = Number(c[key]);

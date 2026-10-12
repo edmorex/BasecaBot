@@ -14,6 +14,20 @@ const AVATAR_DEBOUNCE_MS = 400;
 /** Most emotes forwarded per chatter per tick, so one spammer cannot flood it. */
 const MAX_SPEW_PER_USER = 6;
 
+/**
+ * Twitch global emote ids the simulator throws, so the spew can actually be seen
+ * while tuning the settings.
+ *
+ * Every one of these was checked against the CDN rather than recalled: two ids
+ * that "everyone knows" (86, 88) turned out to 404. Should Twitch retire one
+ * later the overlay drops any image that fails to load, so it degrades to nothing
+ * rather than a broken-image icon.
+ */
+const SIM_EMOTE_IDS = [
+  '25', '33', '41', '52', '245', '354', '360', '425618',
+  '30259', '64138', '58765', '81274', '55338', '305954156',
+];
+
 /** What we know about one chatter on screen. */
 interface Fighter {
   name: string;
@@ -163,9 +177,17 @@ export function crowdHypePlugin(): Plugin {
       const n = Math.floor(Math.random() * chatters);
       const userId = 'sim-' + n;
       const name = 'Chatter' + (n + 1);
-      const carried = perMsg + (left-- > 0 ? 1 : 0);
-      tracker.add({ ts: now, userId, name, emotes: Math.max(0, carried) });
+      const carried = Math.max(0, perMsg + (left-- > 0 ? 1 : 0));
+      tracker.add({ ts: now, userId, name, emotes: carried });
       seen(userId, name);
+      // Real emote art, so the spew is visible while the settings are tuned.
+      if (carried > 0 && cfg.emoteSpew) {
+        const urls = pendingSpew.get(userId) ?? [];
+        for (let k = 0; k < carried && urls.length < MAX_SPEW_PER_USER; k++) {
+          urls.push(emoteImageUrl(SIM_EMOTE_IDS[Math.floor(Math.random() * SIM_EMOTE_IDS.length)]!));
+        }
+        pendingSpew.set(userId, urls);
+      }
     }
   };
 
@@ -265,6 +287,8 @@ export function crowdHypePlugin(): Plugin {
         silhouetteHeight: cfg.silhouetteHeight,
         avatarSize: cfg.avatarSize,
         glow: cfg.glow,
+        glowColor: cfg.glowColor,
+        mirrorMode: cfg.mirrorMode,
         emoteSpew: cfg.emoteSpew,
         spewSpeed: cfg.spewSpeed,
         spewSize: cfg.spewSize,

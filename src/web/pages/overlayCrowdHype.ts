@@ -79,8 +79,8 @@ export function crowdHypeOverlayPage(): string {
   // ── State ─────────────────────────────────────────────────────────────────
   var cfg = {
     rows:3, rowSpacing:46, perRow:6, rowScale:.86, silhouetteHeight:190, avatarSize:46,
-    glow:18, emoteSpew:true, spewSpeed:260, spewSize:44, spewSeconds:2.2,
-    anim:{ jumpPx:10, bounceHz:1.6, swayDeg:7, jitterPx:2 }
+    glow:18, glowColor:'#ff6ec7', mirrorMode:'off', emoteSpew:true, spewSpeed:260, spewSize:44, spewSeconds:2.2,
+    anim:{ jumpPx:10, bounceHz:1.6, swayDeg:7, jitterPx:2, driftPx:20 }
   };
   var people = {};        // id -> { el, body, row, slot, phase, jitter, jitterAt, name }
   var enabled = false;
@@ -105,8 +105,15 @@ export function crowdHypeOverlayPage(): string {
       // A random phase and rate wobble stop the whole crowd moving as one.
       phase: Math.random() * Math.PI * 2,
       rateJitter: 0.85 + Math.random() * 0.3,
+      // The sideways wander runs on its own slower clock, so drifting and
+      // bouncing are not locked together.
+      driftPhase: Math.random() * Math.PI * 2,
+      driftRate: 0.18 + Math.random() * 0.22,
       jitter: { x:0, y:0 }, jitterAt: 0,
       sil: null, avatar: null,
+      // The flip goes on the artwork, not on .body, so the profile picture is
+      // never mirrored with it.
+      art: null, flipped: false,
       // No signature yet, so applyStatic runs on this member's first frame.
       sig: ''
     };
@@ -123,6 +130,9 @@ export function crowdHypeOverlayPage(): string {
         ? '<img class="sil" src="' + esc(m.silhouette) + '" alt="" />'
         : '<span class="stand-in"></span>';
       p.avatar = null;   // the avatar node went with it
+      // ...and so did the element the mirror was applied to.
+      p.art = p.body.firstChild;
+      p.flipped = false;
     }
     if (!p.avatar){
       var av = document.createElement('div');
@@ -159,19 +169,18 @@ export function crowdHypeOverlayPage(): string {
    * would slide the whole row sideways several times a second.
    */
   function seat(list){
-    var perRow = Math.max(1, Math.round(cfg.perRow));
     var taken = {};     // "row:slot" -> id
     var needs = [];
+    var orders = {};    // row -> centre-out slot order, built once per update
 
     for (var i = 0; i < list.length; i++){
       var m = list[i];
       var p = people[m.id] || build(m);
       paint(p, m);
       p.name = m.name;
-      if (p.row === m.row && p.slot >= 0 && p.slot < perRow && !taken[m.row + ':' + p.slot]){
+      if (p.row === m.row && p.slot >= 0 && p.slot < rowCapacity(m.row) && !taken[m.row + ':' + p.slot]){
         taken[m.row + ':' + p.slot] = m.id;
       } else {
-        p.row = m.row;
         p.slot = -1;
         needs.push(m.id);
       }
@@ -180,7 +189,10 @@ export function crowdHypeOverlayPage(): string {
     for (var j = 0; j < needs.length; j++){
       var id = needs[j];
       var q = people[id];
-      for (var s = 0; s < perRow; s++){
+      if (!orders[q.row]) orders[q.row] = slotOrder(rowCapacity(q.row));
+      var order = orders[q.row];
+      for (var k = 0; k < order.length; k++){
+        var s = order[k];
         if (!taken[q.row + ':' + s]){ q.slot = s; taken[q.row + ':' + s] = id; break; }
       }
     }
@@ -204,7 +216,8 @@ export function crowdHypeOverlayPage(): string {
       d.style.height = size + 'px';
       d.style.left = (base.x - size / 2) + 'px';
       d.style.bottom = (base.y + base.height * 0.55) + 'px';
-      d.innerHTML = '<img src="' + esc(urls[i]) + '" alt="" />';
+      d.innerHTML = '<img src="' + esc(urls[i]) + '" alt="" ' +
+        'onerror="this.parentNode &amp;&amp; this.parentNode.remove()" />';
       crowd.appendChild(d);
 
       // Up and outward, with a little gravity on the way down.
@@ -225,16 +238,36 @@ export function crowdHypeOverlayPage(): string {
     }
   }
 
+  /** How many fit in a row: the odd rows behind the front hold one fewer. */
+  function rowCapacity(row){
+    var full = Math.max(2, Math.round(cfg.perRow));
+    return row % 2 === 1 ? full - 1 : full;
+  }
+
+  /**
+   * Slot order for a row, middle outward, so a sparse crowd gathers in the centre
+   * instead of hugging the left edge. For six slots that is 2,3,1,4,0,5.
+   */
+  function slotOrder(n){
+    var mid = (n - 1) / 2;
+    var idx = [];
+    for (var i = 0; i < n; i++) idx.push(i);
+    idx.sort(function(a, b){ return Math.abs(a - mid) - Math.abs(b - mid) || a - b; });
+    return idx;
+  }
+
   /** Where a member is standing, in design pixels. */
   function anchor(p){
     var rows = Math.max(1, Math.round(cfg.rows));
-    var perRow = Math.max(1, Math.round(cfg.perRow));
     var depth = Math.min(p.row, rows - 1);
     var scale = Math.pow(Math.max(.2, cfg.rowScale), depth);
-    var lane = W / perRow;
+    var lane = W / Math.max(2, Math.round(cfg.perRow));
     var slot = p.slot < 0 ? 0 : p.slot;
+    // Short rows sit on the midpoints between the heads in front of them, which
+    // fills the gaps rather than stacking everyone into columns.
+    var offset = depth % 2 === 1 ? 1 : 0.5;
     return {
-      x: lane * (slot + 0.5),
+      x: lane * (slot + offset),
       y: depth * Math.max(0, cfg.rowSpacing),
       scale: scale,
       height: Math.max(10, cfg.silhouetteHeight) * scale
@@ -254,12 +287,12 @@ export function crowdHypeOverlayPage(): string {
   //
   //   zIndex ........................ rows, row
   //   body height/width/marginLeft .. silhouetteHeight, rowScale, rows, row
-  //   body filter (the glow) ........ glow
+  //   body filter (the glow) ........ glow, glowColor
   //   avatar width/height/fontSize .. avatarSize, rowScale, rows, row
   //
   // (body color is a constant and lives in the stylesheet. perRow and rowSpacing
   // feed x/y only, which the per-frame transform rewrites anyway.)
-  var STATIC_DEPS = ['row', 'rows', 'rowScale', 'silhouetteHeight', 'avatarSize', 'glow'];
+  var STATIC_DEPS = ['row', 'rows', 'rowScale', 'silhouetteHeight', 'avatarSize', 'glow', 'glowColor'];
 
   /** Signature over every declared dependency; cheap enough to build per frame. */
   function staticSig(d){
@@ -274,8 +307,10 @@ export function crowdHypeOverlayPage(): string {
     p.body.style.height = base.height + 'px';
     p.body.style.width = (base.height * 0.62) + 'px';
     p.body.style.marginLeft = (-base.height * 0.31) + 'px';
+    // Two shadows of the same hue at different alphas, for a soft halo. The 8-digit
+    // hex carries the alpha, so one colour setting drives both.
     p.body.style.filter = d.glow > 0
-      ? 'drop-shadow(0 0 ' + d.glow + 'px rgba(255,110,199,.75)) drop-shadow(0 0 ' + (d.glow * 2) + 'px rgba(169,112,255,.45))'
+      ? 'drop-shadow(0 0 ' + d.glow + 'px ' + d.glowColor + 'bf) drop-shadow(0 0 ' + (d.glow * 2) + 'px ' + d.glowColor + '73)'
       : '';
     if (p.avatar){
       var av = Math.max(8, d.avatarSize) * base.scale;
@@ -286,7 +321,31 @@ export function crowdHypeOverlayPage(): string {
   }
 
   // One object reused every frame, so the guard allocates nothing per member.
-  var deps = { row:0, rows:3, rowScale:.86, silhouetteHeight:190, avatarSize:46, glow:18 };
+  var deps = { row:0, rows:3, rowScale:.86, silhouetteHeight:190, avatarSize:46, glow:18, glowColor:'#ff6ec7' };
+
+  /**
+   * Should this member's artwork be mirrored right now?
+   *
+   * 'move' reads the sign of the drift's derivative rather than comparing frames:
+   * the wander is a sine, so cos of the same phase gives the direction exactly,
+   * with none of the jitter noise that a frame-to-frame comparison would pick up
+   * (which would flap the silhouette back and forth at the turnaround).
+   *
+   * 'position' uses a deadband around the centre line for the same reason — a
+   * member hovering on the midpoint must not flicker.
+   */
+  function wantsFlip(p, x, t, drift){
+    if (cfg.mirrorMode === 'move'){
+      if (drift <= 0) return false;                     // not moving, so no direction
+      return Math.cos(t * Math.PI * 2 * p.driftRate + p.driftPhase) > 0;
+    }
+    if (cfg.mirrorMode === 'position'){
+      if (x < W / 2 - 8) return true;                   // left half: mirrored
+      if (x > W / 2 + 8) return false;                  // right half: as uploaded
+      return p.flipped;                                 // inside the deadband, hold
+    }
+    return false;
+  }
 
   // ── Animation ─────────────────────────────────────────────────────────────
   function frame(now){
@@ -298,11 +357,13 @@ export function crowdHypeOverlayPage(): string {
     var hz = Math.max(0, num(a.bounceHz, 0));
     var sway = Math.max(0, num(a.swayDeg, 0));
     var jit = Math.max(0, num(a.jitterPx, 0));
+    var drift = Math.max(0, num(a.driftPx, 0));
     deps.rows = Math.max(1, Math.round(cfg.rows));
     deps.rowScale = cfg.rowScale;
     deps.silhouetteHeight = cfg.silhouetteHeight;
     deps.avatarSize = num(cfg.avatarSize, 46);
     deps.glow = Math.max(0, num(cfg.glow, 0));
+    deps.glowColor = cfg.glowColor || '#ff6ec7';
 
     for (var id in people){
       var p = people[id];
@@ -320,10 +381,30 @@ export function crowdHypeOverlayPage(): string {
         p.jitter.x = 0; p.jitter.y = 0;
       }
 
+      // Sideways wander. Nothing clamps it to a lane, so neighbours overlap and
+      // the row reads as a crowd rubbing shoulders rather than a row of pegs.
+      var wander = drift > 0
+        ? Math.sin(t * Math.PI * 2 * p.driftRate + p.driftPhase) * drift
+        : 0;
+      // Overlapping a neighbour is the point; hanging half off the stage edge is
+      // not, so the wander is clamped at the sides but nowhere in between.
+      var halfBody = base.height * 0.31;
+      var x = base.x + wander + p.jitter.x;
+      if (x < halfBody) x = halfBody;
+      else if (x > W - halfBody) x = W - halfBody;
+
       // The only two that genuinely move.
-      p.el.style.transform = 'translate(' + (base.x + p.jitter.x) + 'px,' +
+      p.el.style.transform = 'translate(' + x + 'px,' +
         (-(base.y + lift + p.jitter.y)) + 'px)';
       p.body.style.transform = 'rotate(' + tilt.toFixed(2) + 'deg)';
+
+      // Mirroring changes rarely, so it is written on change rather than each
+      // frame — the same reasoning as the static styles below.
+      var flip = wantsFlip(p, x, t, drift);
+      if (flip !== p.flipped && p.art){
+        p.flipped = flip;
+        p.art.style.transform = flip ? 'scaleX(-1)' : '';
+      }
 
       // Everything else only when one of its declared inputs has changed.
       deps.row = p.row;

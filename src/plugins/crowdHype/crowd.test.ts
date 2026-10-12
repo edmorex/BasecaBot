@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CrowdTracker, excitementLevel, assignRows, type CrowdMember, type RowSlot } from './crowd.js';
+import { CrowdTracker, excitementLevel, assignRows, rowCapacity, type CrowdMember, type RowSlot } from './crowd.js';
 
 const T0 = 1_000_000;
 const member = (userId: string, score: number, lastAt = T0): CrowdMember => ({ userId, name: userId.toUpperCase(), score, lastAt });
@@ -86,7 +86,22 @@ describe('excitementLevel', () => {
   });
 });
 
+describe('rowCapacity', () => {
+  it('alternates full and one-short going back', () => {
+    // The short rows sit on the midpoints of the row in front, filling the gaps
+    // between heads instead of lining everyone up in columns.
+    expect([0, 1, 2, 3].map((r) => rowCapacity(r, 6))).toEqual([6, 5, 6, 5]);
+  });
+
+  it('never drops below the two-per-row floor', () => {
+    expect([0, 1].map((r) => rowCapacity(r, 2))).toEqual([2, 1]);
+    expect(rowCapacity(0, 1)).toBe(2); // clamped up
+    expect(rowCapacity(0, 0)).toBe(2);
+  });
+});
+
 describe('assignRows', () => {
+  // rows 3, perRow 2 -> capacities [2, 1, 2], five seats in total.
   const OPTS = { rows: 3, perRow: 2, debounceMs: 2000, now: T0 };
   const none = new Map<string, RowSlot>();
 
@@ -95,24 +110,33 @@ describe('assignRows', () => {
     const out = assignRows(ranked, none, OPTS);
     expect(out.get('a')!.row).toBe(0);
     expect(out.get('b')!.row).toBe(0);
-    expect(out.get('c')!.row).toBe(1);
-    expect(out.get('d')!.row).toBe(1);
+    expect(out.get('c')!.row).toBe(1); // the short row takes one
+    expect(out.get('d')!.row).toBe(2);
     expect(out.get('e')!.row).toBe(2);
-    expect(out.get('f')!.row).toBe(2);
+    expect(out.has('f')).toBe(false);  // past capacity
   });
 
-  it('never seats more than perRow in a row', () => {
+  it('never seats more than a row can hold', () => {
     const ranked = Array.from({ length: 20 }, (_, i) => member('u' + i, 100 - i));
     const out = assignRows(ranked, none, OPTS);
     const counts = [0, 0, 0];
     for (const slot of out.values()) counts[slot.row]!++;
-    expect(counts).toEqual([2, 2, 2]);
+    expect(counts).toEqual([2, 1, 2]);
+  });
+
+  it('fills a six-wide crowd 6/5/6 as documented', () => {
+    const ranked = Array.from({ length: 40 }, (_, i) => member('u' + i, 100 - i));
+    const out = assignRows(ranked, none, { rows: 3, perRow: 6, debounceMs: 0, now: T0 });
+    const counts = [0, 0, 0];
+    for (const slot of out.values()) counts[slot.row]!++;
+    expect(counts).toEqual([6, 5, 6]);
+    expect(out.size).toBe(17);
   });
 
   it('leaves chatters past capacity off screen entirely', () => {
     const ranked = Array.from({ length: 20 }, (_, i) => member('u' + i, 100 - i));
     const out = assignRows(ranked, none, OPTS);
-    expect(out.size).toBe(6);
+    expect(out.size).toBe(5);
     expect(out.has('u19')).toBe(false);
   });
 
@@ -167,10 +191,12 @@ describe('assignRows', () => {
     expect([...out.values()].every((s) => s.row === 0)).toBe(true);
   });
 
-  it('copes with a single seat', () => {
-    const out = assignRows([member('a', 9), member('b', 8)], none, { ...OPTS, rows: 1, perRow: 1 });
-    expect(out.size).toBe(1);
+  it('copes with the smallest possible crowd', () => {
+    // perRow floors at 2, so one row is two seats however small the setting.
+    const out = assignRows([member('a', 9), member('b', 8), member('c', 7)], none, { ...OPTS, rows: 1, perRow: 1 });
+    expect(out.size).toBe(2);
     expect(out.get('a')).toEqual({ row: 0, since: T0 });
+    expect(out.has('c')).toBe(false);
   });
 
   it('settles rather than oscillating when two chatters swap rank each tick', () => {

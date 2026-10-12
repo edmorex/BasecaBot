@@ -102,7 +102,8 @@ describe('crowd hype plugin', () => {
   it('never puts more people on screen than the rows can hold', async () => {
     for (let i = 0; i < 20; i++) await bus.publish(chat(user({ id: 'u' + i, displayName: 'U' + i })));
     await settle();
-    expect(latest().members).toHaveLength(4); // 2 rows x 2 per row
+    // rows 2, perRow 2 -> the row behind holds one fewer, so 2 + 1 seats.
+    expect(latest().members).toHaveLength(3);
   });
 
   it('climbs the excitement levels as chat speeds up', async () => {
@@ -286,6 +287,25 @@ describe('crowd hype plugin', () => {
       const m = latest().members;
       expect(m.length).toBeGreaterThan(0);
       expect(m.every((x) => x.id.startsWith('sim-'))).toBe(true);
+    });
+
+    it('throws real Twitch global emotes, so the spew can be seen', async () => {
+      live = { ...live, sim: true };
+      config = { ...config, simChatters: 4, simChatRate: 10, simEmoteRate: 20, rows: 3, perRow: 6 };
+      await settle(2000);
+      const urls = frames().flatMap((f) => ((f.spews ?? []) as { urls: string[] }[])).flatMap((x) => x.urls);
+      expect(urls.length).toBeGreaterThan(0);
+      for (const u of urls) expect(u).toMatch(/^https:\/\/static-cdn\.jtvnw\.net\/emoticons\/v2\/\d+\//);
+      // More than one emote in the mix, or the spew would look like a single sticker.
+      expect(new Set(urls).size).toBeGreaterThan(1);
+    });
+
+    it('throws nothing when spew is switched off', async () => {
+      live = { ...live, sim: true };
+      config = { ...config, emoteSpew: false, simChatRate: 10, simEmoteRate: 20 };
+      await settle(2000);
+      const urls = frames().flatMap((f) => ((f.spews ?? []) as { urls: string[] }[]));
+      expect(urls).toEqual([]);
     });
 
     it('never looks up an avatar for a fake chatter', async () => {

@@ -369,6 +369,18 @@ const SHARED_STYLE = /* css */ `
   }
   input[type=checkbox]:disabled, input[type=radio]:disabled { opacity: 0.45; cursor: not-allowed; }
 
+  /* ── Colour swatch: the native control is a bare OS rectangle, so it gets the
+     same box as everything else and the swatch inside it is squared off. ── */
+  input[type=color] {
+    appearance: none; -webkit-appearance: none; width: 3.4rem; height: var(--ctl-h);
+    padding: 0.18rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--ctl-radius); cursor: pointer;
+  }
+  input[type=color]:hover { border-color: #3d3d42; }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type=color]::-webkit-color-swatch { border: 0; border-radius: 5px; }
+  input[type=color]::-moz-color-swatch { border: 0; border-radius: 5px; }
+
   /* ── File picker: the native control is replaced outright. Its button label and
      "no file chosen" text are browser- AND locale-specific, which is exactly the
      inconsistency we are removing. The real input stays in the DOM (screen

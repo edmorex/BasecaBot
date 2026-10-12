@@ -38,8 +38,11 @@ const DEPS = (() => {
 describe('crowd overlay static-style cache', () => {
   it('declares the dependency list the guard is built from', () => {
     // The documented table: zIndex <- rows,row; body box <- silhouetteHeight,
-    // rowScale,rows,row; filter <- glow; avatar <- avatarSize,rowScale,rows,row.
-    expect(DEPS.sort()).toEqual(['avatarSize', 'glow', 'row', 'rowScale', 'rows', 'silhouetteHeight']);
+    // rowScale,rows,row; filter <- glow,glowColor; avatar <- avatarSize,rowScale,
+    // rows,row. Spelled out so adding a guarded input is a deliberate act.
+    expect(DEPS.sort()).toEqual([
+      'avatarSize', 'glow', 'glowColor', 'row', 'rowScale', 'rows', 'silhouetteHeight',
+    ]);
   });
 
   it('builds the signature from every declared dependency, nothing hand-picked', () => {
@@ -104,6 +107,48 @@ describe('crowd overlay static-style cache', () => {
   it('keeps the constant colour out of the frame loop entirely', () => {
     expect(functionBody('frame')).not.toMatch(/style\.color/);
     expect(SRC).toMatch(/\.body\{[^}]*color:rgba\(8,6,12,\.96\)/);
+  });
+
+  it('handles all three mirror modes', () => {
+    const body = functionBody('wantsFlip');
+    expect(body).toMatch(/'move'/);
+    expect(body).toMatch(/'position'/);
+    // 'off' is the fall-through: neither branch taken, so nothing is mirrored.
+    expect(body.trimEnd().endsWith('return false;')).toBe(true);
+  });
+
+  it('reads the drift direction analytically, not by comparing frames', () => {
+    // The wander is a sine, so cos of the same phase gives the exact direction.
+    // Diffing x between frames would pick up the random jitter and flap the
+    // silhouette back and forth at every turnaround.
+    const body = functionBody('wantsFlip');
+    expect(body).toMatch(/Math\.cos\(/);
+    expect(body).not.toMatch(/lastX|prevX/);
+    // No horizontal movement means no direction to face.
+    expect(body).toMatch(/drift <= 0/);
+  });
+
+  it('holds the flip inside a deadband at the centre line', () => {
+    // Without it, a member hovering on the midpoint flickers every frame.
+    const body = functionBody('wantsFlip');
+    expect(body).toMatch(/W \/ 2 - \d+/);
+    expect(body).toMatch(/W \/ 2 \+ \d+/);
+    expect(body).toMatch(/return p\.flipped;/);
+  });
+
+  it('writes the mirror only when it changes, and never onto the avatar', () => {
+    const body = functionBody('frame');
+    expect(body).toMatch(/if \(flip !== p\.flipped/);
+    // The flip lands on the artwork element; putting it on .body would mirror the
+    // profile picture along with the silhouette.
+    expect(body).toMatch(/p\.art\.style\.transform/);
+    expect(body).not.toMatch(/p\.body\.style\.transform = .*scaleX/);
+  });
+
+  it('re-applies the mirror when the artwork is swapped out', () => {
+    const body = functionBody('paint');
+    expect(body).toMatch(/p\.art = /);
+    expect(body).toMatch(/p\.flipped = false/);
   });
 
   it('still renders, with JS that compiles', () => {

@@ -7,6 +7,7 @@ import {
   LEVELS,
   safeCrowdName,
   HOLD_FOREVER,
+  MIRROR_MODES,
 } from './crowdHype.js';
 import type { Storage } from './storage/index.js';
 import type { Logger } from './logger.js';
@@ -100,6 +101,27 @@ describe('CrowdHypeService config', () => {
     expect(after.rows).toBe(5);
     expect(svc.getConfig()).toBe(after);
     expect(Object.isFrozen(after)).toBe(true);
+  });
+
+  it('accepts each mirror mode and rejects anything else', async () => {
+    for (const mode of MIRROR_MODES) {
+      expect((await svc.setConfig({ mirrorMode: mode })).mirrorMode).toBe(mode);
+    }
+    // An unknown mode would leave the overlay reading a value it cannot act on.
+    expect((await svc.setConfig({ mirrorMode: 'sideways' as never })).mirrorMode).toBe('off');
+    expect((await svc.setConfig({ mirrorMode: undefined as never })).mirrorMode).toBe('off');
+  });
+
+  it('never flips by default, so existing artwork looks unchanged', () => {
+    expect(CROWD_DEFAULTS.mirrorMode).toBe('off');
+    expect(MIRROR_MODES).toEqual(['off', 'move', 'position']);
+  });
+
+  it('rejects a glow colour that is not a plain hex triple', async () => {
+    expect((await svc.setConfig({ glowColor: '#ABCDEF' })).glowColor).toBe('#abcdef');
+    for (const bad of ['red', '#fff', 'rgb(1,2,3)', '#12345g', '']) {
+      expect((await svc.setConfig({ glowColor: bad })).glowColor).toBe(CROWD_DEFAULTS.glowColor);
+    }
   });
 
   it('clamps out-of-range values', async () => {

@@ -44,6 +44,19 @@ export interface RowOptions {
 export const MAX_LEVEL = 5;
 
 /**
+ * How many people a given row holds.
+ *
+ * Rows alternate full and one-short: the front row takes `perRow`, the one behind
+ * it `perRow - 1`, then full again. The overlay sits the short rows at the
+ * midpoints of the row in front, so the gaps between front-row heads are filled
+ * rather than lining everyone up in columns.
+ */
+export function rowCapacity(row: number, perRow: number): number {
+  const full = Math.max(2, Math.floor(perRow));
+  return row % 2 === 1 ? full - 1 : full;
+}
+
+/**
  * A rolling window of chat activity.
  *
  * Entries are appended in arrival order and dropped from the front once they age
@@ -118,7 +131,8 @@ export function excitementLevel(rate: number, thresholds: readonly number[]): nu
 /**
  * Place the ranked chatters into rows, front row first.
  *
- * The front row holds the loudest, and the rows behind take the overflow. The
+ * The front row holds the loudest, and the rows behind take the overflow (the
+ * odd-numbered rows one fewer, see rowCapacity). The
  * catch is that chat rankings churn constantly, and reassigning strictly by rank
  * every tick would have people teleporting between rows several times a second.
  * So a chatter is pinned to their row for `debounceMs` after arriving in it:
@@ -132,8 +146,10 @@ export function assignRows(
   opts: RowOptions,
 ): Map<string, RowSlot> {
   const rows = Math.max(1, Math.floor(opts.rows));
-  const perRow = Math.max(1, Math.floor(opts.perRow));
-  const onScreen = ranked.slice(0, rows * perRow);
+  const perRow = Math.max(2, Math.floor(opts.perRow));
+  const caps = Array.from({ length: rows }, (_, r) => rowCapacity(r, perRow));
+  const capacity = caps.reduce((a, b) => a + b, 0);
+  const onScreen = ranked.slice(0, capacity);
   const counts = new Array<number>(rows).fill(0);
   const out = new Map<string, RowSlot>();
 
@@ -142,7 +158,7 @@ export function assignRows(
     const p = prev.get(m.userId);
     if (!p || p.row >= rows) continue;
     if (opts.now - p.since >= opts.debounceMs) continue;
-    if (counts[p.row]! >= perRow) continue;
+    if (counts[p.row]! >= caps[p.row]!) continue;
     out.set(m.userId, { row: p.row, since: p.since });
     counts[p.row]!++;
   }
@@ -151,7 +167,7 @@ export function assignRows(
   for (const m of onScreen) {
     if (out.has(m.userId)) continue;
     let row = 0;
-    while (row < rows && counts[row]! >= perRow) row++;
+    while (row < rows && counts[row]! >= caps[row]!) row++;
     if (row >= rows) continue; // no seat left (only reachable if rows/perRow shrank)
     const p = prev.get(m.userId);
     // The clock only restarts on an actual move, or a chatter who keeps their row

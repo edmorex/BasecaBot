@@ -48,6 +48,7 @@ describe('form control styling', () => {
     // rest of these assertions would pass vacuously.
     expect([...all].sort()).toEqual([
       'input[type=checkbox]',
+      'input[type=color]',
       'input[type=file]',
       'input[type=number]',
       'input[type=radio]',
@@ -66,7 +67,7 @@ describe('form control styling', () => {
   it('draws every native control itself, so engines cannot disagree', () => {
     // appearance:none is what removes each browser's own widget; without it a
     // select, range or checkbox reverts to per-engine metrics and accent colours.
-    for (const sel of ['select', 'input[type=range]', 'input[type=checkbox]', 'input[type=radio]', 'input[type=number]']) {
+    for (const sel of ['select', 'input[type=range]', 'input[type=checkbox]', 'input[type=radio]', 'input[type=number]', 'input[type=color]']) {
       expect(LAYOUT, `${sel} should be reset`).toMatch(new RegExp(sel.replace(/[[\]]/g, '\\$&')));
     }
     expect(LAYOUT).toContain('appearance: none');

@@ -1543,12 +1543,18 @@ export function adminPage(): string {
     // ── Crowd Hype: live controls, simulation, and the look of the audience ─────
     var CROWD_LAYOUT = [
       { key: 'rows', label: 'Rows', hint: 'rows of silhouettes', min: 1, max: 8, step: 1 },
-      { key: 'perRow', label: 'Per row', hint: 'silhouettes in one row', min: 1, max: 24, step: 1 },
+      { key: 'perRow', label: 'Per row', hint: 'in the front row; the rows behind alternate one fewer', min: 2, max: 24, step: 1 },
       { key: 'rowSpacing', label: 'Space between rows', hint: 'pixels each row sits higher', min: 0, max: 300, step: 2 },
       { key: 'rowScale', label: 'Row scale', hint: 'size multiplier per row back', min: 0.4, max: 1, step: 0.02 },
       { key: 'silhouetteHeight', label: 'Silhouette height', hint: 'front-row height in pixels', min: 40, max: 600, step: 5 },
       { key: 'avatarSize', label: 'Avatar size', hint: 'profile picture diameter', min: 8, max: 200, step: 2 },
       { key: 'glow', label: 'Glow', hint: 'back-light strength; 0 turns it off', min: 0, max: 80, step: 1 },
+      { key: 'glowColor', label: 'Glow colour', hint: 'the back-light hue', color: true },
+      { key: 'mirrorMode', label: 'Mirror silhouettes', hint: 'when to flip the artwork horizontally', options: [
+        ['off', 'Never flip'],
+        ['move', 'Flip while drifting right'],
+        ['position', 'Flip on the left half']
+      ] },
       { key: 'rowDebounceSeconds', label: 'Row hold', hint: 'seconds before a chatter may change row', min: 0, max: 60, step: 1 }
     ];
     var CROWD_SPEW = [
@@ -1565,7 +1571,8 @@ export function adminPage(): string {
       { key: 'jumpPx', label: 'Jump', hint: 'hop height in pixels', min: 0, max: 300, step: 1 },
       { key: 'bounceHz', label: 'Bounce', hint: 'hops per second', min: 0, max: 12, step: 0.05 },
       { key: 'swayDeg', label: 'Sway', hint: 'degrees either side', min: 0, max: 45, step: 1 },
-      { key: 'jitterPx', label: 'Jitter', hint: 'random twitch in pixels', min: 0, max: 60, step: 1 }
+      { key: 'jitterPx', label: 'Jitter', hint: 'random twitch in pixels', min: 0, max: 60, step: 1 },
+      { key: 'driftPx', label: 'Drift', hint: 'sideways wander in pixels', min: 0, max: 300, step: 1 }
     ];
     var LEVEL_NAMES = ['Calm', 'Interested', 'Into it', 'Jumping', 'Hype'];
     var crowdData = null;
@@ -1574,8 +1581,17 @@ export function adminPage(): string {
 
     function crowdField(f, cfg, prefix) {
       var id = (prefix || 'cr-') + f.key;
-      return '<label class="field"><span>' + esc(f.label) + '</span>' +
-        '<input type="number" id="' + id + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />' +
+      var input;
+      if (f.options){
+        input = '<select id="' + id + '">' + f.options.map(function (o) {
+          return '<option value="' + esc(o[0]) + '"' + (cfg[f.key] === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+        }).join('') + '</select>';
+      } else if (f.color){
+        input = '<input type="color" id="' + id + '" value="' + esc(cfg[f.key] || '#ff6ec7') + '" />';
+      } else {
+        input = '<input type="number" id="' + id + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />';
+      }
+      return '<label class="field"><span>' + esc(f.label) + '</span>' + input +
         '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
     }
 
@@ -1699,7 +1715,9 @@ export function adminPage(): string {
         var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
         flat.forEach(function (f) {
           var el = document.getElementById('cr-' + f.key);
-          if (el) out[f.key] = Number(el.value);
+          if (!el) return;
+          // The glow colour and the mirror mode are the non-numeric settings here.
+          out[f.key] = (f.color || f.options) ? String(el.value) : Number(el.value);
         });
         out.clearPauseSeconds = Number(document.getElementById('cr-clearSecs').value);
         out.quiescePauseSeconds = Number(document.getElementById('cr-quiesceSecs').value);
