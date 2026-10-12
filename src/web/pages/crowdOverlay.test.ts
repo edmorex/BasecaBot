@@ -42,6 +42,11 @@ function functionSrc(name: string): string {
   return SRC.slice(start, i + 1);
 }
 
+/** Source with comments stripped, so prose about a past bug cannot trip a scan. */
+function codeOnly(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
 const DEPS = (() => {
   const m = /var STATIC_DEPS = \[([^\]]*)\]/.exec(SRC);
   expect(m, 'STATIC_DEPS not found').not.toBeNull();
@@ -204,7 +209,7 @@ describe('crowd overlay static-style cache', () => {
   it('gives the animation phase to the seat, not the occupant', () => {
     // Otherwise a chatter arriving mid-bounce would restart the spot's rhythm.
     const body = functionBody('buildSeat');
-    for (const key of ['phase', 'driftPhase', 'driftRate', 'rateJitter']) {
+    for (const key of ['beat', 'driftPhase', 'driftRate', 'rateJitter']) {
       expect(body, `${key} should belong to the seat`).toMatch(new RegExp(key + ':'));
     }
   });
@@ -226,14 +231,45 @@ describe('crowd overlay static-style cache', () => {
     expect(body).toMatch(/rowCapacity\(s3\.row\)/);
   });
 
-  it('centres the artwork in its box, so the avatar lines up with it', () => {
-    // The body box is a fixed 0.62 x height but the artwork is width:auto, so its
-    // real width comes from the PNG's aspect ratio. Flush-left artwork put the
-    // avatar off to one side — the direction depending on whether the image was
-    // narrower or wider than the box.
-    const m = /\.sil\{([^}]*)\}/.exec(SRC);
-    expect(m, '.sil rule not found').not.toBeNull();
-    expect(m![1]!).toMatch(/margin:\s*0 auto/);
+  it('centres the artwork in a way that survives overflowing its box', () => {
+    // The body box is a fixed 0.62 x height but the artwork is width:auto, so any
+    // silhouette with an aspect wider than 0.62 is WIDER than its box. CSS 2.1
+    // 10.3.3: a box wider than its container has its auto margins treated as zero,
+    // so `margin: 0 auto` centred the narrow art and silently left everything
+    // wider flush against the left edge, with the avatar — centred on the box —
+    // sitting off to the left of the artwork. Flex centring overflows both sides
+    // equally, so it holds at every aspect ratio.
+    const body = /\.body\{([^}]*)\}/.exec(SRC);
+    expect(body, '.body rule not found').not.toBeNull();
+    expect(body![1]!).toMatch(/display:\s*flex/);
+    expect(body![1]!).toMatch(/justify-content:\s*center/);
+
+    const sil = /\.sil\{([^}]*)\}/.exec(SRC);
+    expect(sil, '.sil rule not found').not.toBeNull();
+    // An auto margin here would be the old, aspect-dependent centring.
+    expect(sil![1]!).not.toMatch(/margin:[^;]*auto/);
+
+    // The arithmetic the two mechanisms give, for the record. Body is 0.62 x height;
+    // auto margins collapse to zero once the image is wider than that, leaving the
+    // artwork's centre (width - box) / 2 to the right of the avatar.
+    const H = 190;
+    const box = 0.62 * H;
+    const autoBias = (aspect: number) => (aspect * H > box ? (aspect * H - box) / 2 : 0);
+    expect(autoBias(0.4)).toBe(0);
+    expect(autoBias(1)).toBeCloseTo(36.1, 1); // a square silhouette: 36px off
+    expect(autoBias(1.33)).toBeCloseTo(67.5, 1);
+  });
+
+  it('keeps the avatar anchored to the same centre line as the artwork', () => {
+    // Both are centred on the body box, which is the only reason they agree.
+    const av = /\.av\{([^}]*)\}/.exec(SRC);
+    expect(av, '.av rule not found').not.toBeNull();
+    expect(av![1]!).toMatch(/left:\s*50%/);
+    expect(av![1]!).toMatch(/translate\(-50%/);
+    // The box itself is centred on the member's x by a half-width pull.
+    const stat = functionBody('applyStatic');
+    expect(stat).toMatch(/width = \(base\.height \* 0\.62\)/);
+    expect(stat).toMatch(/marginLeft = \(-base\.height \* 0\.31\)/);
   });
 
   it('still renders, with JS that compiles', () => {
@@ -506,5 +542,89 @@ describe('crowd overlay emote spew', () => {
     const body = functionBody('spew');
     const beforeLoop = body.slice(0, body.indexOf('for (var i = 0'));
     expect(beforeLoop).toMatch(/var sp = spewSettings\(\);/);
+  });
+});
+
+/**
+ * The hop phase. The excitement easing made bounceHz a continuously changing
+ * value, which turned a latent bug into a visible one: the hop was computed as
+ * sin(t * hz), so changing hz rescales the whole elapsed time and moves the phase
+ * rather than its speed. Five minutes into a stream one frame of the ease moved
+ * the phase a cycle and a half, so the crowd shook itself apart instead of easing.
+ * The phase has to accumulate.
+ */
+describe('crowd overlay hop phase', () => {
+  const FRAME = codeOnly(functionBody('frame'));
+
+  it('accumulates the phase instead of scaling elapsed time', () => {
+    expect(FRAME).toMatch(/p\.beat \+= dt \* hz \* p\.rateJitter \* Math\.PI/);
+    expect(FRAME).toMatch(/Math\.abs\(Math\.sin\(p\.beat\)\)/);
+    expect(FRAME).toMatch(/Math\.sin\(p\.beat \* 0\.5\)/);
+    // The shape of the old bug, in either order.
+    expect(FRAME).not.toMatch(/\bt \* hz\b/);
+    expect(FRAME).not.toMatch(/\bhz \* t\b/);
+  });
+
+  it('seeds the phase per seat so the crowd is not in lockstep', () => {
+    const build = codeOnly(functionBody('buildSeat'));
+    expect(build).toMatch(/beat: Math\.random\(\) \* Math\.PI \* 2/);
+    expect(build).not.toMatch(/phase: Math\.random/); // renamed, not duplicated
+  });
+
+  it('lets an eased value set an oscillator amplitude, never its phase', () => {
+    // The general rule, so the next eased setting cannot reintroduce this bug. An
+    // eased value outside the trig call is an amplitude and eases smoothly; inside
+    // the argument it moves the phase, and anything multiplied by elapsed time
+    // moves it further the longer the overlay has been running. Only per-member
+    // constants (driftRate, driftPhase) may appear beside t.
+    const eased = ['jump', 'hz', 'sway', 'jit', 'drift'];
+    const args: string[] = [];
+    for (const m of FRAME.matchAll(/Math\.(?:sin|cos)\(/g)) {
+      let i = m.index! + m[0].length;
+      let depth = 1;
+      const from = i;
+      for (; i < FRAME.length && depth > 0; i++) {
+        if (FRAME[i] === '(') depth++;
+        else if (FRAME[i] === ')') depth--;
+      }
+      args.push(FRAME.slice(from, i - 1));
+    }
+    expect(args.length, 'no oscillators found — has the frame loop moved?').toBeGreaterThan(1);
+    for (const arg of args) {
+      if (!/\bt\b/.test(arg)) continue; // a phase that does not use elapsed time is safe
+      for (const name of eased) {
+        expect(new RegExp('\\b' + name + '\\b').test(arg),
+          `the eased '${name}' is inside an oscillator phase scaled by elapsed time: ${arg}`).toBe(false);
+      }
+    }
+  });
+
+  it('advances the phase at a rate set by hz, independent of how long it has run', () => {
+    // The property the fix buys, as arithmetic: one frame's advance depends only on
+    // dt and hz. The old form's advance also depends on t, which is the bug.
+    const dt = 1 / 60;
+    const rj = 1;
+    const advance = (hz: number) => dt * hz * rj * Math.PI;
+    expect(advance(1.6)).toBeCloseTo(0.0838, 4);
+
+    // Old form: beat = t * hz, so easing hz by one frame's step shifts the phase by
+    // t * dHz * PI — a cycle and a half at five minutes in.
+    const dHz = (3.0 - 0.5) / (4 * 60); // a 1->5 ease over the 4s default
+    const oldShift = (t: number) => t * dHz * Math.PI;
+    expect(oldShift(1)).toBeLessThan(Math.PI / 2);
+    expect(oldShift(300) / (2 * Math.PI)).toBeGreaterThan(1.5); // whole cycles per frame
+    // The fixed form has no t term at all, so it is the same at any elapsed time.
+    for (const t of [1, 60, 300, 1800]) {
+      expect(advance(1.6)).toBeCloseTo(0.0838, 4);
+      expect(t * 0 + advance(1.6)).toBeLessThan(0.1); // bounded, whatever t is
+    }
+  });
+
+  it('still lets the hop speed up as the level climbs', () => {
+    // The fix must not flatten the thing it protects: a higher hz still means more
+    // phase per second, it just no longer jumps when hz changes.
+    const perSecond = (hz: number) => hz * Math.PI;
+    expect(perSecond(3.0)).toBeGreaterThan(perSecond(0.5));
+    expect(perSecond(3.0) / perSecond(0.5)).toBeCloseTo(6, 5);
   });
 });

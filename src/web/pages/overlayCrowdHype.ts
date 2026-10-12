@@ -46,12 +46,16 @@ export function crowdHypeOverlayPage(): string {
   .member{ position:absolute; bottom:0; left:0; opacity:0;
     transition:opacity .45s ease; will-change:transform; }
   .member.in{ opacity:1; }
-  .body{ position:relative; transform-origin:50% 100%; color:rgba(8,6,12,.96); }
-  /* Auto margins matter: the body box is a fixed 0.62 x height, but the artwork is
-     width:auto so its real width comes from the image's own aspect ratio. Without
-     centring it sits flush against the box's left edge while the avatar below is
-     centred on the box — which reads as the profile picture being off to the left. */
-  .sil{ display:block; height:100%; width:auto; margin:0 auto; }
+  /* Centred with flex, NOT with auto margins. The body box is a fixed 0.62 x height
+     but the artwork is width:auto, so a silhouette wider than that overflows its
+     box, and CSS 2.1 10.3.3 says a box wider than its container has its auto
+     margins treated as ZERO. So margin:0 auto centred the narrow images and quietly
+     left every wider one flush against the left edge, with the avatar centred on
+     the box sitting off to the left of the artwork. Flex centring overflows both
+     sides equally, so the two agree at every aspect ratio. */
+  .body{ position:relative; display:flex; justify-content:center; align-items:flex-end;
+    transform-origin:50% 100%; color:rgba(8,6,12,.96); }
+  .sil{ display:block; height:100%; width:auto; flex:none; }
   /* The profile picture sits at the silhouette's bottom centre. */
   .av{ position:absolute; left:50%; bottom:0; border-radius:50%;
     transform:translate(-50%,28%); background:#241a2b center/cover no-repeat;
@@ -60,7 +64,7 @@ export function crowdHypeOverlayPage(): string {
     color:#fff; font-weight:800; text-shadow:0 1px 3px rgba(0,0,0,.9); }
   /* Fallback shape for before any silhouette has been uploaded: a plain
      head-and-shoulders, so the overlay is never simply blank. */
-  .stand-in{ display:block; width:100%; height:100%;
+  .stand-in{ display:block; width:100%; height:100%; flex:none;
     background:currentColor;
     -webkit-mask:radial-gradient(circle at 50% 22%, #000 0 19%, transparent 20%) no-repeat,
       radial-gradient(ellipse 54% 44% at 50% 100%, #000 0 99%, transparent 100%) no-repeat;
@@ -149,9 +153,10 @@ export function crowdHypeOverlayPage(): string {
     crowd.appendChild(el);
     return {
       el: el, body: body, row: row, slot: slot,
-      // The phase belongs to the seat, so a chatter arriving mid-bounce drops
-      // into the rhythm of the spot rather than restarting it.
-      phase: Math.random() * Math.PI * 2,
+      // The phase belongs to the seat, so a chatter arriving mid-bounce drops into
+      // the rhythm of the spot rather than restarting it. It accumulates frame by
+      // frame -- see the hop in frame().
+      beat: Math.random() * Math.PI * 2,
       rateJitter: 0.85 + Math.random() * 0.3,
       driftPhase: Math.random() * Math.PI * 2,
       driftRate: 0.18 + Math.random() * 0.22,
@@ -514,11 +519,17 @@ export function crowdHypeOverlayPage(): string {
       var p = seats[key];
       if (p.user === null) continue;   // an empty seat is mid fade-out
       var base = anchor(p);
+      // Advance each member's own phase by this frame's worth, rather than
+      // multiplying the elapsed time by the current rate. Changing hz must change
+      // how fast the phase ADVANCES, not where the phase is: with beat = t * hz,
+      // easing hz rescales the whole elapsed time, so a hair of a change jumps the
+      // phase by whole cycles once t is large (five minutes in, one frame of the
+      // ease moved it a cycle and a half) and the crowd shakes itself apart.
+      p.beat += dt * hz * p.rateJitter * Math.PI;
       // Hop: abs(sin) so they spring off the floor rather than sinking through it.
-      var beat = t * hz * p.rateJitter * Math.PI + p.phase;
-      var lift = jump > 0 && hz > 0 ? Math.abs(Math.sin(beat)) * jump : 0;
+      var lift = jump > 0 && hz > 0 ? Math.abs(Math.sin(p.beat)) * jump : 0;
       // Rock at half the hop rate, which reads as a sway rather than a shiver.
-      var tilt = sway > 0 ? Math.sin(beat * 0.5) * sway : 0;
+      var tilt = sway > 0 ? Math.sin(p.beat * 0.5) * sway : 0;
       if (jit > 0 && now - p.jitterAt > 90){
         p.jitterAt = now;
         p.jitter.x = (Math.random() * 2 - 1) * jit;
