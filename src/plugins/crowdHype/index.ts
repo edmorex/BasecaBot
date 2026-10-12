@@ -296,10 +296,24 @@ export function crowdHypePlugin(): Plugin {
         seatArt,
         mirrorMode: cfg.mirrorMode,
         emoteSpew: cfg.emoteSpew,
-        spewSpeed: cfg.spewSpeed,
-        spewSize: cfg.spewSize,
-        spewSeconds: cfg.spewSeconds,
-        anim: live.mode === 'slow' ? cfg.calm : cfg.levels[level - 1],
+        // Sent as two sets rather than one resolved set: the overlay blends them
+        // by how far into slow mode it has eased, the same way it blends the
+        // animation levels, so launches do not change character in one frame.
+        spew: {
+          speed: cfg.spewSpeed, speedVar: cfg.spewSpeedVar,
+          distance: cfg.spewDistance, distanceVar: cfg.spewDistanceVar,
+          size: cfg.spewSize, seconds: cfg.spewSeconds,
+        },
+        spewSlow: {
+          speed: cfg.spewSlowSpeed, speedVar: cfg.spewSlowSpeedVar,
+          distance: cfg.spewSlowDistance, distanceVar: cfg.spewSlowDistanceVar,
+          size: cfg.spewSlowSize, seconds: cfg.spewSlowSeconds,
+        },
+        // The whole table, not one resolved set: the overlay eases between levels
+        // and needs its neighbours to interpolate against.
+        levels: cfg.levels,
+        calm: cfg.calm,
+        transitionSeconds: cfg.transitionSeconds,
       },
     });
   };

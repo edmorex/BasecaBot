@@ -78,21 +78,46 @@ export interface CrowdConfig {
   levels: CrowdLevelAnim[];
   /** Movement while the broadcaster has forced Slow Mode. */
   calm: CrowdLevelAnim;
+  /**
+   * Seconds to travel one excitement level. The crowd eases between levels rather
+   * than snapping, and because it moves through the levels one at a time it can
+   * never skip one — a jump from calm to hype passes through everything between.
+   */
+  transitionSeconds: number;
 
   // ── Emote spew ──
   emoteSpew: boolean;
-  /** Launch speed in pixels per second. */
+  /**
+   * Regular-mode launch. An emote travels `spewDistance` pixels at `spewSpeed`
+   * pixels per second, so it reaches the top of its arc after distance/speed
+   * seconds and then floats and fades for the rest of `spewSeconds`. The two
+   * variability values are the plus-or-minus each launch is randomised by, so a
+   * speed of 260 with a variability of 30 fires between 230 and 290.
+   */
   spewSpeed: number;
+  spewSpeedVar: number;
+  spewDistance: number;
+  spewDistanceVar: number;
   /** Rendered emote size in pixels. */
   spewSize: number;
-  /** Seconds before a spewed emote fades out. */
+  /** Seconds a spewed emote is on screen before it has faded out. */
   spewSeconds: number;
+
+  /** The same six values, used instead while the crowd is in slow mode. */
+  spewSlowSpeed: number;
+  spewSlowSpeedVar: number;
+  spewSlowDistance: number;
+  spewSlowDistanceVar: number;
+  spewSlowSize: number;
+  spewSlowSeconds: number;
 
   // ── Live-control defaults ──
   /** Seconds the overlay stays cleared and paused. */
   clearPauseSeconds: number;
   /** Seconds the crowd stays quiesced before it may ramp up again. */
   quiescePauseSeconds: number;
+  /** Seconds the crowd stays in slow mode. */
+  slowPauseSeconds: number;
 
   // ── Simulation ──
   simChatters: number;
@@ -125,12 +150,24 @@ export const CROWD_DEFAULTS: CrowdConfig = {
   thresholds: [0, 0.5, 1.5, 3, 6],
   levels: LEVEL_DEFAULTS.map((l) => ({ ...l })),
   calm: { jumpPx: 0, bounceHz: 0.35, swayDeg: 6, jitterPx: 0, driftPx: 10 },
+  transitionSeconds: 4,
   emoteSpew: true,
   spewSpeed: 260,
+  spewSpeedVar: 30,
+  spewDistance: 300,
+  spewDistanceVar: 60,
   spewSize: 44,
   spewSeconds: 2.2,
+  // Slow mode: a lazier, shorter lob that matches the gentle sway.
+  spewSlowSpeed: 110,
+  spewSlowSpeedVar: 15,
+  spewSlowDistance: 140,
+  spewSlowDistanceVar: 30,
+  spewSlowSize: 40,
+  spewSlowSeconds: 2.8,
   clearPauseSeconds: 30,
   quiescePauseSeconds: 30,
+  slowPauseSeconds: 30,
   simChatters: 12,
   simChatRate: 2,
   simEmoteRate: 3,
@@ -151,11 +188,22 @@ export const CROWD_RANGES: Record<string, readonly [number, number]> = {
   glow: [0, 80],
   rateWindowSeconds: [1, 60],
   survivalWindows: [1, 1000],
+  transitionSeconds: [0, 30],
   spewSpeed: [20, 1200],
+  spewSpeedVar: [0, 600],
+  spewDistance: [10, 2000],
+  spewDistanceVar: [0, 1000],
   spewSize: [8, 200],
   spewSeconds: [0.3, 10],
+  spewSlowSpeed: [20, 1200],
+  spewSlowSpeedVar: [0, 600],
+  spewSlowDistance: [10, 2000],
+  spewSlowDistanceVar: [0, 1000],
+  spewSlowSize: [8, 200],
+  spewSlowSeconds: [0.3, 10],
   clearPauseSeconds: [0, 600],
   quiescePauseSeconds: [0, 600],
+  slowPauseSeconds: [0, 600],
   simChatters: [1, 200],
   simChatRate: [0, 50],
   simEmoteRate: [0, 200],
@@ -171,7 +219,7 @@ export const CROWD_ANIM_RANGES: Record<keyof CrowdLevelAnim, readonly [number, n
 };
 
 /** Settings that are meaningful as fractions; the rest are rounded. */
-const FRACTIONAL = new Set(['rowScale', 'spewSeconds', 'simChatRate', 'simEmoteRate', 'rateWindowSeconds']);
+const FRACTIONAL = new Set(['rowScale', 'spewSeconds', 'spewSlowSeconds', 'simChatRate', 'simEmoteRate', 'rateWindowSeconds', 'transitionSeconds']);
 const FRACTIONAL_ANIM = new Set<keyof CrowdLevelAnim>(['bounceHz']);
 
 /** Chat-facing setter names -> config keys. */
@@ -189,10 +237,20 @@ export const CROWD_VARIABLES: Record<string, keyof CrowdConfig> = {
   mirror: 'mirrorMode',
   window: 'rateWindowSeconds',
   survival: 'survivalWindows',
+  transition: 'transitionSeconds',
   spew: 'emoteSpew',
   'spew-speed': 'spewSpeed',
+  'spew-speed-var': 'spewSpeedVar',
+  'spew-distance': 'spewDistance',
+  'spew-distance-var': 'spewDistanceVar',
   'spew-size': 'spewSize',
   'spew-seconds': 'spewSeconds',
+  'slow-spew-speed': 'spewSlowSpeed',
+  'slow-spew-speed-var': 'spewSlowSpeedVar',
+  'slow-spew-distance': 'spewSlowDistance',
+  'slow-spew-distance-var': 'spewSlowDistanceVar',
+  'slow-spew-size': 'spewSlowSize',
+  'slow-spew-seconds': 'spewSlowSeconds',
 };
 
 export interface CrowdImage {
@@ -213,7 +271,11 @@ export const HOLD_FOREVER = Number.MAX_SAFE_INTEGER;
 
 /** How the broadcaster is currently overriding the crowd. Not persisted. */
 export interface CrowdLive {
-  /** 'slow' swaps every level for the calm animation values. */
+  /**
+   * 'slow' swaps every level for the calm animation values. Derived from
+   * `slowUntil` rather than stored, so slow mode expires on its own the way the
+   * clear and quiesce holds do.
+   */
   mode: 'regular' | 'slow';
   /** Epoch ms until which the overlay takes no new updates. */
   pausedUntil: number;
@@ -221,11 +283,14 @@ export interface CrowdLive {
   clearedAt: number;
   /** Epoch ms until which excitement is held at level 1. */
   quiescedUntil: number;
+  /** Epoch ms until which the crowd stays in slow mode. */
+  slowUntil: number;
   /** Whether synthetic chat is being generated. */
   sim: boolean;
   /** True when the hold runs until Resume rather than expiring. For display. */
   pausedForever: boolean;
   quiescedForever: boolean;
+  slowForever: boolean;
 }
 
 /** A user-facing problem (bad upload); safe to show in the UI. */
@@ -264,7 +329,7 @@ export class CrowdHypeService {
    */
   private config: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFAULTS));
   private seatArt: SeatArt = {};
-  private live = { mode: 'regular' as 'regular' | 'slow', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false };
+  private live = { pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false };
 
   constructor(
     private readonly storage: Storage,
@@ -393,14 +458,25 @@ export class CrowdHypeService {
       ...this.live,
       // Derived rather than stored, so the timestamp stays the single source of
       // truth and the panel never has to know the sentinel.
+      mode: Date.now() < this.live.slowUntil ? 'slow' : 'regular',
       pausedForever: this.live.pausedUntil >= HOLD_FOREVER,
       quiescedForever: this.live.quiescedUntil >= HOLD_FOREVER,
+      slowForever: this.live.slowUntil >= HOLD_FOREVER,
     };
   }
 
-  setMode(mode: string): CrowdLive {
-    this.live.mode = mode === 'slow' ? 'slow' : 'regular';
-    this.logger.info({ mode: this.live.mode }, 'crowd: mode changed');
+  /** Sway gently instead of hopping, for a while. */
+  slowAndPause(seconds?: number): CrowdLive {
+    const secs = this.pauseSeconds(seconds, this.config.slowPauseSeconds);
+    this.live.slowUntil = Date.now() + secs * 1000;
+    this.logger.info({ seconds: secs }, 'crowd: slow mode');
+    return this.getLive();
+  }
+
+  /** Sway gently until Resume. */
+  slowAndWait(): CrowdLive {
+    this.live.slowUntil = HOLD_FOREVER;
+    this.logger.info('crowd: slow mode until resume');
     return this.getLive();
   }
 
@@ -437,10 +513,11 @@ export class CrowdHypeService {
     return this.getLive();
   }
 
-  /** Cancel any clear/quiesce hold immediately. */
+  /** Cancel any clear, quiesce or slow-mode hold immediately. */
   resume(): CrowdLive {
     this.live.pausedUntil = 0;
     this.live.quiescedUntil = 0;
+    this.live.slowUntil = 0;
     return this.getLive();
   }
 

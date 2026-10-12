@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CrowdHypeService,
   CROWD_DEFAULTS,
@@ -140,6 +140,15 @@ describe('CrowdHypeService config', () => {
     expect((await svc.setConfig({ survivalWindows: 99999 })).survivalWindows).toBe(1000);
   });
 
+  it('keeps the excitement transition a fractional number of seconds', async () => {
+    // 4s per level step by default; 0 is legal and means the old hard snap.
+    expect(CROWD_DEFAULTS.transitionSeconds).toBe(4);
+    expect((await svc.setConfig({ transitionSeconds: 2.5 })).transitionSeconds).toBe(2.5);
+    expect((await svc.setConfig({ transitionSeconds: 0 })).transitionSeconds).toBe(0);
+    expect((await svc.setConfig({ transitionSeconds: -1 })).transitionSeconds).toBe(0);
+    expect((await svc.setConfig({ transitionSeconds: 999 })).transitionSeconds).toBe(30);
+  });
+
   it('clamps out-of-range values', async () => {
     const c = await svc.setConfig({ rows: 99, glow: -5, rowScale: 9, spewSeconds: 0.01 });
     expect(c.rows).toBe(8);
@@ -246,14 +255,44 @@ describe('CrowdHypeService live controls', () => {
 
   it('starts clean — live overrides are never persisted', () => {
     expect(svc.getLive()).toEqual({
-      mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false,
-      pausedForever: false, quiescedForever: false,
+      mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false,
+      pausedForever: false, quiescedForever: false, slowForever: false,
     });
   });
 
-  it('toggles slow mode and ignores anything that is not a mode', () => {
-    expect(svc.setMode('slow').mode).toBe('slow');
-    expect(svc.setMode('nonsense').mode).toBe('regular');
+  describe('slow mode', () => {
+    // A frozen clock, so 'has it lapsed yet' is an exact question.
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('holds slow mode for a while, then lets it lapse on its own', () => {
+      // Slow mode is a timed hold like clear and quiesce, not a latch: the mode is
+      // derived from the deadline, so it ends without anything having to clear it.
+      const live = svc.slowAndPause(10);
+      expect(live.mode).toBe('slow');
+      expect(live.slowUntil).toBeGreaterThan(Date.now());
+      expect(live.slowForever).toBe(false);
+
+      vi.setSystemTime(new Date(Date.now() + 11_000));
+      expect(svc.getLive().mode).toBe('regular');
+    });
+
+    it('holds slow mode until resume when asked', () => {
+      const live = svc.slowAndWait();
+      expect(live.mode).toBe('slow');
+      expect(live.slowForever).toBe(true);
+
+      // Far longer than any real stream: an endless hold must not lapse.
+      vi.setSystemTime(new Date(Date.now() + 86_400_000));
+      expect(svc.getLive().mode).toBe('slow');
+    });
+
+    it('falls back to the configured slow duration, and clamps a silly one', async () => {
+      await svc.setConfig({ slowPauseSeconds: 45 });
+      const started = Date.now();
+      expect(svc.slowAndPause(undefined).slowUntil).toBe(started + 45_000);
+      expect(svc.slowAndPause(99_999).slowUntil).toBe(started + 600_000);
+    });
   });
 
   it('stamps a clear and a pause window', () => {
@@ -316,21 +355,25 @@ describe('CrowdHypeService live controls', () => {
     expect(svc.clearAndWait().pausedForever).toBe(true);
   });
 
-  it('cancels both holds on resume, leaving mode and sim alone', () => {
-    svc.setMode('slow');
+  it('cancels every hold on resume, leaving the simulation alone', () => {
+    // Resume is the counterpart of all three 'until resume' buttons, so it has to
+    // lift slow mode as well — otherwise the panel offers no way back out of it.
+    svc.slowAndWait();
     svc.setSim(true);
     svc.clearAndPause(60);
     svc.quiesceAndPause(60);
     const live = svc.resume();
     expect(live.pausedUntil).toBe(0);
     expect(live.quiescedUntil).toBe(0);
-    expect(live.mode).toBe('slow');
+    expect(live.slowUntil).toBe(0);
+    expect(live.mode).toBe('regular');
     expect(live.sim).toBe(true);
   });
 
   it('hands out a copy of the live state, not the original', () => {
     const live = svc.getLive();
-    live.mode = 'slow';
+    live.slowUntil = HOLD_FOREVER;
+    expect(svc.getLive().slowUntil).toBe(0);
     expect(svc.getLive().mode).toBe('regular');
   });
 });

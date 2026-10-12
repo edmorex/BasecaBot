@@ -29,6 +29,19 @@ function functionBody(name: string): string {
   return SRC.slice(from + 1, i);
 }
 
+/** Full source text of a top-level function in the page script. */
+function functionSrc(name: string): string {
+  const start = SRC.indexOf('function ' + name + '(');
+  expect(start, `${name} not found`).toBeGreaterThan(-1);
+  let i = SRC.indexOf('{', start);
+  let depth = 0;
+  for (; i < SRC.length; i++) {
+    if (SRC[i] === '{') depth++;
+    else if (SRC[i] === '}' && --depth === 0) break;
+  }
+  return SRC.slice(start, i + 1);
+}
+
 const DEPS = (() => {
   const m = /var STATIC_DEPS = \[([^\]]*)\]/.exec(SRC);
   expect(m, 'STATIC_DEPS not found').not.toBeNull();
@@ -228,5 +241,270 @@ describe('crowd overlay static-style cache', () => {
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
     expect(scripts).toHaveLength(1);
     expect(() => new Function(scripts[0]!)).not.toThrow();
+  });
+});
+
+/**
+ * The excitement easing. Levels used to be applied the instant the rate crossed a
+ * threshold, so a burst of chat snapped the whole crowd from a calm sway to a full
+ * jump between two frames — read as a glitch. Now the level is a continuous value
+ * that walks toward its target, which also means it cannot skip a level: passing
+ * through 3 on the way from 2 to 4 is a property of moving continuously, not a
+ * special case. These run the overlay's own easing code.
+ */
+const LEVEL_FIXTURE = [
+  { jumpPx: 0, bounceHz: 0.5, swayDeg: 2, jitterPx: 0, driftPx: 4 },
+  { jumpPx: 4, bounceHz: 1.0, swayDeg: 4, jitterPx: 1, driftPx: 14 },
+  { jumpPx: 10, bounceHz: 1.6, swayDeg: 7, jitterPx: 2, driftPx: 28 },
+  { jumpPx: 20, bounceHz: 2.3, swayDeg: 10, jitterPx: 3, driftPx: 46 },
+  { jumpPx: 34, bounceHz: 3.0, swayDeg: 14, jitterPx: 5, driftPx: 66 },
+];
+const CALM_FIXTURE = { jumpPx: 0, bounceHz: 0.3, swayDeg: 1, jitterPx: 0, driftPx: 10 };
+
+type Anim = Record<string, number> & { jumpPx: number; driftPx: number };
+
+interface Easer {
+  tick(dt: number): Anim;
+  target(level: number): void;
+  level(): number;
+  mode(m: string): void;
+}
+
+/** Build the overlay's easing in isolation, over a fixed level table. */
+function easer(cfg: Record<string, unknown>): Easer {
+  const animKeys = /var ANIM_KEYS = \[[^\]]*\]/.exec(SRC);
+  expect(animKeys, 'ANIM_KEYS not found').not.toBeNull();
+  const body = [
+    'var cfg = CFG;',
+    'var levelNow = 1, levelTarget = 1, slowMix = 0;',
+    'function num(v, d){ var n = Number(v); return isFinite(n) ? n : d; }',
+    animKeys![0] + ';',
+    functionSrc('lerpAnim'),
+    functionSrc('approach'),
+    functionSrc('easeAnim'),
+    'return {',
+    '  tick: function(dt){ return easeAnim(dt); },',
+    '  target: function(v){ levelTarget = v; },',
+    '  level: function(){ return levelNow; },',
+    '  mode: function(m){ cfg.mode = m; }',
+    '};',
+  ].join('\n');
+  return new Function('CFG', body)({ levels: LEVEL_FIXTURE, calm: CALM_FIXTURE, ...cfg }) as Easer;
+}
+
+/** Run `seconds` of 60fps frames, returning every integer level boundary crossed. */
+function crossings(e: Easer, seconds: number): number[] {
+  const out: number[] = [];
+  for (let f = 0; f < seconds * 60; f++) {
+    const before = e.level();
+    e.tick(1 / 60);
+    const after = e.level();
+    for (const L of [2, 3, 4, 5]) {
+      if ((before < L && after >= L) || (before > L && after <= L)) out.push(L);
+    }
+  }
+  return out;
+}
+
+describe('crowd overlay excitement easing', () => {
+  it('walks every level in between instead of jumping to the target', () => {
+    // THE point of the setting: chat slamming from dead calm to peak hype must
+    // still be seen to pass through 2, 3 and 4.
+    const e = easer({ transitionSeconds: 4 });
+    e.target(5);
+    expect(crossings(e, 30)).toEqual([2, 3, 4, 5]);
+    expect(e.level()).toBe(5);
+  });
+
+  it('walks back down through every level too', () => {
+    const e = easer({ transitionSeconds: 2 });
+    e.target(5);
+    crossings(e, 20);
+    e.target(1);
+    expect(crossings(e, 20)).toEqual([4, 3, 2]);
+    expect(e.level()).toBe(1);
+  });
+
+  it('spends the configured time on each level step', () => {
+    // 'Transition time' is seconds per level, so one step lands on the nose and a
+    // four-level swing takes four times as long.
+    const e = easer({ transitionSeconds: 4 });
+    e.target(2);
+    for (let f = 0; f < 4 * 60; f++) e.tick(1 / 60);
+    expect(e.level()).toBeCloseTo(2, 5);
+
+    const far = easer({ transitionSeconds: 4 });
+    far.target(5);
+    for (let f = 0; f < 8 * 60; f++) far.tick(1 / 60);
+    expect(far.level()).toBeCloseTo(3, 1); // halfway after 8 of the 16 seconds
+  });
+
+  it('snaps when the transition time is zero', () => {
+    // The old behaviour, still reachable by setting the field to 0.
+    const e = easer({ transitionSeconds: 0 });
+    e.target(5);
+    e.tick(1 / 60);
+    expect(e.level()).toBe(5);
+  });
+
+  it('blends only between the two levels it sits between', () => {
+    // Halfway from 2 to 3 must read as the midpoint of those two rows of the
+    // table and never borrow from level 1 or 4.
+    const e = easer({ transitionSeconds: 1 });
+    e.target(3);
+    let anim = {} as Anim;
+    for (let f = 0; f < 90; f++) anim = e.tick(1 / 60); // 1.5s = level 2.5
+    expect(e.level()).toBeCloseTo(2.5, 5);
+    expect(anim.jumpPx).toBeCloseTo((4 + 10) / 2, 5);
+    expect(anim.driftPx).toBeCloseTo((14 + 28) / 2, 5);
+  });
+
+  it('holds still once it has arrived', () => {
+    const e = easer({ transitionSeconds: 3 });
+    e.target(4);
+    for (let f = 0; f < 60 * 60; f++) e.tick(1 / 60);
+    expect(e.level()).toBe(4);
+    expect(crossings(e, 5)).toEqual([]); // no overshoot past 4 and back
+  });
+
+  it('never leaves the level table, however the target arrives', () => {
+    // d.level comes off the wire; a stale or wrong value must not index past the
+    // ends of the table and produce undefined animation values.
+    for (const target of [-3, 0, 1.5, 9, 99]) {
+      const e = easer({ transitionSeconds: 1 });
+      e.target(target);
+      let anim = {} as Anim;
+      for (let f = 0; f < 20 * 60; f++) anim = e.tick(1 / 60);
+      expect(e.level()).toBeGreaterThanOrEqual(1);
+      expect(e.level()).toBeLessThanOrEqual(LEVEL_FIXTURE.length);
+      for (const k of Object.keys(CALM_FIXTURE)) expect(Number.isFinite(anim[k])).toBe(true);
+    }
+  });
+
+  it('eases into slow mode rather than cutting to it', () => {
+    const e = easer({ transitionSeconds: 4 });
+    e.target(5);
+    for (let f = 0; f < 30 * 60; f++) e.tick(1 / 60);
+    const hyped = e.tick(1 / 60).driftPx;
+    e.mode('slow');
+    const firstFrame = e.tick(1 / 60).driftPx;
+    // One frame into slow mode it has barely moved; it must not be calm already.
+    expect(Math.abs(firstFrame - hyped)).toBeLessThan(1);
+    for (let f = 0; f < 4 * 60; f++) e.tick(1 / 60);
+    expect(e.tick(1 / 60).driftPx).toBeCloseTo(CALM_FIXTURE.driftPx, 1);
+  });
+});
+
+/**
+ * Emote spew. Launch speed and distance used to be the same number: the arc height
+ * was derived from the speed, so there was no way to ask for a fast short lob or a
+ * slow high one. They are separate now, which means the time to the top of the arc
+ * is distance/speed and has to stay inside the emote's lifetime. These run the
+ * overlay's own launch arithmetic.
+ */
+interface Launch {
+  settings(mix: number): Record<string, number>;
+  vary(value: number, variability: number, floor: number): number;
+}
+
+function launcher(cfg: Record<string, unknown>, rand = Math.random): Launch {
+  const keys = /var SPEW_KEYS = \[[^\]]*\]/.exec(SRC);
+  expect(keys, 'SPEW_KEYS not found').not.toBeNull();
+  const body = [
+    'var cfg = CFG, slowMix = 0;',
+    'var Math = MATH;',
+    'function num(v, d){ var n = Number(v); return isFinite(n) ? n : d; }',
+    keys![0] + ';',
+    functionSrc('spewSettings'),
+    functionSrc('vary'),
+    'return {',
+    '  settings: function(mix){ slowMix = mix; return spewSettings(); },',
+    '  vary: vary',
+    '};',
+  ].join('\n');
+  const math = Object.create(Math) as Math;
+  (math as { random: () => number }).random = rand;
+  return new Function('CFG', 'MATH', body)(cfg, math) as Launch;
+}
+
+const SPEW = { speed: 260, speedVar: 30, distance: 300, distanceVar: 60, size: 44, seconds: 2.2 };
+const SPEW_SLOW = { speed: 110, speedVar: 15, distance: 140, distanceVar: 30, size: 40, seconds: 2.8 };
+
+describe('crowd overlay emote spew', () => {
+  it('uses the normal set in regular mode and the slow set in slow mode', () => {
+    const l = launcher({ spew: SPEW, spewSlow: SPEW_SLOW });
+    expect(l.settings(0)).toEqual(SPEW);
+    expect(l.settings(1)).toEqual(SPEW_SLOW);
+  });
+
+  it('blends the two sets while slow mode is easing in', () => {
+    // Launches during the transition must not change character in one frame, the
+    // same reasoning as the level easing.
+    const l = launcher({ spew: SPEW, spewSlow: SPEW_SLOW });
+    const half = l.settings(0.5);
+    expect(half.speed).toBeCloseTo((260 + 110) / 2, 5);
+    expect(half.distance).toBeCloseTo((300 + 140) / 2, 5);
+    expect(half.seconds).toBeCloseTo((2.2 + 2.8) / 2, 5);
+  });
+
+  it('clamps the blend, so a stray mix cannot overshoot either set', () => {
+    const l = launcher({ spew: SPEW, spewSlow: SPEW_SLOW });
+    expect(l.settings(-2).speed).toBe(260);
+    expect(l.settings(5).speed).toBe(110);
+  });
+
+  it('falls back to the normal set when no slow set has arrived', () => {
+    // An overlay talking to an older server, or a config that never saved one.
+    const l = launcher({ spew: SPEW });
+    expect(l.settings(1)).toEqual(SPEW);
+  });
+
+  it('varies a launch by plus or minus the variability, never past the floor', () => {
+    // 260 +/- 30 is 230..290, the example from the spec.
+    const lo = launcher({}, () => 0).vary(260, 30, 20);
+    const hi = launcher({}, () => 1).vary(260, 30, 20);
+    const mid = launcher({}, () => 0.5).vary(260, 30, 20);
+    expect(lo).toBe(230);
+    expect(hi).toBe(290);
+    expect(mid).toBe(260);
+
+    // Variability larger than the value must not fire an emote backwards.
+    expect(launcher({}, () => 0).vary(30, 500, 20)).toBe(20);
+    expect(launcher({}, () => 0).vary(100, 0, 20)).toBe(100);
+  });
+
+  it('keeps the arc inside the emote lifetime', () => {
+    // Replays the overlay's own clamp: the top of the arc has to land inside the
+    // animation, or the keyframe offset would be out of range and the emote would
+    // vanish mid-flight.
+    const body = functionBody('spew');
+    expect(body).toMatch(/var apex = Math\.min\(0?\.85, Math\.max\(0?\.15, \(rise \/ speed\) \/ life\)\)/);
+    expect(body).toMatch(/offset:apex/);
+
+    const apex = (dist: number, speed: number, life: number) =>
+      Math.min(0.85, Math.max(0.15, dist / speed / life));
+    expect(apex(300, 260, 2.2)).toBeCloseTo(0.524, 3); // the defaults
+    expect(apex(140, 110, 2.8)).toBeCloseTo(0.455, 3); // the slow defaults
+    expect(apex(2000, 20, 0.3)).toBe(0.85); // absurdly far and slow: still lands
+    expect(apex(10, 1200, 10)).toBe(0.15); // absurdly near and fast: still visible
+  });
+
+  it('scales distance and speed together, so timing does not depend on the row', () => {
+    // Both are multiplied by the row scale, so distance/speed cancels it out and a
+    // back-row emote takes exactly as long as a front-row one.
+    const body = functionBody('spew');
+    expect(body).toMatch(/var speed = vary\(sp\.speed, sp\.speedVar, 20\) \* base\.scale/);
+    expect(body).toMatch(/var rise = vary\(sp\.distance, sp\.distanceVar, 10\) \* base\.scale/);
+    for (const scale of [1, 0.86, 0.5]) {
+      expect((300 * scale) / (260 * scale)).toBeCloseTo(300 / 260, 10);
+    }
+  });
+
+  it('reads the launch settings once per burst, not once per emote', () => {
+    // A burst of five emotes from one message should look like one burst; rolling
+    // the blend per emote would also cost five lerps instead of one.
+    const body = functionBody('spew');
+    const beforeLoop = body.slice(0, body.indexOf('for (var i = 0'));
+    expect(beforeLoop).toMatch(/var sp = spewSettings\(\);/);
   });
 });

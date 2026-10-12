@@ -196,6 +196,16 @@ describe('form control styling', () => {
     expect(LAYOUT).toContain("Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')");
   });
 
+  it('does not close the menu when the list itself is scrolled', () => {
+    // The menu is 16rem tall and scrolls; closing on any scroll made every option
+    // past roughly the eighth unreachable in a long library.
+    const i = LAYOUT.indexOf("addEventListener('scroll'");
+    expect(i).toBeGreaterThan(-1);
+    const handler = LAYOUT.slice(i, LAYOUT.indexOf('}, true)', i));
+    expect(handler).toMatch(/openSel\.menu\.contains\(e\.target\)/);
+    expect(handler).toMatch(/return;/);
+  });
+
   it('cannot leave an orphaned menu behind when a panel re-renders', () => {
     // The admin sections replace their own markup while a menu could be open.
     expect(LAYOUT).toContain('!openSel.btn.isConnected');
@@ -228,7 +238,7 @@ describe('form control styling', () => {
 describe('toggle rows', () => {
   const ADMIN = readFileSync(path.join(PAGE_DIR, 'admin.ts'), 'utf8');
   // The settings whose switch sits to the LEFT of its label.
-  const LEFT_ALIGNED = ['floof-enabled', 'boss-enabled', 'cr-enabled', 'cr-slow', 'cr-sim', 'cr-emoteSpew'];
+  const LEFT_ALIGNED = ['floof-enabled', 'boss-enabled', 'cr-enabled', 'cr-sim', 'cr-emoteSpew'];
 
   /** The markup around one switch, from its row's opening div. */
   function rowFor(id: string): string {
@@ -334,5 +344,67 @@ describe('inline page scripts', () => {
     // Sizing a page put on the native control has to follow it onto the wrapper,
     // or an inline width:100% collapses against a shrink-wrapping flex parent.
     expect(LAYOUT).toContain('liftBoxStyles');
+  });
+});
+
+/**
+ * The Crowd Hype live controls. Every one of these is a fire-and-forget button
+ * wired to a server action by id, so a typo in an id or an action name is silent:
+ * the button renders, does nothing, and reports success-shaped nothing. These pin
+ * the buttons to the actions the route actually implements.
+ */
+describe('crowd live controls', () => {
+  const ADMIN = readFileSync(path.join(PAGE_DIR, 'admin.ts'), 'utf8');
+  const ROUTES = readFileSync(path.join(PAGE_DIR, '..', 'routes', 'adminRoutes.ts'), 'utf8');
+
+  /** The live-control section of the crowd renderer. */
+  const SECTION = (() => {
+    const from = ADMIN.indexOf("'<div class=\"card\"><h3 style=\"margin:0 0 .5rem\">Live control</h3>'");
+    expect(from, 'live control card not found').toBeGreaterThan(-1);
+    // Through to the end of the crowd renderer: the markup, its button handlers
+    // and the state readout are all part of the same wiring.
+    const to = ADMIN.indexOf('function injectCrowdCss()');
+    expect(to).toBeGreaterThan(from);
+    return ADMIN.slice(from, to);
+  })();
+
+  it('labels the holds by what they do', () => {
+    for (const label of ['Clear for', 'Clear until resume', 'Quiesce for', 'Quiesce until resume',
+      'Slow mode for', 'Slow mode until resume', 'Resume now']) {
+      expect(SECTION, `missing the ${label} button`).toContain('>' + label + '<');
+    }
+  });
+
+  it('no longer offers slow mode as a toggle', () => {
+    // It is a timed hold now, so a latch with no timer would be a second, silently
+    // different way to enter the same state.
+    expect(SECTION).not.toMatch(/id="cr-slow"[^>]*type="checkbox"/);
+    expect(SECTION).not.toMatch(/action: 'mode'/);
+    expect(ADMIN).not.toMatch(/action: 'mode'/);
+  });
+
+  it('gives slow mode a seconds box, like the other timed holds', () => {
+    for (const id of ['cr-clearSecs', 'cr-quiesceSecs', 'cr-slowSecs']) {
+      expect(SECTION).toContain('id="' + id + '"');
+    }
+    // Seeded from the saved default and sent with the request, not hard-coded.
+    expect(SECTION).toContain("c.slowPauseSeconds");
+    expect(SECTION).toMatch(/action: 'slow', seconds: Number\(document\.getElementById\('cr-slowSecs'\)\.value\)/);
+  });
+
+  it('sends only actions the route implements', () => {
+    const sent = [...SECTION.matchAll(/action: '([\w-]+)'/g)].map((m) => m[1]!);
+    expect(sent.length).toBeGreaterThan(5);
+    for (const action of new Set(sent)) {
+      expect(ROUTES, `the route has no case for ${action}`).toContain("case '" + action + "':");
+    }
+  });
+
+  it('reports an endless slow hold without printing the sentinel', () => {
+    // pausedUntil-style arithmetic on MAX_SAFE_INTEGER would print a count of
+    // seconds in the millions, which is why the forever flags exist.
+    expect(SECTION).toMatch(/live\.slowForever/);
+    const timed = /live\.slowUntil > now\) bits\.push\('in slow mode for '/;
+    expect(SECTION).toMatch(timed);
   });
 });

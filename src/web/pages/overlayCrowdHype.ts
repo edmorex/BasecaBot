@@ -90,13 +90,27 @@ export function crowdHypeOverlayPage(): string {
   // ── State ─────────────────────────────────────────────────────────────────
   var cfg = {
     rows:3, rowSpacing:46, perRow:6, rowScale:.86, silhouetteHeight:190, avatarSize:46,
-    glow:18, glowColor:'#ff6ec7', mirrorMode:'off', silhouettes:[], seatArt:{}, emoteSpew:true, spewSpeed:260, spewSize:44, spewSeconds:2.2,
-    anim:{ jumpPx:10, bounceHz:1.6, swayDeg:7, jitterPx:2, driftPx:20 }
+    glow:18, glowColor:'#ff6ec7', mirrorMode:'off', silhouettes:[], seatArt:{},
+    emoteSpew:true,
+    spew:{ speed:260, speedVar:30, distance:300, distanceVar:60, size:44, seconds:2.2 },
+    spewSlow:{ speed:110, speedVar:15, distance:140, distanceVar:30, size:40, seconds:2.8 },
+    transitionSeconds:4,
+    levels:[{ jumpPx:0, bounceHz:.5, swayDeg:2, jitterPx:0, driftPx:4 }],
+    calm:{ jumpPx:0, bounceHz:.35, swayDeg:6, jitterPx:0, driftPx:10 }
   };
   var seats = {};         // "row:slot" -> a seat, which owns its art and phase
   var assign = {};        // userId -> "row:slot"
   var enabled = false;
   var started = performance.now();
+  // Where the crowd's excitement actually is, as a fraction between levels, and
+  // where it is heading. Snapping between levels made the animation visibly
+  // glitch, so this eases instead — and because it walks the scale rather than
+  // jumping, it can never skip a level on the way.
+  var levelNow = 1, levelTarget = 1;
+  // 0 = the level animation, 1 = fully in Slow Mode. Eased on the same clock.
+  var slowMix = 0;
+  var animNow = null;
+  var lastFrame = 0;
 
   function num(v, d){ var n = Number(v); return isFinite(n) ? n : d; }
   function esc(s){
@@ -257,13 +271,40 @@ export function crowdHypeOverlayPage(): string {
   }
 
   // ── Emote spew ────────────────────────────────────────────────────────────
+  var SPEW_KEYS = ['speed', 'speedVar', 'distance', 'distanceVar', 'size', 'seconds'];
+
+  /**
+   * The launch settings to use right now: the normal set blended toward the slow
+   * one by how far slow mode has eased in. Read once per burst rather than per
+   * frame, since a launch is a one-shot animation.
+   */
+  function spewSettings(){
+    var a = cfg.spew || {};
+    var b = cfg.spewSlow || a;
+    var k = Math.min(1, Math.max(0, slowMix));
+    var out = {};
+    for (var i = 0; i < SPEW_KEYS.length; i++){
+      var key = SPEW_KEYS[i];
+      var av = num(a[key], 0);
+      out[key] = av + (num(b[key], av) - av) * k;
+    }
+    return out;
+  }
+
+  /** A value randomised by plus-or-minus its variability, never below a floor. */
+  function vary(value, variability, floor){
+    var v = num(value, floor) + (Math.random() * 2 - 1) * Math.max(0, num(variability, 0));
+    return Math.max(floor, v);
+  }
+
   function spew(id, urls){
     var p = seats[assign[id]];
     if (!p || !urls || !urls.length) return;
     if (crowd.querySelectorAll('.spew').length > 120) return;   // keep a lid on it
     var base = anchor(p);
+    var sp = spewSettings();
     for (var i = 0; i < urls.length; i++){
-      var size = Math.max(8, cfg.spewSize) * base.scale;
+      var size = Math.max(8, sp.size) * base.scale;
       var d = document.createElement('div');
       d.className = 'spew';
       d.style.width = size + 'px';
@@ -274,17 +315,23 @@ export function crowdHypeOverlayPage(): string {
         'onerror="this.parentNode &amp;&amp; this.parentNode.remove()" />';
       crowd.appendChild(d);
 
-      // Up and outward, with a little gravity on the way down.
-      var ms = Math.max(300, cfg.spewSeconds * 1000);
-      var speed = Math.max(20, cfg.spewSpeed) * base.scale;
-      var spread = (Math.random() * 2 - 1) * speed * 0.55;
-      var rise = speed * (0.75 + Math.random() * 0.5);
+      // Up and outward, with a little gravity on the way down. Distance is how far
+      // it travels and speed is how fast, so the time it takes to get there is
+      // distance/speed and the rest of its lifetime is spent floating and fading.
+      // Both are scaled per row, so the ratio — and therefore the timing — is the
+      // same wherever in the crowd it came from.
+      var life = Math.max(0.3, num(sp.seconds, 2.2));
+      var ms = life * 1000;
+      var speed = vary(sp.speed, sp.speedVar, 20) * base.scale;
+      var rise = vary(sp.distance, sp.distanceVar, 10) * base.scale;
+      var apex = Math.min(0.85, Math.max(0.15, (rise / speed) / life));
+      var spread = (Math.random() * 2 - 1) * rise * 0.55;
       var spin = (Math.random() * 2 - 1) * 90;
       var done = (function(node){ return function(){ if (node.parentNode) node.parentNode.removeChild(node); }; })(d);
       if (d.animate){
         d.animate([
           { transform:'translate(0px,0px) scale(.5) rotate(0deg)', opacity:0 },
-          { transform:'translate(' + (spread * 0.5) + 'px,' + (-rise) + 'px) scale(1) rotate(' + (spin * 0.5) + 'deg)', opacity:1, offset:.35 },
+          { transform:'translate(' + (spread * 0.5) + 'px,' + (-rise) + 'px) scale(1) rotate(' + (spin * 0.5) + 'deg)', opacity:1, offset:apex },
           { transform:'translate(' + spread + 'px,' + (-rise * 0.6) + 'px) scale(.9) rotate(' + spin + 'deg)', opacity:0 }
         ], { duration: ms, easing:'cubic-bezier(.25,.6,.4,1)', fill:'forwards' }).onfinish = done;
       }
@@ -401,12 +448,56 @@ export function crowdHypeOverlayPage(): string {
     return false;
   }
 
+  // ── Excitement easing ─────────────────────────────────────────────────────
+  var ANIM_KEYS = ['jumpPx', 'bounceHz', 'swayDeg', 'jitterPx', 'driftPx'];
+
+  function lerpAnim(a, b, k){
+    var out = {};
+    for (var i = 0; i < ANIM_KEYS.length; i++){
+      var key = ANIM_KEYS[i];
+      var from = num(a && a[key], 0);
+      var to = num(b && b[key], 0);
+      out[key] = from + (to - from) * k;
+    }
+    return out;
+  }
+
+  /** Move a value toward a target at the given units per second. */
+  function approach(value, target, rate, dt){
+    if (rate <= 0) return target;                 // a zero transition snaps
+    var step = rate * dt;
+    if (target > value) return Math.min(target, value + step);
+    if (target < value) return Math.max(target, value - step);
+    return target;
+  }
+
+  /**
+   * The animation values for right now: the current fractional level, blended
+   * with Slow Mode by however far into it we are.
+   */
+  function easeAnim(dt){
+    var levels = (cfg.levels && cfg.levels.length) ? cfg.levels : [cfg.calm];
+    var span = Math.max(0, num(cfg.transitionSeconds, 4));
+    var rate = span > 0 ? 1 / span : 0;
+
+    levelTarget = Math.min(levels.length, Math.max(1, levelTarget));
+    levelNow = approach(levelNow, levelTarget, rate, dt);
+    slowMix = approach(slowMix, cfg.mode === 'slow' ? 1 : 0, rate, dt);
+
+    var lo = Math.max(0, Math.floor(levelNow) - 1);
+    var hi = Math.min(levels.length - 1, lo + 1);
+    var blended = lerpAnim(levels[lo], levels[hi], levelNow - 1 - lo);
+    return slowMix > 0 ? lerpAnim(blended, cfg.calm, slowMix) : blended;
+  }
+
   // ── Animation ─────────────────────────────────────────────────────────────
   function frame(now){
     requestAnimationFrame(frame);
     if (!enabled) return;
     var t = (now - started) / 1000;
-    var a = cfg.anim || {};
+    var dt = Math.min(0.25, lastFrame ? (now - lastFrame) / 1000 : 0);
+    lastFrame = now;
+    var a = easeAnim(dt);
     var jump = Math.max(0, num(a.jumpPx, 0));
     var hz = Math.max(0, num(a.bounceHz, 0));
     var sway = Math.max(0, num(a.swayDeg, 0));
@@ -476,6 +567,8 @@ export function crowdHypeOverlayPage(): string {
   function onCrowd(d){
     enabled = !!(d && d.enabled);
     if (d && d.config) for (var k in d.config) cfg[k] = d.config[k];
+    if (d && isFinite(d.level)) levelTarget = d.level;
+    if (d && d.mode) cfg.mode = d.mode;
     if (!enabled){ assignSeats([]); return; }
     assignSeats((d && d.members) || []);
     var spews = (d && d.spews) || [];

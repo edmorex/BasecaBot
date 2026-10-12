@@ -490,6 +490,17 @@ const SHARED_STYLE = /* css */ `
   .toggle-row { display: flex; align-items: flex-start; gap: 0.7rem; }
   .toggle-row > .switch { margin-top: 0.12rem; }
 
+  /* A titled subsection inside a card, divided from the one before it. The
+     divider is the group's own border-top, so the gap BELOW it is this group's
+     padding-top and the gap ABOVE it is the previous group's padding-bottom:
+     equal padding on both sides is what centres it. Shared rather than injected
+     per panel because the Floof, Boss Battle and Crowd Hype panels all use it and
+     only one of them renders at a time. */
+  .anim-group { border-top: 1px solid var(--border); padding: 1rem 0; }
+  .anim-group:first-of-type { border-top: 0; padding-top: 0; }
+  .anim-group:last-of-type { padding-bottom: 0; }
+  .anim-group h4 { margin: 0 0 0.2rem; font-size: 0.92rem; }
+
   /* Panel heading with its live save state beside it, so both self-saving panels
      report in the same place. */
   .panel-head { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin: 0 0 0.75rem; }
@@ -861,8 +872,13 @@ const SHELL_SCRIPT = /* js */ `
   document.addEventListener('click', (e) => {
     if (openSel && !openSel.menu.contains(e.target) && e.target !== openSel.btn) closeSel(false);
   });
-  // A fixed menu would otherwise drift away from its button.
-  window.addEventListener('scroll', () => closeSel(false), true);
+  // A fixed menu would otherwise drift away from its button when the page moves.
+  // Scrolling INSIDE the list is not that: closing on it made every option past
+  // the first screenful unreachable, since the menu scrolls at 16rem tall.
+  window.addEventListener('scroll', (e) => {
+    if (openSel && e.target instanceof Node && openSel.menu.contains(e.target)) return;
+    closeSel(false);
+  }, true);
   window.addEventListener('resize', () => closeSel(false));
 
   const enhanceControls = (root) => {

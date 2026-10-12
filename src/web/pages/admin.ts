@@ -1068,13 +1068,6 @@ export function adminPage(): string {
         + '.floof-table tr.shelved td.nm,.floof-table tr.shelved img{opacity:.5}'
         + '.floof-table tr.taunt-row.hidden{display:none}'
         + '.floof-table tr.taunt-row td{background:var(--bg);border-top:0;padding:.2rem .6rem .8rem}'
-        // The divider is each group's border-top, so the gap BELOW it is this
-        // group's padding-top and the gap ABOVE it is the previous group's
-        // padding-bottom. Equal padding on both sides is what centres it.
-        + '.anim-group{border-top:1px solid var(--border);padding:1rem 0}'
-        + '.anim-group:first-of-type{border-top:0;padding-top:0}'
-        + '.anim-group:last-of-type{padding-bottom:0}'
-        + '.anim-group h4{margin:0 0 .2rem;font-size:.92rem}'
         + '@media (max-width:640px){.floof-table th,.floof-table td{padding:.3rem .25rem}'
         + '.floof-table img{width:40px;height:40px}.floof-table td.nm{min-width:6rem;font-size:.82rem}}';
       document.head.appendChild(st);
@@ -1554,9 +1547,17 @@ export function adminPage(): string {
     ];
     var CROWD_SPEW = [
       { key: 'spewSpeed', label: 'Launch speed', hint: 'pixels per second', min: 20, max: 1200, step: 10 },
+      { key: 'spewSpeedVar', label: 'Launch variability', hint: 'plus or minus, pixels per second', min: 0, max: 600, step: 5 },
+      { key: 'spewDistance', label: 'Launch distance', hint: 'pixels travelled', min: 10, max: 2000, step: 10 },
+      { key: 'spewDistanceVar', label: 'Distance variability', hint: 'plus or minus, pixels', min: 0, max: 1000, step: 5 },
       { key: 'spewSize', label: 'Emote size', hint: 'pixels', min: 8, max: 200, step: 2 },
       { key: 'spewSeconds', label: 'Emote lifetime', hint: 'seconds before it fades', min: 0.3, max: 10, step: 0.1 }
     ];
+    // The same six for slow mode. Keys are the normal ones with a Slow infix, which
+    // is what lets one table drive both groups.
+    var CROWD_SPEW_SLOW = CROWD_SPEW.map(function (f) {
+      return { key: f.key.replace('spew', 'spewSlow'), label: f.label, hint: f.hint, min: f.min, max: f.max, step: f.step };
+    });
     var CROWD_SIM = [
       { key: 'simChatters', label: 'Chatters', hint: 'how many fake chatters', min: 1, max: 200, step: 1 },
       { key: 'simChatRate', label: 'Chat rate', hint: 'messages per second', min: 0, max: 50, step: 0.5 },
@@ -1632,12 +1633,13 @@ export function adminPage(): string {
       }
       var c = crowdData.config;
       var live = crowdData.live || {};
-      var slow = live.mode === 'slow';
 
       var gallery = (crowdData.images || []).length
         ? crowdData.images.map(function (im) {
+            // On the glow colour, because an all-black silhouette is invisible
+            // against a dark panel.
             return '<div class="sil-card">' +
-              '<img src="' + esc(im.url) + '" alt="" />' +
+              '<img src="' + esc(im.url) + '" alt="" style="background:' + esc(c.glowColor || '#ff6ec7') + '" />' +
               '<div class="muted" style="font-size:.74rem; text-align:center; word-break:break-all">' + esc(im.name) + '</div>' +
               '<div class="muted" style="font-size:.7rem">' + im.width + '×' + im.height + '</div>' +
               '<button type="button" class="pink" data-crdel="' + esc(im.name) + '">Delete</button></div>';
@@ -1655,23 +1657,24 @@ export function adminPage(): string {
 
         '<div class="card"><h3 style="margin:0 0 .5rem">Live control</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Overrides for while you are on air. None of these are saved — the crowd comes back in regular mode after a restart.</p>' +
-          '<div class="toggle-row" style="margin:0 0 .8rem">' +
-            '<label class="switch"><input type="checkbox" id="cr-slow"' + (slow ? ' checked' : '') + '><span class="slider"></span></label>' +
-            '<div><strong>Slow mode</strong>' +
-            '<div class="muted" style="font-size:.82rem">Swap the hopping for a gentle sway, whatever chat is doing.</div></div></div>' +
           '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap">' +
-            '<button type="button" class="pink" id="cr-clear">Clear and pause</button>' +
+            '<button type="button" class="pink" id="cr-clear">Clear for</button>' +
             '<input type="number" id="cr-clearSecs" value="' + c.clearPauseSeconds + '" min="0" max="600" step="5" />' +
             '<span class="muted">seconds</span>' +
-            '<button type="button" class="pink" id="cr-clear-wait">Clear and wait</button></div>' +
+            '<button type="button" class="pink" id="cr-clear-wait">Clear until resume</button></div>' +
           '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.6rem">' +
-            '<button type="button" class="pink" id="cr-quiesce">Quiesce and pause</button>' +
+            '<button type="button" class="pink" id="cr-quiesce">Quiesce for</button>' +
             '<input type="number" id="cr-quiesceSecs" value="' + c.quiescePauseSeconds + '" min="0" max="600" step="5" />' +
             '<span class="muted">seconds</span>' +
-            '<button type="button" class="pink" id="cr-quiesce-wait">Quiesce and wait</button></div>' +
+            '<button type="button" class="pink" id="cr-quiesce-wait">Quiesce until resume</button></div>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.6rem">' +
+            '<button type="button" class="pink" id="cr-slow">Slow mode for</button>' +
+            '<input type="number" id="cr-slowSecs" value="' + c.slowPauseSeconds + '" min="0" max="600" step="5" />' +
+            '<span class="muted">seconds</span>' +
+            '<button type="button" class="pink" id="cr-slow-wait">Slow mode until resume</button></div>' +
           '<div class="rowline" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap">' +
             '<button type="button" class="pink" id="cr-resume">Resume now</button></div>' +
-          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Clear</strong> empties the overlay and stops taking updates. <strong>Quiesce</strong> leaves everyone on screen but holds them at level 1 so they settle. The <strong>wait</strong> variants hold until you press <strong>Resume</strong>; the <strong>pause</strong> ones lift on their own after the given number of seconds.</p>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Clear</strong> empties the overlay and stops taking updates. <strong>Quiesce</strong> leaves everyone on screen but holds them at level 1 so they settle. <strong>Slow mode</strong> swaps the hopping for a gentle sway, whatever chat is doing. The <strong>until resume</strong> variants hold until you press <strong>Resume</strong>; the timed ones lift on their own.</p>' +
           '<div class="muted" id="cr-live-state" style="font-size:.82rem; margin-top:.5rem"></div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .5rem">Simulation</h3>' +
@@ -1697,6 +1700,7 @@ export function adminPage(): string {
           '<div class="grid-fields" style="margin:0 0 .9rem">' +
             crowdField({ key: 'rateWindowSeconds', label: 'Rate window', hint: 'seconds of chat the rate is measured over', min: 1, max: 60, step: 1 }, c) +
             crowdField({ key: 'survivalWindows', label: 'Window survival', hint: 'silent rate windows before a chatter leaves', min: 1, max: 1000, step: 1 }, c) +
+            crowdField({ key: 'transitionSeconds', label: 'Transition time', hint: 'seconds to ease one level; the crowd never skips one', min: 0, max: 30, step: 0.5 }, c) +
           '</div>' +
           [0, 1, 2, 3, 4].map(function (i) { return crowdLevelGroup(i, c); }).join('') +
           '<div class="anim-group"><h4>Slow mode</h4>' +
@@ -1711,7 +1715,11 @@ export function adminPage(): string {
           '<label class="switch"><input type="checkbox" id="cr-emoteSpew"' + (c.emoteSpew ? ' checked' : '') + '><span class="slider"></span></label>' +
           '<div><strong>Emote spew</strong>' +
           '<div class="muted" style="font-size:.82rem">Throw the emotes a chatter is spamming up out of their silhouette.</div></div></div>' +
-          '<div class="grid-fields">' + CROWD_SPEW.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+          '<div class="anim-group"><h4>Normal mode</h4>' +
+            '<div class="grid-fields">' + CROWD_SPEW.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+          '<div class="anim-group"><h4>Slow mode</h4>' +
+            '<div class="grid-fields">' + CROWD_SPEW_SLOW.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">An emote travels its <strong>launch distance</strong> at its <strong>launch speed</strong>, so it tops out after distance ÷ speed seconds and then floats and fades for the rest of its lifetime. The variability values are the plus-or-minus each launch is randomised by.</p></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .3rem">Silhouettes</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">PNGs up to ' + Math.floor(crowdData.maxBytes / 1048576) + 'MB, one per crowd member shape. They need not be square — taller than wide suits a person — and each chatter keeps the same shape for as long as they are on screen.</p>' +
@@ -1727,7 +1735,7 @@ export function adminPage(): string {
 
       function collect() {
         var out = { enabled: document.getElementById('cr-enabled').checked, emoteSpew: document.getElementById('cr-emoteSpew').checked };
-        var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
+        var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
         flat.forEach(function (f) {
           var el = document.getElementById('cr-' + f.key);
           if (!el) return;
@@ -1735,9 +1743,11 @@ export function adminPage(): string {
           out[f.key] = (f.color || f.options) ? String(el.value) : Number(el.value);
         });
         out.survivalWindows = Number(document.getElementById('cr-survivalWindows').value);
+        out.transitionSeconds = Number(document.getElementById('cr-transitionSeconds').value);
         out.mirrorMode = String(document.getElementById('cr-mirrorMode').value);
         out.clearPauseSeconds = Number(document.getElementById('cr-clearSecs').value);
         out.quiescePauseSeconds = Number(document.getElementById('cr-quiesceSecs').value);
+        out.slowPauseSeconds = Number(document.getElementById('cr-slowSecs').value);
         out.thresholds = [0, 1, 2, 3, 4].map(function (i) {
           var el = document.getElementById('cr-th' + i);
           return el ? Number(el.value) : 0;
@@ -1753,9 +1763,9 @@ export function adminPage(): string {
       }
 
       // Everything in Configuration autosaves, like the other game panels.
-      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs',
-        'cr-rateWindowSeconds', 'cr-survivalWindows', 'cr-mirrorMode'];
-      CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
+      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs', 'cr-slowSecs',
+        'cr-rateWindowSeconds', 'cr-survivalWindows', 'cr-transitionSeconds', 'cr-mirrorMode'];
+      CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
       [0, 1, 2, 3, 4].forEach(function (i) {
         ids.push('cr-th' + i);
         CROWD_ANIM_FIELDS.forEach(function (f) { ids.push('cr-lv' + i + '-' + f.key); });
@@ -1768,8 +1778,11 @@ export function adminPage(): string {
           .then(function (d) { showLiveState(d.live); crowdToast(msg, true); })
           .catch(function (e) { crowdToast(e.message, false); });
       }
-      document.getElementById('cr-slow').onchange = function () {
-        live1({ action: 'mode', mode: this.checked ? 'slow' : 'regular' }, this.checked ? 'Slow mode on.' : 'Back to regular mode.');
+      document.getElementById('cr-slow').onclick = function () {
+        live1({ action: 'slow', seconds: Number(document.getElementById('cr-slowSecs').value) }, 'Slow mode on.');
+      };
+      document.getElementById('cr-slow-wait').onclick = function () {
+        live1({ action: 'slow-wait' }, 'Slow mode — waiting for Resume.');
       };
       document.getElementById('cr-sim').onchange = function () {
         live1({ action: 'sim', on: this.checked }, this.checked ? 'Simulation running.' : 'Simulation stopped.');
@@ -1826,7 +1839,8 @@ export function adminPage(): string {
       else if (live && live.pausedUntil > now) bits.push('paused for ' + Math.ceil((live.pausedUntil - now) / 1000) + 's');
       if (live && live.quiescedForever) bits.push('held calm until you resume');
       else if (live && live.quiescedUntil > now) bits.push('held calm for ' + Math.ceil((live.quiescedUntil - now) / 1000) + 's');
-      if (live && live.mode === 'slow') bits.push('slow mode');
+      if (live && live.slowForever) bits.push('in slow mode until you resume');
+      else if (live && live.slowUntil > now) bits.push('in slow mode for ' + Math.ceil((live.slowUntil - now) / 1000) + 's');
       if (live && live.sim) bits.push('simulation running');
       el.textContent = bits.length ? 'Currently: ' + bits.join(', ') + '.' : '';
     }
@@ -1835,6 +1849,7 @@ export function adminPage(): string {
     // ── Seat assignment: one dropdown per seat, laid out like the crowd itself ──
     var crowdSeatsOpen = false;
     var seatDraft = null;      // the edits in progress, applied only on Save
+    var seatPicking = null;    // which seat the picker dialog is editing
 
     function seatKey(row, slot) { return row + ':' + slot; }
 
@@ -1861,14 +1876,18 @@ export function adminPage(): string {
         return;
       }
 
+      var glow = esc(c.glowColor || '#ff6ec7');
+
       function cell(row, slot) {
         var key = seatKey(row, slot);
         var picked = seatDraft[key] || '';
-        var opts = '<option value="">Random</option>' + images.map(function (im) {
-          return '<option value="' + esc(im.name) + '"' + (im.name === picked ? ' selected' : '') + '>' + esc(im.name) + '</option>';
-        }).join('');
-        return '<label class="seat-cell"><span class="muted">' + (slot + 1) + '</span>' +
-          '<select data-seat="' + esc(key) + '">' + opts + '</select></label>';
+        var im = images.filter(function (x) { return x.name === picked; })[0];
+        var pic = im
+          ? '<span class="seat-pic" style="background-color:' + glow + '; background-image:url(' + esc(im.url) + ')"></span>'
+          : '<span class="seat-pic random" style="background-color:' + glow + '">?</span>';
+        return '<div class="seat-cell">' + pic +
+          '<span class="seat-name muted">' + esc(im ? im.name : 'Random') + '</span>' +
+          '<button type="button" class="pink" data-seatpick="' + esc(key) + '">Change</button></div>';
       }
 
       // Back row at the top, front row at the bottom, so the grid reads the way
@@ -1886,7 +1905,7 @@ export function adminPage(): string {
 
       main.innerHTML = '<div class="panel-head"><h2>Assign seats</h2></div>' +
         '<p class="muted">Pin a character to a seat and it is used every time that seat fills. Leave a seat on ' +
-        '<strong>Random</strong> and it draws from the library whenever somebody new stands there. ' +
+        '<strong>Random</strong> (shown as <strong>?</strong>) and it draws from the library whenever somebody new stands there. ' +
         'The grid below is laid out as the crowd appears on screen — the farthest row at the top, and the ' +
         'short rows inset because they sit on the midpoints of the row in front.</p>' +
         '<div class="card"><div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
@@ -1900,17 +1919,45 @@ export function adminPage(): string {
           '<div class="toast" id="seat-toast"></div></div>' +
         '<div class="card"><div class="seat-grid">' + grid + '</div></div>';
 
+      // The picker. One dialog reused by every seat; which seat it is editing is
+      // held in seatPicking rather than rebuilt into the markup each time.
+      main.innerHTML += '<dialog class="modal" id="seat-dlg" style="max-width:44rem">' +
+        '<h3 style="margin:0 0 .2rem">Choose a character</h3>' +
+        '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem" id="seat-dlg-which"></p>' +
+        '<div class="seat-picker">' +
+          '<button type="button" class="seat-opt" data-pick="">' +
+            '<span class="seat-pic random" style="background-color:' + glow + '">?</span>' +
+            '<span class="seat-name">Random</span></button>' +
+          images.map(function (im) {
+            return '<button type="button" class="seat-opt" data-pick="' + esc(im.name) + '">' +
+              '<span class="seat-pic" style="background-color:' + glow + '; background-image:url(' + esc(im.url) + ')"></span>' +
+              '<span class="seat-name">' + esc(im.name) + '</span></button>';
+          }).join('') +
+        '</div>' +
+        '<div class="rowline" style="justify-content:flex-end; margin-top:.9rem">' +
+          '<button type="button" class="pink" id="seat-dlg-cancel">Cancel</button></div></dialog>';
+
       injectSeatCss();
 
-      // Reading straight from the DOM on save would lose any row that is hidden
-      // by a later layout change, so edits land in the draft as they are made.
-      Array.prototype.forEach.call(document.querySelectorAll('[data-seat]'), function (sel) {
-        sel.onchange = function () {
-          var key = sel.getAttribute('data-seat');
-          if (sel.value) seatDraft[key] = sel.value;
-          else delete seatDraft[key];
+      Array.prototype.forEach.call(document.querySelectorAll('[data-seatpick]'), function (b) {
+        b.onclick = function () {
+          seatPicking = b.getAttribute('data-seatpick');
+          var bits = seatPicking.split(':');
+          document.getElementById('seat-dlg-which').textContent =
+            'Seat ' + (Number(bits[1]) + 1) + ' of ' + (Number(bits[0]) === 0 ? 'the front row' : 'row ' + (Number(bits[0]) + 1)) + '.';
+          openDialog('seat-dlg');
         };
       });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-pick]'), function (b) {
+        b.onclick = function () {
+          var pick = b.getAttribute('data-pick');
+          if (pick) seatDraft[seatPicking] = pick;
+          else delete seatDraft[seatPicking];   // blank means Random
+          closeDialog('seat-dlg');
+          renderCrowdSeats();
+        };
+      });
+      document.getElementById('seat-dlg-cancel').onclick = function () { closeDialog('seat-dlg'); };
 
       document.getElementById('seat-save').onclick = function () {
         api('POST', '/api/admin/crowd/seats', { seats: seatDraft })
@@ -1948,16 +1995,28 @@ export function adminPage(): string {
       if (document.getElementById('seat-css')) return;
       var st = document.createElement('style');
       st.id = 'seat-css';
-      st.textContent = '.seat-grid{display:flex;flex-direction:column;gap:.7rem}'
-        + '.seat-row{display:flex;align-items:center;gap:.6rem}'
-        + '.seat-label{flex:0 0 5.5rem;font-size:.78rem;text-align:right}'
+      st.textContent = '.seat-grid{display:flex;flex-direction:column;gap:.9rem}'
+        + '.seat-row{display:flex;align-items:flex-start;gap:.6rem}'
+        + '.seat-label{flex:0 0 5.5rem;font-size:.78rem;text-align:right;padding-top:1.6rem}'
         + '.seat-cells{display:flex;gap:.5rem;flex-wrap:wrap}'
         // Half a cell of inset, mirroring where the short rows sit on screen.
-        + '.seat-row.offset .seat-cells{margin-left:5.25rem}'
-        + '.seat-cell{display:flex;align-items:center;gap:.3rem}'
-        + '.seat-cell>span{font-size:.72rem;min-width:1rem;text-align:right}'
+        + '.seat-row.offset .seat-cells{margin-left:3.4rem}'
+        + '.seat-cell{display:flex;flex-direction:column;align-items:center;gap:.25rem;width:6.4rem}'
+        + '.seat-cell button{padding:.25rem .5rem;font-size:.78rem}'
+        // The preview sits on the glow colour, or an all-black silhouette is
+        // invisible against the panel.
+        + '.seat-pic{display:flex;align-items:center;justify-content:center;width:4rem;height:5rem;'
+        + 'border-radius:8px;border:1px solid var(--border);background-position:center;'
+        + 'background-size:contain;background-repeat:no-repeat}'
+        + '.seat-pic.random{color:#1a1220;font-weight:800;font-size:1.4rem;opacity:.55}'
+        + '.seat-name{font-size:.68rem;max-width:6.2rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+        + '.seat-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(5.5rem,1fr));gap:.6rem;'
+        + 'max-height:26rem;overflow-y:auto}'
+        + '.seat-opt{display:flex;flex-direction:column;align-items:center;gap:.3rem;background:var(--bg);'
+        + 'border:1px solid var(--border);border-radius:10px;padding:.45rem;cursor:pointer;color:var(--text)}'
+        + '.seat-opt:hover{border-color:var(--pink);background:var(--bg)}'
         + '@media (max-width:860px){.seat-row{align-items:flex-start;flex-direction:column;gap:.3rem}'
-        + '.seat-label{text-align:left;flex:none}.seat-row.offset .seat-cells{margin-left:0}}';
+        + '.seat-label{text-align:left;flex:none;padding-top:0}.seat-row.offset .seat-cells{margin-left:0}}';
       document.head.appendChild(st);
     }
 

@@ -629,8 +629,11 @@ export async function postAdminCrowdLive(s: WebServer, req: IncomingMessage, res
   const seconds = body.seconds === undefined ? undefined : Number(body.seconds);
   let live;
   switch (action) {
-    case 'mode':
-      live = s.crowd.setMode(String(body.mode ?? 'regular'));
+    case 'slow':
+      live = s.crowd.slowAndPause(seconds);
+      break;
+    case 'slow-wait':
+      live = s.crowd.slowAndWait();
       break;
     case 'clear':
       live = s.crowd.clearAndPause(seconds);

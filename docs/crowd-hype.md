@@ -92,16 +92,23 @@ back in regular mode after a restart, which is what you want from a live switch.
 | Control | What it does |
 |---|---|
 | **Overlay enabled** | When off the overlay draws nothing at all, whatever chat is doing |
-| **Slow mode** | Swaps every excitement level for the Slow-mode movement — a gentle sway instead of hopping |
-| **Clear and pause** | Empties the overlay and stops taking updates for N seconds |
-| **Clear and wait** | The same, but held until you press Resume |
-| **Quiesce and pause** | Leaves everyone on screen but holds them at level 1 for N seconds, so they settle |
-| **Quiesce and wait** | The same, but held until you press Resume |
-| **Resume now** | Lifts either hold, timed or endless |
+| **Clear for** N | Empties the overlay and stops taking updates for N seconds |
+| **Clear until resume** | The same, but held until you press Resume |
+| **Quiesce for** N | Leaves everyone on screen but holds them at level 1 for N seconds, so they settle |
+| **Quiesce until resume** | The same, but held until you press Resume |
+| **Slow mode for** N | Swaps every excitement level for the Slow-mode movement — a gentle sway instead of hopping — for N seconds |
+| **Slow mode until resume** | The same, but held until you press Resume |
+| **Resume now** | Lifts any of the three holds, timed or endless |
 
-The **pause** variants lift on their own after the given number of seconds; the
-**wait** variants stay put until Resume — useful when you don't know yet how long
-you'll be away.
+All three holds work the same way: the timed ones lift on their own after the given
+number of seconds, and the **until resume** ones stay put until Resume — useful when
+you don't know yet how long you'll be away. Each has its own seconds box, whose
+value is remembered as the default for next time.
+
+Slow mode is a hold rather than a switch, so there is no way to leave it on by
+accident: it either expires or you press Resume. It also eases in and out over the
+**Transition time**, and while it is easing the emote spew blends between its two
+sets of values, so nothing changes character in a single frame.
 
 A quiesce holds the *excitement level*, not the roster: chatters who go quiet
 still drift off the screen as their activity ages out of the rate window. A clear
@@ -137,8 +144,8 @@ profile-picture lookup, and real chat still counts while the simulation runs.
 | Row hold | 4s | Before a chatter may change row |
 | Rate window | 6s | Seconds of chat the rate is measured over |
 | Window survival | 50 | Silent rate windows a chatter survives before leaving |
-| Emote spew | on | Throw spammed emotes out of the silhouettes |
-| Launch speed / size / lifetime | 260px/s, 44px, 2.2s | How the spewed emotes fly |
+| Transition time | 4s | Seconds to ease one excitement level (see below); 0 snaps |
+| Emote spew | on | Throw spammed emotes out of the silhouettes (see *Emote spew* below) |
 
 Plus, per excitement level: a **threshold** (the rate needed to reach it) and
 **jump**, **bounce**, **sway**, **jitter** and **drift** values. Thresholds are forced
@@ -148,6 +155,50 @@ values.
 
 Defaults: level 1 from 0/s, level 2 from 0.5/s, level 3 from 1.5/s, level 4 from
 3/s, level 5 from 6/s.
+
+#### Easing between levels
+
+The crowd does not apply a level the moment the chat rate crosses a threshold.
+The level it animates at is a *continuous* value that walks toward the level the
+rate currently calls for, and **Transition time** is how long one whole level step
+takes — so at the 4s default a jump from level 2 to level 3 takes four seconds, and
+chat going from silent to peak hype takes sixteen as the crowd climbs through 3 and
+4 on the way. Because the value moves continuously it cannot skip a level: every
+level in between is actually animated, which is what stops a burst of chat reading
+as a glitch rather than as the crowd getting excited.
+
+Lower it for a twitchier crowd, raise it for a slower swell, or set it to **0** for
+the old behaviour where a threshold crossing snaps the whole crowd to the new level
+between two frames. Slow mode fades in and out over the same duration.
+
+### Emote spew
+
+When somebody spams an emote it is thrown up out of their silhouette. There are two
+sets of the same six values: one for **normal mode** and one for **slow mode**, so
+the crowd's emotes calm down with the rest of it.
+
+| Setting | Normal | Slow | What it does |
+|---|---|---|---|
+| Launch speed | 260px/s | 110px/s | How fast the emote travels |
+| Launch variability | 30px/s | 15px/s | Plus-or-minus on the speed, so a launch of 260 ± 30 fires between 230 and 290 |
+| Launch distance | 300px | 140px | How far it travels before it tops out |
+| Distance variability | 60px | 30px | Plus-or-minus on the distance |
+| Emote size | 44px | 40px | Rendered size |
+| Emote lifetime | 2.2s | 2.8s | Total seconds on screen before it has faded |
+
+Speed and distance are independent, which is what lets you ask for a fast short lob
+or a slow high arc. An emote travels its distance at its speed, so it reaches the top
+of its arc after **distance ÷ speed** seconds and then floats and fades for whatever
+is left of its lifetime. At the normal defaults that is about 1.2s of flight and 1s
+of float; the slow defaults give a shorter, lazier lob that lingers.
+
+Both values are scaled down for the rows further back, so the *ratio* — and therefore
+the timing — is the same wherever in the crowd the emote came from. If distance and
+speed would take longer than the lifetime, the arc is compressed to fit rather than
+cut off mid-flight.
+
+Each launch rolls its own speed and distance inside the variability, but the whole
+burst from one message is rolled once, so a five-emote spam reads as one burst.
 
 ### Seats, not people
 
@@ -167,10 +218,12 @@ long as somebody is standing there.
 
 ### Assigning seats
 
-**Silhouettes → Assign Seats** opens a grid with one dropdown per seat, laid out
-the way the crowd appears on screen: the farthest row at the top, the front row at
-the bottom, and the short rows inset half a cell because that is where they
-actually sit.
+**Silhouettes → Assign Seats** opens a grid with one cell per seat, laid out the
+way the crowd appears on screen: the farthest row at the top, the front row at the
+bottom, and the short rows inset half a cell because that is where they actually
+sit. Each cell previews the character pinned to that seat (on the glow colour, so
+all-black artwork is still visible) with a **Change** button underneath that opens
+a picker of the whole library plus *Random*.
 
 | Choice | Behaviour |
 |---|---|

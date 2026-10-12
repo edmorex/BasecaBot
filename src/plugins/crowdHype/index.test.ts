@@ -41,7 +41,7 @@ describe('crowd hype plugin', () => {
     seatArt = {};
     seatArtFails = false;
     config = { ...CROWD_DEFAULTS, enabled: true, rows: 2, perRow: 2, rowDebounceSeconds: 0 };
-    live = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, sim: false, pausedForever: false, quiescedForever: false };
+    live = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false, pausedForever: false, quiescedForever: false, slowForever: false };
 
     const ctx = {
       bus,
@@ -304,13 +304,21 @@ describe('crowd hype plugin', () => {
       expect(latest().level).toBe(5);
     });
 
-    it('sends the calm animation values in slow mode', async () => {
+    it('hands the overlay the tables and the mode, not a resolved animation', async () => {
+      // The server used to pick the one set of animation values for the current
+      // level and send that. The overlay now eases between levels itself, which it
+      // can only do if it has every level plus calm and decides locally — sending a
+      // resolved `anim` would snap the crowd again and strand the easing code.
       await bus.publish(chat());
       await settle();
       live = { ...live, mode: 'slow' };
       await settle();
-      expect(latest().mode).toBe('slow');
-      expect(latest().config.anim).toEqual(config.calm);
+      const d = latest();
+      expect(d.mode).toBe('slow');
+      expect(d.config.anim).toBeUndefined();
+      expect(d.config.levels).toEqual(config.levels);
+      expect(d.config.calm).toEqual(config.calm);
+      expect(d.config.transitionSeconds).toBe(config.transitionSeconds);
     });
   });
 
