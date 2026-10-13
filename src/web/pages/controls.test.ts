@@ -400,11 +400,86 @@ describe('crowd live controls', () => {
     }
   });
 
+  it('offers the excitement ceiling as one radio per level', () => {
+    // A radio set, not a dropdown: all five are visible, so the admin can see at a
+    // glance where the ceiling is without opening anything.
+    expect(SECTION).toMatch(/class="segmented" id="cr-cap"/);
+    // Built by concatenation, so the levels come from the list it maps over.
+    expect(SECTION).toMatch(/\[1, 2, 3, 4, 5\]\.map\(function \(n\) \{/);
+    expect(SECTION).toMatch(/type="radio" name="cr-cap" value="' \+ n \+ '"/);
+    // Exactly one is pre-checked, from the live state rather than a hard-coded one.
+    expect(SECTION).toMatch(/\(live\.maxLevel === n \? ' checked' : ''\)/);
+    expect(SECTION).toMatch(/action: 'max-level', level: n/);
+  });
+
+  it('names the level each radio stands for, since the buttons are bare numbers', () => {
+    expect(SECTION).toMatch(/title="' \+ esc\('Level ' \+ n \+ ' — ' \+ \(LEVEL_NAMES\[n - 1\]/);
+  });
+
+  it('reports a cap in the live state line, and says nothing when uncapped', () => {
+    expect(SECTION).toMatch(/live\.maxLevel < 5\) bits\.push\('capped at level '/);
+  });
+
+  it('draws the radio set as a real radio group, not clickable divs', () => {
+    // Keyboard and screen-reader users get arrow-key navigation and a group for
+    // free from real radios; the input is moved off-screen rather than hidden, so
+    // it stays focusable.
+    const seg = /\.segmented input \{([^}]*)\}/.exec(LAYOUT);
+    expect(seg, '.segmented input rule not found').not.toBeNull();
+    expect(seg![1]!).toMatch(/position:\s*absolute/);
+    expect(seg![1]!).toMatch(/opacity:\s*0/);
+    expect(seg![1]!).not.toMatch(/display:\s*none/);
+    expect(LAYOUT).toMatch(/\.segmented label:has\(input:checked\)/);
+    expect(LAYOUT).toMatch(/\.segmented label:has\(input:focus-visible\)/);
+  });
+
   it('reports an endless slow hold without printing the sentinel', () => {
     // pausedUntil-style arithmetic on MAX_SAFE_INTEGER would print a count of
     // seconds in the millions, which is why the forever flags exist.
     expect(SECTION).toMatch(/live\.slowForever/);
     const timed = /live\.slowUntil > now\) bits\.push\('in slow mode for '/;
     expect(SECTION).toMatch(timed);
+  });
+});
+
+/**
+ * Field sizing inside a card. A row of number spinners is uniform, but a text box
+ * grows to fill its row and a colour swatch does not, so mixing those two into the
+ * lighter's spinner row left it ragged. They get a row of their own and a class
+ * that keeps them small in it.
+ */
+describe('compact fields', () => {
+  const ADMIN = readFileSync(path.join(PAGE_DIR, 'admin.ts'), 'utf8');
+
+  it('keeps the flame glyph and colour on a row of their own', () => {
+    expect(ADMIN).toMatch(/var CROWD_LIGHTER_LOOK = \[/);
+    const look = ADMIN.slice(ADMIN.indexOf('var CROWD_LIGHTER_LOOK = ['));
+    const table = look.slice(0, look.indexOf('];'));
+    expect([...table.matchAll(/key: '(\w+)'/g)].map((m) => m[1]!)).toEqual(['lighterGlyph', 'lighterGlowColor']);
+    // Both marked compact, or the text box would still stretch.
+    expect([...table.matchAll(/compact: true/g)]).toHaveLength(2);
+    // Rendered as its own grid, before the spinners.
+    expect(ADMIN).toMatch(/CROWD_LIGHTER_LOOK\.map\(function \(f\) \{ return crowdField\(f, c\); \}\)/);
+    const card = ADMIN.slice(ADMIN.indexOf("<h3 style=\"margin:0 0 .5rem\">Lighters</h3>"));
+    expect(card.indexOf('CROWD_LIGHTER_LOOK')).toBeLessThan(card.indexOf('CROWD_LIGHTER.map'));
+  });
+
+  it('passes the compact class through to the field', () => {
+    expect(ADMIN).toMatch(/class="field' \+ \(f\.compact \? ' compact' : ''\)/);
+    // And no longer sizes the text box with an inline width.
+    expect(ADMIN).not.toMatch(/maxlength="' \+ \(f\.maxlength \|\| 8\) \+ '" style="width/);
+  });
+
+  it('beats the grow rule on specificity, not on source order', () => {
+    // `.grid-fields > .field:has(input[type=text])` carries its argument's
+    // specificity, so a plain `.field.compact` would lose to it however late it
+    // appears. The compact rule takes the same :has() to win outright.
+    expect(LAYOUT).toMatch(/\.grid-fields > \.field\.compact:has\(input\[type=text\]\),/);
+    expect(LAYOUT).toMatch(/\.grid-fields > \.field\.compact \{ flex: 0 1 8\.5rem; \}/);
+
+    const grow = LAYOUT.indexOf('.grid-fields > .field:has(input[type=text])');
+    const compact = LAYOUT.indexOf('.grid-fields > .field.compact:has(input[type=text])');
+    expect(grow).toBeGreaterThan(-1);
+    expect(compact).toBeGreaterThan(grow); // later as well, belt and braces
   });
 });

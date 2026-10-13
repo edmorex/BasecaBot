@@ -61,6 +61,8 @@ const crowdCollected = new Set([
   // The slow-mode group is derived from the normal one rather than written out,
   // so mirror that here — and the test below pins the derivation itself.
   ...fieldKeys('CROWD_SPEW').map((k) => k.replace('spew', 'spewSlow')),
+  ...fieldKeys('CROWD_LIGHTER_LOOK'),
+  ...fieldKeys('CROWD_LIGHTER'),
   ...fieldKeys('CROWD_SIM'),
   'rateWindowSeconds', // the lone key appended to the flat list inline
 ]);
@@ -149,6 +151,19 @@ describe('admin panel autosave', () => {
     // the coverage check below would be verifying the wrong names.
     expect(ADMIN).toMatch(/CROWD_SPEW_SLOW = CROWD_SPEW\.map/);
     expect(ADMIN).toMatch(/f\.key\.replace\('spew', 'spewSlow'\)/);
+  });
+
+  it('collects the non-numeric Crowd Hype settings as strings', () => {
+    // Colours, dropdowns and the lighter glyph all go through one collector. Miss a
+    // kind and Number('🔥') is NaN, which the service then throws away for the
+    // default — a setting that silently refuses to change.
+    expect(CROWD_COLLECT).toMatch(/\(f\.color \|\| f\.options \|\| f\.text\) \? String\(el\.value\) : Number\(el\.value\)/);
+    // And the panel really does declare one of each kind, or the line above is
+    // moot. (The mirror dropdown is hand-rolled markup and collected on its own
+    // line, so it does not go through this collector at all.)
+    expect(ADMIN).toMatch(/key: 'lighterGlyph'[^}]*text: true/);
+    expect(ADMIN).toMatch(/key: 'lighterGlowColor'[^}]*color: true/);
+    expect(CROWD_COLLECT).toMatch(/out\.mirrorMode = String\(/);
   });
 
   it('collects every Crowd Hype setting the service defines', () => {

@@ -113,7 +113,7 @@ async function collectBuiltins() {
     guests: { registerFeature: noop, isGuest: () => false }, // plugins declare guest-channel features here
     achievements: { evaluate: asyncNoop, listForUser: async () => [], backfillAll: asyncNoop },
     floof: { getConfig: () => ({}), setSpawner: noop, setPetSimulator: noop, getImageTaunts: () => [], getImageName: () => '', getImageDisplayName: () => 'The floof', pickSpawn: async () => null, getImageStyles: () => [], statsFor: async () => ({ wins: 0, rank: null }) },
-    crowd: { getConfig: () => ({}), getLive: () => ({ mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false, pausedForever: false, quiescedForever: false, slowForever: false }), listImages: async () => [], getSeatArt: () => ({}), resolveSeatArt: async () => ({}) },
+    crowd: { getConfig: () => ({}), getLive: () => ({ mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, maxLevel: CROWD_LEVELS, sim: false, pausedForever: false, quiescedForever: false, slowForever: false }), listImages: async () => [], getSeatArt: () => ({}), resolveSeatArt: async () => ({}) },
     boss: { getConfig: () => ({}), setStarter: noop, setCanceller: noop, setSimulators: noop, listBosses: async () => [], listSounds: async () => [], pickBoss: async () => null, rememberEmotes: async () => {}, lookupEmoteArt: async () => new Map() },
     stream: { isLive: async () => false, stream: async () => null, game: async () => null },
     users: {},
@@ -261,7 +261,7 @@ const previewFloofImages: MockFloof[] = [
 
 // Mock Crowd Hype state (exercises the three panel sections + the gallery).
 const previewCrowdConfig: Record<string, unknown> = { ...CROWD_DEFAULTS, enabled: true };
-const previewCrowdLive = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false, pausedForever: false, quiescedForever: false, slowForever: false };
+const previewCrowdLive = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, maxLevel: CROWD_LEVELS, sim: false, pausedForever: false, quiescedForever: false, slowForever: false };
 let previewCrowdSeatArt: Record<string, string> = { '2:2': 'fan-b.png' };
 const previewCrowdImages = [
   { name: 'fan-a.png', url: '/assets/logo.png', bytes: 18420, width: 180, height: 300 },
@@ -666,7 +666,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       const action = String(body.action ?? '');
       const secs = Number(body.seconds) || 0;
       const now = Date.now();
-      if (action === 'slow') previewCrowdLive.slowUntil = now + secs * 1000;
+      if (action === 'max-level') {
+        const lvl = Math.round(Number(body.level));
+        if (Number.isFinite(lvl) && lvl >= 1 && lvl <= CROWD_LEVELS) previewCrowdLive.maxLevel = lvl;
+      }
+      else if (action === 'slow') previewCrowdLive.slowUntil = now + secs * 1000;
       else if (action === 'slow-wait') previewCrowdLive.slowUntil = HOLD_FOREVER;
       else if (action === 'clear') { previewCrowdLive.clearedAt = now; previewCrowdLive.pausedUntil = now + secs * 1000; }
       else if (action === 'clear-wait') { previewCrowdLive.clearedAt = now; previewCrowdLive.pausedUntil = HOLD_FOREVER; }

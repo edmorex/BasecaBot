@@ -149,6 +149,51 @@ describe('CrowdHypeService config', () => {
     expect((await svc.setConfig({ transitionSeconds: 999 })).transitionSeconds).toBe(30);
   });
 
+  it('keeps the lighter glyph short, trimmed and never empty', async () => {
+    // It is drawn once per crowd member, so a pasted essay is a real cost; and an
+    // empty glyph would leave every member waving nothing at all.
+    expect(CROWD_DEFAULTS.lighterGlyph).toBe('🔥');
+    expect((await svc.setConfig({ lighterGlyph: '  ✨  ' })).lighterGlyph).toBe('✨');
+    expect((await svc.setConfig({ lighterGlyph: '' })).lighterGlyph).toBe(CROWD_DEFAULTS.lighterGlyph);
+    expect((await svc.setConfig({ lighterGlyph: '   ' })).lighterGlyph).toBe(CROWD_DEFAULTS.lighterGlyph);
+
+    const long = await svc.setConfig({ lighterGlyph: 'abcdefghijklmnop' });
+    expect([...long.lighterGlyph]).toHaveLength(8);
+
+    // Counted in code points, so a multi-code-unit emoji survives whole.
+    const emoji = await svc.setConfig({ lighterGlyph: '👨‍🚀' });
+    expect(emoji.lighterGlyph).toBe('👨‍🚀');
+  });
+
+  it('validates the flame colour like the crowd glow', async () => {
+    expect(CROWD_DEFAULTS.lighterGlowColor).toBe('#ffb347');
+    expect((await svc.setConfig({ lighterGlowColor: '#FFAA00' })).lighterGlowColor).toBe('#ffaa00');
+    for (const bad of ['red', '#fff', 'rgb(1,2,3)', '#12345g', '']) {
+      expect((await svc.setConfig({ lighterGlowColor: bad })).lighterGlowColor).toBe(CROWD_DEFAULTS.lighterGlowColor);
+    }
+  });
+
+  it('clamps the lighter numbers, keeping the fractional ones fractional', async () => {
+    const c = await svc.setConfig({
+      lighterArcDegrees: 999, lighterArcSeconds: 2.5, lighterFlicker: 5,
+      lighterFlickerHz: -3, lighterSize: 0, lighterGlow: 500,
+    });
+    expect(c.lighterArcDegrees).toBe(360);
+    expect(c.lighterArcSeconds).toBe(2.5);   // not rounded to 3
+    expect(c.lighterFlicker).toBe(1);
+    expect(c.lighterFlickerHz).toBe(0);
+    expect(c.lighterSize).toBe(6);
+    expect(c.lighterGlow).toBe(80);
+    // A depth of 0.45 has to survive the round trip, or the default is unreachable.
+    expect((await svc.setConfig({ lighterFlicker: 0.45 })).lighterFlicker).toBe(0.45);
+  });
+
+  it('can turn the lighters off outright', async () => {
+    expect(CROWD_DEFAULTS.lighters).toBe(true);
+    expect((await svc.setConfig({ lighters: false })).lighters).toBe(false);
+    expect((await svc.setConfig({ lighters: true })).lighters).toBe(true);
+  });
+
   it('clamps out-of-range values', async () => {
     const c = await svc.setConfig({ rows: 99, glow: -5, rowScale: 9, spewSeconds: 0.01 });
     expect(c.rows).toBe(8);
@@ -255,9 +300,35 @@ describe('CrowdHypeService live controls', () => {
 
   it('starts clean — live overrides are never persisted', () => {
     expect(svc.getLive()).toEqual({
-      mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false,
+      mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0,
+      maxLevel: LEVELS, sim: false,
       pausedForever: false, quiescedForever: false, slowForever: false,
     });
+  });
+
+  it('caps the excitement level, and ignores anything off the scale', () => {
+    expect(svc.getLive().maxLevel).toBe(LEVELS);   // uncapped to begin with
+    expect(svc.setMaxLevel(4).maxLevel).toBe(4);
+    expect(svc.setMaxLevel(1).maxLevel).toBe(1);
+    expect(svc.setMaxLevel(LEVELS).maxLevel).toBe(LEVELS);
+
+    // Off the scale is refused outright rather than snapped to an end: it comes
+    // from a radio set, so a stray value means the panel and the service disagree
+    // and silently picking a level would hide that.
+    svc.setMaxLevel(3);
+    for (const bad of [0, -2, 6, 99, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(svc.setMaxLevel(bad).maxLevel).toBe(3);
+    }
+  });
+
+  it('leaves the cap alone when a hold is lifted', () => {
+    // The cap is a setting, not a timer. Resume lifts the holds; wiping the ceiling
+    // too would mean a planned cap vanished the moment you came back from a break.
+    svc.setMaxLevel(4);
+    svc.clearAndWait();
+    svc.quiesceAndPause(30);
+    svc.slowAndWait();
+    expect(svc.resume().maxLevel).toBe(4);
   });
 
   describe('slow mode', () => {

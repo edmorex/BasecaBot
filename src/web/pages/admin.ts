@@ -1558,6 +1558,22 @@ export function adminPage(): string {
     var CROWD_SPEW_SLOW = CROWD_SPEW.map(function (f) {
       return { key: f.key.replace('spew', 'spewSlow'), label: f.label, hint: f.hint, min: f.min, max: f.max, step: f.step };
     });
+    // Slow-mode lighters. The glyph and the colour are an odd pair in a row of
+    // number spinners — a text box grows to fill its row and a colour swatch does
+    // not — so they get a row of their own and stay compact in it.
+    var CROWD_LIGHTER_LOOK = [
+      { key: 'lighterGlyph', label: 'Flame', hint: 'the glyph held up', text: true, maxlength: 8, compact: true },
+      { key: 'lighterGlowColor', label: 'Flame colour', hint: 'the glow hue', color: true, compact: true }
+    ];
+    var CROWD_LIGHTER = [
+      { key: 'lighterSize', label: 'Size', hint: 'pixels', min: 6, max: 120, step: 1 },
+      { key: 'lighterRadius', label: 'Reach', hint: 'pixels above the head', min: 0, max: 400, step: 2 },
+      { key: 'lighterArcDegrees', label: 'Arc width', hint: 'degrees swept; 180 is a semicircle', min: 0, max: 360, step: 5 },
+      { key: 'lighterArcSeconds', label: 'Arc time', hint: 'seconds for one wave out and back', min: 0.2, max: 30, step: 0.1 },
+      { key: 'lighterFlicker', label: 'Flicker depth', hint: 'how far the flame dips, 0 to 1', min: 0, max: 1, step: 0.05 },
+      { key: 'lighterFlickerHz', label: 'Flicker speed', hint: 'flickers per second', min: 0, max: 30, step: 0.5 },
+      { key: 'lighterGlow', label: 'Flame glow', hint: 'glow radius; 0 is off', min: 0, max: 80, step: 1 }
+    ];
     var CROWD_SIM = [
       { key: 'simChatters', label: 'Chatters', hint: 'how many fake chatters', min: 1, max: 200, step: 1 },
       { key: 'simChatRate', label: 'Chat rate', hint: 'messages per second', min: 0, max: 50, step: 0.5 },
@@ -1591,10 +1607,12 @@ export function adminPage(): string {
         }).join('') + '</select>';
       } else if (f.color){
         input = '<input type="color" id="' + id + '" value="' + esc(cfg[f.key] || '#ff6ec7') + '" />';
+      } else if (f.text){
+        input = '<input type="text" id="' + id + '" value="' + esc(cfg[f.key] || '') + '" maxlength="' + (f.maxlength || 8) + '" />';
       } else {
         input = '<input type="number" id="' + id + '" value="' + cfg[f.key] + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" />';
       }
-      return '<label class="field"><span>' + esc(f.label) + '</span>' + input +
+      return '<label class="field' + (f.compact ? ' compact' : '') + '"><span>' + esc(f.label) + '</span>' + input +
         '<span class="muted" style="font-size:.78rem">' + esc(f.hint) + '</span></label>';
     }
 
@@ -1672,6 +1690,14 @@ export function adminPage(): string {
             '<input type="number" id="cr-slowSecs" value="' + c.slowPauseSeconds + '" min="0" max="600" step="5" />' +
             '<span class="muted">seconds</span>' +
             '<button type="button" class="pink" id="cr-slow-wait">Slow mode until resume</button></div>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap; margin-top:.9rem">' +
+            '<strong style="font-size:.9rem">Excitement ceiling</strong>' +
+            '<div class="segmented" id="cr-cap">' + [1, 2, 3, 4, 5].map(function (n) {
+              return '<label title="' + esc('Level ' + n + ' — ' + (LEVEL_NAMES[n - 1] || '')) + '">' +
+                '<input type="radio" name="cr-cap" value="' + n + '"' + (live.maxLevel === n ? ' checked' : '') + ' />' +
+                '<span>' + n + '</span></label>';
+            }).join('') + '</div></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.45rem 0 0">The highest level chat can reach, however busy it gets. Hold it at 4 and keep <strong>5 — Hype</strong> for the finale. Level 5 is no cap, and this one is not a timer: it stays where you put it.</p>' +
           '<div class="rowline" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap">' +
             '<button type="button" class="pink" id="cr-resume">Resume now</button></div>' +
           '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0"><strong>Clear</strong> empties the overlay and stops taking updates. <strong>Quiesce</strong> leaves everyone on screen but holds them at level 1 so they settle. <strong>Slow mode</strong> swaps the hopping for a gentle sway, whatever chat is doing. The <strong>until resume</strong> variants hold until you press <strong>Resume</strong>; the timed ones lift on their own.</p>' +
@@ -1721,6 +1747,15 @@ export function adminPage(): string {
             '<div class="grid-fields">' + CROWD_SPEW_SLOW.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
           '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">An emote travels its <strong>launch distance</strong> at its <strong>launch speed</strong>, so it tops out after distance ÷ speed seconds and then floats and fades for the rest of its lifetime. The variability values are the plus-or-minus each launch is randomised by.</p></div>' +
 
+        '<div class="card"><h3 style="margin:0 0 .5rem">Lighters</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">For the slow songs: every crowd member holds up a lit lighter and waves it overhead. Slow mode only, and it fades in and out with the rest of the transition.</p>' +
+          '<div class="toggle-row" style="margin:0 0 .8rem">' +
+            '<label class="switch"><input type="checkbox" id="cr-lighters"' + (c.lighters ? ' checked' : '') + '><span class="slider"></span></label>' +
+            '<div><strong>Lighters in slow mode</strong>' +
+            '<div class="muted" style="font-size:.82rem">Turn this off and slow mode is just the gentle sway.</div></div></div>' +
+          '<div class="grid-fields" style="margin:0 0 .7rem">' + CROWD_LIGHTER_LOOK.map(function (f) { return crowdField(f, c); }).join('') + '</div>' +
+          '<div class="grid-fields">' + CROWD_LIGHTER.map(function (f) { return crowdField(f, c); }).join('') + '</div></div>' +
+
         '<div class="card"><h3 style="margin:0 0 .3rem">Silhouettes</h3>' +
           '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">PNGs up to ' + Math.floor(crowdData.maxBytes / 1048576) + 'MB, one per crowd member shape. They need not be square — taller than wide suits a person — and each chatter keeps the same shape for as long as they are on screen.</p>' +
           '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="cr-file" accept="image/png" />' +
@@ -1734,13 +1769,17 @@ export function adminPage(): string {
       showLiveState(live);
 
       function collect() {
-        var out = { enabled: document.getElementById('cr-enabled').checked, emoteSpew: document.getElementById('cr-emoteSpew').checked };
-        var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
+        var out = {
+          enabled: document.getElementById('cr-enabled').checked,
+          emoteSpew: document.getElementById('cr-emoteSpew').checked,
+          lighters: document.getElementById('cr-lighters').checked
+        };
+        var flat = CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_LIGHTER_LOOK, CROWD_LIGHTER, CROWD_SIM, [{ key: 'rateWindowSeconds' }]);
         flat.forEach(function (f) {
           var el = document.getElementById('cr-' + f.key);
           if (!el) return;
-          // The glow colour and the mirror mode are the non-numeric settings here.
-          out[f.key] = (f.color || f.options) ? String(el.value) : Number(el.value);
+          // Colours, dropdowns and the lighter glyph are the non-numeric settings.
+          out[f.key] = (f.color || f.options || f.text) ? String(el.value) : Number(el.value);
         });
         out.survivalWindows = Number(document.getElementById('cr-survivalWindows').value);
         out.transitionSeconds = Number(document.getElementById('cr-transitionSeconds').value);
@@ -1763,9 +1802,9 @@ export function adminPage(): string {
       }
 
       // Everything in Configuration autosaves, like the other game panels.
-      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-clearSecs', 'cr-quiesceSecs', 'cr-slowSecs',
+      var ids = ['cr-enabled', 'cr-emoteSpew', 'cr-lighters', 'cr-clearSecs', 'cr-quiesceSecs', 'cr-slowSecs',
         'cr-rateWindowSeconds', 'cr-survivalWindows', 'cr-transitionSeconds', 'cr-mirrorMode'];
-      CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
+      CROWD_LAYOUT.concat(CROWD_SPEW, CROWD_SPEW_SLOW, CROWD_LIGHTER_LOOK, CROWD_LIGHTER, CROWD_SIM).forEach(function (f) { ids.push('cr-' + f.key); });
       [0, 1, 2, 3, 4].forEach(function (i) {
         ids.push('cr-th' + i);
         CROWD_ANIM_FIELDS.forEach(function (f) { ids.push('cr-lv' + i + '-' + f.key); });
@@ -1778,6 +1817,13 @@ export function adminPage(): string {
           .then(function (d) { showLiveState(d.live); crowdToast(msg, true); })
           .catch(function (e) { crowdToast(e.message, false); });
       }
+      Array.prototype.forEach.call(document.querySelectorAll('#cr-cap input'), function (r) {
+        r.onchange = function () {
+          if (!this.checked) return;
+          var n = Number(this.value);
+          live1({ action: 'max-level', level: n }, n >= 5 ? 'Excitement uncapped.' : 'Excitement capped at level ' + n + '.');
+        };
+      });
       document.getElementById('cr-slow').onclick = function () {
         live1({ action: 'slow', seconds: Number(document.getElementById('cr-slowSecs').value) }, 'Slow mode on.');
       };
@@ -1841,6 +1887,7 @@ export function adminPage(): string {
       else if (live && live.quiescedUntil > now) bits.push('held calm for ' + Math.ceil((live.quiescedUntil - now) / 1000) + 's');
       if (live && live.slowForever) bits.push('in slow mode until you resume');
       else if (live && live.slowUntil > now) bits.push('in slow mode for ' + Math.ceil((live.slowUntil - now) / 1000) + 's');
+      if (live && live.maxLevel < 5) bits.push('capped at level ' + live.maxLevel);
       if (live && live.sim) bits.push('simulation running');
       el.textContent = bits.length ? 'Currently: ' + bits.join(', ') + '.' : '';
     }

@@ -98,6 +98,7 @@ back in regular mode after a restart, which is what you want from a live switch.
 | **Quiesce until resume** | The same, but held until you press Resume |
 | **Slow mode for** N | Swaps every excitement level for the Slow-mode movement — a gentle sway instead of hopping — for N seconds |
 | **Slow mode until resume** | The same, but held until you press Resume |
+| **Excitement ceiling** | Radio set, 1–5: the highest level chat may reach, whatever the rate says |
 | **Resume now** | Lifts any of the three holds, timed or endless |
 
 All three holds work the same way: the timed ones lift on their own after the given
@@ -106,9 +107,21 @@ you don't know yet how long you'll be away. Each has its own seconds box, whose
 value is remembered as the default for next time.
 
 Slow mode is a hold rather than a switch, so there is no way to leave it on by
-accident: it either expires or you press Resume. It also eases in and out over the
-**Transition time**, and while it is easing the emote spew blends between its two
-sets of values, so nothing changes character in a single frame.
+accident: it either expires or you press Resume. It brings up the **lighters** (see
+below) unless you have turned them off, and it eases in and out over the **Transition
+time** — while it is easing, the emote spew blends between its two sets of values, so
+nothing changes character in a single frame.
+
+The **excitement ceiling** is the one control here that is not a hold. Hold the crowd
+at 4 and keep *5 — Hype* in reserve for a planned finale, then move the radio to 5 to
+let chat off the leash. Because it is a setting rather than a timer it stays where you
+put it — **Resume does not lift it**, so coming back from a break cannot accidentally
+uncap the crowd mid-show. The radio always shows where the ceiling is, and 5 means no
+cap.
+
+Capping changes only the level the crowd animates at: the measured chat rate is
+reported unchanged, and the crowd eases down to the ceiling over the **Transition
+time** rather than snapping to it.
 
 A quiesce holds the *excitement level*, not the roster: chatters who go quiet
 still drift off the screen as their activity ages out of the rate window. A clear
@@ -199,6 +212,39 @@ cut off mid-flight.
 
 Each launch rolls its own speed and distance inside the variability, but the whole
 burst from one message is rolled once, so a five-emote spam reads as one burst.
+
+### Lighters
+
+A slow-mode effect: every crowd member holds up a lit lighter and waves it overhead,
+the way an audience does for a slow song. It appears only in slow mode and rides the
+same eased mix as everything else, so the lighters come up as the crowd settles and
+go back down when slow mode lapses or you press Resume.
+
+| Setting | Default | What it does |
+|---|---|---|
+| Lighters in slow mode | on | Off means slow mode is just the gentle sway |
+| Flame | 🔥 | The glyph each member holds up; any emoji or character |
+| Flame colour | `#ffb347` | The glow hue; shares a row with Flame in the panel, since neither is a number |
+| Size | 22px | Rendered glyph size |
+| Reach | 34px | How far above the head the arm reaches |
+| Arc width | 180° | How wide the wave sweeps; 180 is a full semicircle, 0 holds it straight up |
+| Arc time | 3.2s | Seconds for one complete wave out and back |
+| Flicker depth | 0.45 | How far the flame dips as it gutters, 0 (steady) to 1 (to black) |
+| Flicker speed | 5/s | Flickers per second |
+| Flame glow | 10px | Glow radius around the flame; 0 turns it off |
+
+The flame travels a true semicircle **above** the head: straight up at the middle of
+the sweep and out to either side at the ends, never down across the face. It leans
+into the direction it is travelling, and its reach scales with the row so the back
+rows wave in proportion. Size and reach are in front-row pixels.
+
+The flicker is two sine waves at a ratio that does not divide evenly, which reads as
+a flame guttering rather than a loop. **Flicker depth** sets how far it dips — the
+brightness and the glow both swing between `1 - depth` and full — so 0 is a steady
+flame and 1 lets it gutter out to nothing.
+
+Nothing is built or drawn until slow mode is actually up, so a crowd that never goes
+slow pays nothing for the effect.
 
 ### Seats, not people
 

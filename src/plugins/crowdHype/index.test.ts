@@ -4,6 +4,7 @@ import { EventBus } from '../../core/eventBus.js';
 import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/events.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import { CROWD_DEFAULTS, HOLD_FOREVER, type CrowdConfig, type CrowdLive } from '../../services/crowdHype.js';
+import { excitementLevel } from './crowd.js';
 
 function user(overrides: Partial<EventUser> = {}): EventUser {
   return { id: 'u1', login: 'alice', displayName: 'Alice', permission: PermissionLevel.Viewer, ...overrides };
@@ -41,7 +42,7 @@ describe('crowd hype plugin', () => {
     seatArt = {};
     seatArtFails = false;
     config = { ...CROWD_DEFAULTS, enabled: true, rows: 2, perRow: 2, rowDebounceSeconds: 0 };
-    live = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false, pausedForever: false, quiescedForever: false, slowForever: false };
+    live = { mode: 'regular', pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, maxLevel: 5, sim: false, pausedForever: false, quiescedForever: false, slowForever: false };
 
     const ctx = {
       bus,
@@ -80,7 +81,7 @@ describe('crowd hype plugin', () => {
   /** Spews are flushed on the first tick after a burst, so look across frames. */
   const spewsFor = (id: string) =>
     frames().flatMap((f) => ((f.spews ?? []) as { id: string; urls: string[] }[])).filter((s) => s.id === id);
-  const latest = () => frames().at(-1) as { members: { id: string; row: number; avatarUrl: string | null }[]; level: number; enabled: boolean; mode: string; quiesced: boolean; spews: { id: string; urls: string[] }[]; config: Record<string, unknown> };
+  const latest = () => frames().at(-1) as { members: { id: string; row: number; avatarUrl: string | null }[]; level: number; rate: number; enabled: boolean; mode: string; quiesced: boolean; spews: { id: string; urls: string[] }[]; config: Record<string, unknown> };
 
   it('is a passive guest-channel feature with no commands of its own', () => {
     expect(registerFeature).toHaveBeenCalledWith({ id: 'crowd-hype', consumesRawChat: true });
@@ -277,6 +278,59 @@ describe('crowd hype plugin', () => {
       await bus.publish(chat());
       await settle();
       expect(latest().members).toHaveLength(1);
+    });
+
+    it('never sends a level above the ceiling, however hard chat goes', async () => {
+      const rage = async () => {
+        for (let i = 0; i < 60; i++) await bus.publish(chat(user({ id: 'u' + (i % 3) }), [em('Kappa', 3)]));
+      };
+      await rage();
+      await settle();
+      expect(latest().level).toBe(5);        // uncapped, chat is at the top
+
+      live = { ...live, maxLevel: 4 };
+      await rage();
+      await settle();
+      expect(latest().level).toBe(4);        // same chat, held one below
+
+      live = { ...live, maxLevel: 1 };
+      await rage();
+      await settle();
+      expect(latest().level).toBe(1);
+
+      // ...and lifting the cap for the finale lets it straight back up.
+      live = { ...live, maxLevel: 5 };
+      await rage();
+      await settle();
+      expect(latest().level).toBe(5);
+    });
+
+    it('still reports the real rate while the level is capped', async () => {
+      // The cap is a ceiling on the animation, not a lie about chat: the rate goes
+      // to the panel and the overlay, so it has to keep describing real chat even
+      // while the level it would imply is being withheld.
+      live = { ...live, maxLevel: 2 };
+      for (let i = 0; i < 60; i++) await bus.publish(chat(user({ id: 'u' + (i % 3) }), [em('Kappa', 3)]));
+      await settle();
+      const d = latest();
+      expect(d.level).toBe(2);
+      expect(d.rate).toBeGreaterThan(0);
+      // The rate still argues for the top level; only the level is held down.
+      expect(excitementLevel(d.rate, config.thresholds)).toBe(5);
+    });
+
+    it('survives a nonsense ceiling rather than blanking the crowd', async () => {
+      // live.maxLevel comes off an object the panel can write; a bad one must not
+      // produce level 0 or NaN, which would index past the end of the level table.
+      for (const bad of [0, -3, 99, Number.NaN, undefined]) {
+        live = { ...live, maxLevel: bad as number };
+        await bus.publish(chat(user({ id: 'solo' }), [em('Kappa', 1)]));
+        await settle();
+        const lvl = latest().level;
+        expect(Number.isFinite(lvl)).toBe(true);
+        expect(lvl).toBeGreaterThanOrEqual(1);
+        expect(lvl).toBeLessThanOrEqual(5);
+      }
     });
 
     it('holds the crowd calm indefinitely while chat keeps raging', async () => {

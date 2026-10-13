@@ -111,6 +111,28 @@ export interface CrowdConfig {
   spewSlowSize: number;
   spewSlowSeconds: number;
 
+  // ── Lighters (slow mode only) ──
+  /** Hold a lit lighter up and wave it, the way an audience does for a slow song. */
+  lighters: boolean;
+  /** The glyph each member holds up. */
+  lighterGlyph: string;
+  /** Rendered glyph size in pixels. */
+  lighterSize: number;
+  /** How far above the head the arm reaches, in pixels. */
+  lighterRadius: number;
+  /** How wide the wave sweeps, in degrees. 180 is a full semicircle. */
+  lighterArcDegrees: number;
+  /** Seconds for one complete sweep out and back. */
+  lighterArcSeconds: number;
+  /** How deeply the flame dips as it flickers, 0 (steady) to 1. */
+  lighterFlicker: number;
+  /** Flickers per second. */
+  lighterFlickerHz: number;
+  /** Flame glow radius in pixels; 0 turns the glow off. */
+  lighterGlow: number;
+  /** The flame's glow hue. */
+  lighterGlowColor: string;
+
   // ── Live-control defaults ──
   /** Seconds the overlay stays cleared and paused. */
   clearPauseSeconds: number;
@@ -165,6 +187,16 @@ export const CROWD_DEFAULTS: CrowdConfig = {
   spewSlowDistanceVar: 30,
   spewSlowSize: 40,
   spewSlowSeconds: 2.8,
+  lighters: true,
+  lighterGlyph: '🔥',
+  lighterSize: 22,
+  lighterRadius: 34,
+  lighterArcDegrees: 180,
+  lighterArcSeconds: 3.2,
+  lighterFlicker: 0.45,
+  lighterFlickerHz: 5,
+  lighterGlow: 10,
+  lighterGlowColor: '#ffb347',
   clearPauseSeconds: 30,
   quiescePauseSeconds: 30,
   slowPauseSeconds: 30,
@@ -201,6 +233,13 @@ export const CROWD_RANGES: Record<string, readonly [number, number]> = {
   spewSlowDistanceVar: [0, 1000],
   spewSlowSize: [8, 200],
   spewSlowSeconds: [0.3, 10],
+  lighterSize: [6, 120],
+  lighterRadius: [0, 400],
+  lighterArcDegrees: [0, 360],
+  lighterArcSeconds: [0.2, 30],
+  lighterFlicker: [0, 1],
+  lighterFlickerHz: [0, 30],
+  lighterGlow: [0, 80],
   clearPauseSeconds: [0, 600],
   quiescePauseSeconds: [0, 600],
   slowPauseSeconds: [0, 600],
@@ -219,7 +258,8 @@ export const CROWD_ANIM_RANGES: Record<keyof CrowdLevelAnim, readonly [number, n
 };
 
 /** Settings that are meaningful as fractions; the rest are rounded. */
-const FRACTIONAL = new Set(['rowScale', 'spewSeconds', 'spewSlowSeconds', 'simChatRate', 'simEmoteRate', 'rateWindowSeconds', 'transitionSeconds']);
+const FRACTIONAL = new Set(['rowScale', 'spewSeconds', 'spewSlowSeconds', 'simChatRate', 'simEmoteRate',
+  'rateWindowSeconds', 'transitionSeconds', 'lighterArcSeconds', 'lighterFlicker', 'lighterFlickerHz']);
 const FRACTIONAL_ANIM = new Set<keyof CrowdLevelAnim>(['bounceHz']);
 
 /** Chat-facing setter names -> config keys. */
@@ -251,6 +291,16 @@ export const CROWD_VARIABLES: Record<string, keyof CrowdConfig> = {
   'slow-spew-distance-var': 'spewSlowDistanceVar',
   'slow-spew-size': 'spewSlowSize',
   'slow-spew-seconds': 'spewSlowSeconds',
+  lighters: 'lighters',
+  'lighter-glyph': 'lighterGlyph',
+  'lighter-size': 'lighterSize',
+  'lighter-radius': 'lighterRadius',
+  'lighter-arc': 'lighterArcDegrees',
+  'lighter-arc-seconds': 'lighterArcSeconds',
+  'lighter-flicker': 'lighterFlicker',
+  'lighter-flicker-hz': 'lighterFlickerHz',
+  'lighter-glow': 'lighterGlow',
+  'lighter-glow-color': 'lighterGlowColor',
 };
 
 export interface CrowdImage {
@@ -285,6 +335,12 @@ export interface CrowdLive {
   quiescedUntil: number;
   /** Epoch ms until which the crowd stays in slow mode. */
   slowUntil: number;
+  /**
+   * The highest excitement level chat is allowed to reach, 1..LEVELS. LEVELS means
+   * uncapped. Unlike the holds this is not a timer — it stays where it is put, so
+   * a cap set before a finale is still there when the clear or quiesce lifts.
+   */
+  maxLevel: number;
   /** Whether synthetic chat is being generated. */
   sim: boolean;
   /** True when the hold runs until Resume rather than expiring. For display. */
@@ -306,6 +362,9 @@ export class CrowdError extends Error {}
 export type SeatArt = Record<string, string>;
 /** Most assignments kept, well past the largest possible grid (8 x 24). */
 const MAX_SEAT_ART = 512;
+
+/** Code points allowed in the lighter glyph; enough for a ZWJ emoji sequence. */
+const MAX_GLYPH = 8;
 
 /**
  * Crowd Hype — settings, the silhouette library, and the broadcaster's live
@@ -329,7 +388,7 @@ export class CrowdHypeService {
    */
   private config: Readonly<CrowdConfig> = deepFreeze(cloneConfig(CROWD_DEFAULTS));
   private seatArt: SeatArt = {};
-  private live = { pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, sim: false };
+  private live = { pausedUntil: 0, clearedAt: 0, quiescedUntil: 0, slowUntil: 0, maxLevel: LEVELS, sim: false };
 
   constructor(
     private readonly storage: Storage,
@@ -393,6 +452,15 @@ export class CrowdHypeService {
     out.mirrorMode = (MIRROR_MODES as readonly string[]).includes(String(c.mirrorMode))
       ? (String(c.mirrorMode) as MirrorMode)
       : CROWD_DEFAULTS.mirrorMode;
+    out.lighters = !!c.lighters;
+    out.lighterGlowColor = /^#[0-9a-fA-F]{6}$/.test(String(c.lighterGlowColor))
+      ? String(c.lighterGlowColor).toLowerCase()
+      : CROWD_DEFAULTS.lighterGlowColor;
+    // Trimmed and length-capped rather than validated: any glyph is fair game, but
+    // a pasted essay would be drawn once per crowd member. The cap counts code
+    // points, so a multi-code-unit emoji is one character, not two.
+    const glyph = [...String(c.lighterGlyph ?? '').trim()].slice(0, MAX_GLYPH).join('');
+    out.lighterGlyph = glyph || CROWD_DEFAULTS.lighterGlyph;
     for (const key of Object.keys(CROWD_RANGES) as (keyof CrowdConfig)[]) {
       const [lo, hi] = CROWD_RANGES[key]!;
       const raw = Number(c[key]);
@@ -463,6 +531,20 @@ export class CrowdHypeService {
       quiescedForever: this.live.quiescedUntil >= HOLD_FOREVER,
       slowForever: this.live.slowUntil >= HOLD_FOREVER,
     };
+  }
+
+  /**
+   * Cap the excitement at `level`. Anything outside 1..LEVELS is ignored rather
+   * than clamped: this comes from a radio set, so an unknown value means the panel
+   * and the service disagree, and quietly snapping to an end would hide that.
+   */
+  setMaxLevel(level: number): CrowdLive {
+    const n = Math.round(Number(level));
+    if (Number.isFinite(n) && n >= 1 && n <= LEVELS) {
+      this.live.maxLevel = n;
+      this.logger.info({ maxLevel: n }, 'crowd: excitement capped');
+    }
+    return this.getLive();
   }
 
   /** Sway gently instead of hopping, for a while. */

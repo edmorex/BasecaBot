@@ -629,6 +629,9 @@ export async function postAdminCrowdLive(s: WebServer, req: IncomingMessage, res
   const seconds = body.seconds === undefined ? undefined : Number(body.seconds);
   let live;
   switch (action) {
+    case 'max-level':
+      live = s.crowd.setMaxLevel(Number(body.level));
+      break;
     case 'slow':
       live = s.crowd.slowAndPause(seconds);
       break;

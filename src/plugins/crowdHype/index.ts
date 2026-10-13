@@ -2,6 +2,7 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatEvent } from '../../core/events.js';
 import { emoteImageUrl } from '../../services/bossBattle.js';
+import { LEVELS } from '../../services/crowdHype.js';
 import { CrowdTracker, excitementLevel, assignRows, type RowSlot } from './crowd.js';
 
 /** WebSocket room the Crowd Hype overlay subscribes to. */
@@ -244,7 +245,9 @@ export function crowdHypePlugin(): Plugin {
     tracker.prune(now, windowMs, windowMs * Math.max(1, cfg.survivalWindows));
     const rate = tracker.rate(now, windowMs);
     const quiesced = now < live.quiescedUntil;
-    const level = quiesced ? 1 : excitementLevel(rate, cfg.thresholds);
+    // The cap is applied last, so it holds whatever the rate or the thresholds say.
+    const cap = Math.min(LEVELS, Math.max(1, Math.round(Number(live.maxLevel)) || LEVELS));
+    const level = Math.min(cap, quiesced ? 1 : excitementLevel(rate, cfg.thresholds));
 
     const ranked = tracker.ranking(now, windowMs);
     slots = assignRows(ranked, slots, {
@@ -308,6 +311,19 @@ export function crowdHypePlugin(): Plugin {
           speed: cfg.spewSlowSpeed, speedVar: cfg.spewSlowSpeedVar,
           distance: cfg.spewSlowDistance, distanceVar: cfg.spewSlowDistanceVar,
           size: cfg.spewSlowSize, seconds: cfg.spewSlowSeconds,
+        },
+        // Slow mode only, so the overlay gates it on the same eased mix.
+        lighter: {
+          on: cfg.lighters,
+          glyph: cfg.lighterGlyph,
+          size: cfg.lighterSize,
+          radius: cfg.lighterRadius,
+          arcDeg: cfg.lighterArcDegrees,
+          arcSeconds: cfg.lighterArcSeconds,
+          flicker: cfg.lighterFlicker,
+          flickerHz: cfg.lighterFlickerHz,
+          glow: cfg.lighterGlow,
+          glowColor: cfg.lighterGlowColor,
         },
         // The whole table, not one resolved set: the overlay eases between levels
         // and needs its neighbours to interpolate against.

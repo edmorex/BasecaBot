@@ -71,6 +71,20 @@ export function crowdHypeOverlayPage(): string {
     mask:radial-gradient(circle at 50% 22%, #000 0 19%, transparent 20%) no-repeat,
       radial-gradient(ellipse 54% 44% at 50% 100%, #000 0 99%, transparent 100%) no-repeat; }
 
+  /* A lit lighter held up and waved, for slow mode. It hangs off the member
+     wrapper rather than the body, so it rides the hop but not the body's rock -
+     the arm swings on its own. The wrapper owns the arc, the inner glyph owns the
+     flicker, so the two transforms never overwrite each other. */
+  .lighter{ position:absolute; left:0; bottom:0; opacity:0; will-change:transform;
+    pointer-events:none;
+    /* A zero-size anchor that centres its glyph. Left to shrink-to-fit it would be
+       one glyph wide and the flame would hang half a glyph to the RIGHT of the arc
+       point - the same trap the avatar fell into. At 0x0 the rotation also spins
+       about the arc point itself rather than some corner of a text box. */
+    width:0; height:0; display:flex; align-items:center; justify-content:center; }
+  /* flex:none, or a flex item in a zero-width line would be squeezed to nothing. */
+  .lighter > span{ display:block; flex:none; line-height:1; white-space:nowrap; }
+
   .spew{ position:absolute; left:0; bottom:0; pointer-events:none; }
   .spew img{ display:block; width:100%; height:100%; filter:drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
 </style>
@@ -98,6 +112,8 @@ export function crowdHypeOverlayPage(): string {
     emoteSpew:true,
     spew:{ speed:260, speedVar:30, distance:300, distanceVar:60, size:44, seconds:2.2 },
     spewSlow:{ speed:110, speedVar:15, distance:140, distanceVar:30, size:40, seconds:2.8 },
+    lighter:{ on:true, glyph:'\uD83D\uDD25', size:22, radius:34, arcDeg:180, arcSeconds:3.2,
+      flicker:0.45, flickerHz:5, glow:10, glowColor:'#ffb347' },
     transitionSeconds:4,
     levels:[{ jumpPx:0, bounceHz:.5, swayDeg:2, jitterPx:0, driftPx:4 }],
     calm:{ jumpPx:0, bounceHz:.35, swayDeg:6, jitterPx:0, driftPx:10 }
@@ -161,6 +177,10 @@ export function crowdHypeOverlayPage(): string {
       driftPhase: Math.random() * Math.PI * 2,
       driftRate: 0.18 + Math.random() * 0.22,
       jitter: { x:0, y:0 }, jitterAt: 0,
+      // The lighter's two phases, accumulated like the hop so changing a speed
+      // changes how fast they advance and not where they are.
+      lighter: null, lit: null, armPhase: Math.random() * Math.PI * 2,
+      flamePhase: Math.random() * Math.PI * 2, litOn: false,
       art: null, sil: null, flipped: false, sig: '',
       // The random draw for an unpinned seat, taken when it fills.
       rolled: null,
@@ -273,6 +293,39 @@ export function crowdHypeOverlayPage(): string {
       }
     }
     assign = next;
+  }
+
+  // ── Lighters ──────────────────────────────────────────────────────────────
+  /**
+   * Build this seat's lighter the first time it is wanted, so a crowd that never
+   * enters slow mode never pays for one. Blanking the signature makes the next
+   * static pass size the new glyph, the same trick the avatar node uses.
+   */
+  function lighterFor(p){
+    if (!p.lighter){
+      var wrap = document.createElement('div');
+      wrap.className = 'lighter';
+      var glyph = document.createElement('span');
+      wrap.appendChild(glyph);
+      p.el.appendChild(wrap);
+      p.lighter = wrap;
+      p.lit = glyph;
+      p.sig = '';
+    }
+    return p.lighter;
+  }
+
+  /**
+   * Two sines at a ratio that does not divide evenly, which reads as a flame
+   * guttering without the cost or the obvious loop of real noise. Returns -1..1.
+   */
+  /** The lighter settings, with an empty object rather than undefined. */
+  function lcfg(){
+    return cfg.lighter || {};
+  }
+
+  function flicker(phase){
+    return (Math.sin(phase) + Math.sin(phase * 2.3 + 1.1)) / 2;
   }
 
   // ── Emote spew ────────────────────────────────────────────────────────────
@@ -398,7 +451,8 @@ export function crowdHypeOverlayPage(): string {
   //
   // (body color is a constant and lives in the stylesheet. perRow and rowSpacing
   // feed x/y only, which the per-frame transform rewrites anyway.)
-  var STATIC_DEPS = ['row', 'rows', 'rowScale', 'silhouetteHeight', 'avatarSize', 'glow', 'glowColor'];
+  var STATIC_DEPS = ['row', 'rows', 'rowScale', 'silhouetteHeight', 'avatarSize', 'glow', 'glowColor',
+    'lighterSize', 'lighterGlyph'];
 
   /** Signature over every declared dependency; cheap enough to build per frame. */
   function staticSig(d){
@@ -424,10 +478,15 @@ export function crowdHypeOverlayPage(): string {
       p.avatar.style.height = av + 'px';
       p.avatar.style.fontSize = (av * 0.52) + 'px';
     }
+    if (p.lit){
+      p.lit.style.fontSize = (Math.max(6, d.lighterSize) * base.scale) + 'px';
+      p.lit.textContent = d.lighterGlyph;
+    }
   }
 
   // One object reused every frame, so the guard allocates nothing per member.
-  var deps = { row:0, rows:3, rowScale:.86, silhouetteHeight:190, avatarSize:46, glow:18, glowColor:'#ff6ec7' };
+  var deps = { row:0, rows:3, rowScale:.86, silhouetteHeight:190, avatarSize:46, glow:18, glowColor:'#ff6ec7',
+    lighterSize:22, lighterGlyph:'\uD83D\uDD25' };
 
   /**
    * Should this member's artwork be mirrored right now?
@@ -514,6 +573,23 @@ export function crowdHypeOverlayPage(): string {
     deps.avatarSize = num(cfg.avatarSize, 46);
     deps.glow = Math.max(0, num(cfg.glow, 0));
     deps.glowColor = cfg.glowColor || '#ff6ec7';
+    deps.lighterSize = Math.max(6, num(lcfg().size, 22));
+    deps.lighterGlyph = lcfg().glyph || '\uD83D\uDD25';
+
+    // Lighters are a slow-mode effect, so they come up on the same eased mix the
+    // animation does: no pop when slow mode is switched on or lapses.
+    var lit = lcfg();
+    var litShow = !!lit.on && slowMix > 0.01;
+    var litHalfArc = Math.max(0, num(lit.arcDeg, 180)) * Math.PI / 360;
+    var litRate = Math.PI * 2 / Math.max(0.2, num(lit.arcSeconds, 3.2));
+    var litDepth = Math.min(1, Math.max(0, num(lit.flicker, 0.45)));
+    // Radians per second, so the setting really is flickers per second: the sweep
+    // rate below does the same, and a bare 'dt * hz' would have run at 1/(2*PI) of
+    // the number in the panel.
+    var litHz = Math.max(0, num(lit.flickerHz, 5)) * Math.PI * 2;
+    var litReach = Math.max(0, num(lit.radius, 34));
+    var litGlow = Math.max(0, num(lit.glow, 10));
+    var litColor = lit.glowColor || '#ffb347';
 
     for (var key in seats){
       var p = seats[key];
@@ -561,6 +637,35 @@ export function crowdHypeOverlayPage(): string {
       if (flip !== p.flipped && p.art){
         p.flipped = flip;
         p.art.style.transform = flip ? 'scaleX(-1)' : '';
+      }
+
+      // The lighter: the wrapper swings along the arc, the glyph inside it
+      // flickers. Both phases accumulate, so changing a speed in the panel
+      // changes how fast they advance rather than jumping them.
+      if (litShow){
+        lighterFor(p);
+        p.armPhase += dt * litRate;
+        p.flamePhase += dt * litHz;
+        var swing = Math.sin(p.armPhase) * litHalfArc;
+        var reach = litReach * base.scale;
+        // Straight up at the middle of the sweep, out to the sides at the ends:
+        // a semicircle over the head rather than a wiper across the face.
+        var lx = Math.sin(swing) * reach;
+        var ly = base.height + Math.cos(swing) * reach;
+        p.lighter.style.transform = 'translate(' + lx.toFixed(1) + 'px,' +
+          (-ly).toFixed(1) + 'px) rotate(' + (swing * 180 / Math.PI).toFixed(1) + 'deg)';
+        // 1 at full brightness down to 1 - depth at the bottom of a gutter.
+        var flame = 1 - litDepth * (0.5 - 0.5 * flicker(p.flamePhase));
+        p.lighter.style.opacity = (slowMix * flame).toFixed(3);
+        var g = litGlow * flame * base.scale;
+        p.lit.style.textShadow = litGlow > 0
+          ? '0 0 ' + g.toFixed(1) + 'px ' + litColor + ', 0 0 ' + (g * 2.2).toFixed(1) + 'px ' + litColor + '99'
+          : '';
+        p.litOn = true;
+      } else if (p.litOn){
+        // Fade out and stop touching it, but keep the node for the next slow song.
+        p.lighter.style.opacity = '0';
+        p.litOn = false;
       }
 
       // Everything else only when one of its declared inputs has changed.

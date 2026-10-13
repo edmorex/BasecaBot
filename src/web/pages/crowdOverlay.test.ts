@@ -47,6 +47,23 @@ function codeOnly(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
+/** The lighter's per-frame block, from its gate to the else-branch that parks it. */
+function lighterBlock(frameBody: string): string {
+  const from = frameBody.indexOf('if (litShow){');
+  expect(from, 'the lighter block was not found in frame()').toBeGreaterThan(-1);
+  const to = frameBody.indexOf('// Everything else only when', from);
+  expect(to).toBeGreaterThan(from);
+  return frameBody.slice(from, to);
+}
+
+/** The same body with the lighter block removed, for the always-on budget. */
+function withoutLighter(frameBody: string): string {
+  const from = frameBody.indexOf('if (litShow){');
+  if (from === -1) return frameBody;
+  const to = frameBody.indexOf('// Everything else only when', from);
+  return frameBody.slice(0, from) + frameBody.slice(to);
+}
+
 const DEPS = (() => {
   const m = /var STATIC_DEPS = \[([^\]]*)\]/.exec(SRC);
   expect(m, 'STATIC_DEPS not found').not.toBeNull();
@@ -59,7 +76,8 @@ describe('crowd overlay static-style cache', () => {
     // rowScale,rows,row; filter <- glow,glowColor; avatar <- avatarSize,rowScale,
     // rows,row. Spelled out so adding a guarded input is a deliberate act.
     expect(DEPS.sort()).toEqual([
-      'avatarSize', 'glow', 'glowColor', 'row', 'rowScale', 'rows', 'silhouetteHeight',
+      'avatarSize', 'glow', 'glowColor', 'lighterGlyph', 'lighterSize',
+      'row', 'rowScale', 'rows', 'silhouetteHeight',
     ]);
   });
 
@@ -100,13 +118,38 @@ describe('crowd overlay static-style cache', () => {
     }
   });
 
-  it('writes only the two moving transforms outside the guard', () => {
+  it('writes only the two moving transforms on the always-on path', () => {
+    // The per-frame budget. Everything that is not genuinely moving belongs behind
+    // the signature; the lighter is the one exception and is checked separately,
+    // because it only costs anything while slow mode is up.
     const body = functionBody('frame');
     const guard = body.indexOf('if (p.sig !== sig)');
     expect(guard).toBeGreaterThan(-1);
     const unguarded = body.slice(body.indexOf('for (var key in seats)'), guard);
-    const writes = [...unguarded.matchAll(/\.style\.(\w+)\s*=/g)].map((m) => m[1]!);
+    const writes = [...withoutLighter(unguarded).matchAll(/\.style\.(\w+)\s*=/g)].map((m) => m[1]!);
     expect([...new Set(writes)].sort()).toEqual(['transform']);
+  });
+
+  it('charges the lighter only while slow mode is showing', () => {
+    // Its flicker is real per-frame state, so it cannot go behind the signature.
+    // What it can do is cost nothing the rest of the time: the whole block sits
+    // behind litShow, which is false unless slow mode has eased in at all.
+    const body = functionBody('frame');
+    expect(body).toMatch(/var litShow = !!lit\.on && slowMix > 0\.01;/);
+    const block = lighterBlock(body);
+    const writes = [...new Set([...block.matchAll(/\.style\.(\w+)\s*=/g)].map((m) => m[1]!))].sort();
+    // The arc, the flicker and the glow — three, and no more.
+    expect(writes).toEqual(['opacity', 'textShadow', 'transform']);
+    expect(block).toMatch(/lighterFor\(p\)/);
+  });
+
+  it('builds no lighter node until one is wanted', () => {
+    // A crowd that never goes slow should not carry a node per seat.
+    expect(functionBody('buildSeat')).toMatch(/lighter: null, lit: null/);
+    expect(functionBody('buildSeat')).not.toMatch(/createElement\('span'\)/);
+    expect(functionBody('lighterFor')).toMatch(/if \(!p\.lighter\)/);
+    // A fresh node has no sizing yet, so the static pass has to run again.
+    expect(functionBody('lighterFor')).toMatch(/p\.sig = ''/);
   });
 
   it('applies the guarded styles on a seat’s very first frame', () => {
@@ -626,5 +669,168 @@ describe('crowd overlay hop phase', () => {
     const perSecond = (hz: number) => hz * Math.PI;
     expect(perSecond(3.0)).toBeGreaterThan(perSecond(0.5));
     expect(perSecond(3.0) / perSecond(0.5)).toBeCloseTo(6, 5);
+  });
+});
+
+/**
+ * Slow-mode lighters: a lit flame held up and waved overhead, the way an audience
+ * does for a slow song. The arc has to be a semicircle ABOVE the head — the easy
+ * mistake is a wiper that sweeps down across the face — and both of its rates have
+ * to accumulate, for the same reason the hop does.
+ */
+describe('crowd overlay lighters', () => {
+  const FRAME = codeOnly(functionBody('frame'));
+  const BLOCK = lighterBlock(functionBody('frame'));
+
+  /** The overlay's own arc maths, replayed. */
+  function arc(phase: number, arcDeg = 180, reach = 34, head = 190, scale = 1) {
+    const swing = Math.sin(phase) * (arcDeg * Math.PI / 360);
+    return {
+      swing,
+      x: Math.sin(swing) * reach * scale,
+      y: head + Math.cos(swing) * reach * scale,
+    };
+  }
+
+  it('builds the arc from the expressions these checks replay', () => {
+    // The geometry checks below re-implement the maths, which only proves anything
+    // if the source still computes it this way: sin across, cos up, measured from
+    // the head. Swapping the two turns the wave into a wiper across the face.
+    expect(BLOCK).toMatch(/var swing = Math\.sin\(p\.armPhase\) \* litHalfArc;/);
+    expect(BLOCK).toMatch(/var lx = Math\.sin\(swing\) \* reach;/);
+    expect(BLOCK).toMatch(/var ly = base\.height \+ Math\.cos\(swing\) \* reach;/);
+    // The half-arc is half of the setting, in radians.
+    expect(FRAME).toMatch(/num\(lit\.arcDeg, 180\)\) \* Math\.PI \/ 360;/);
+    // Up is negative, and the glyph leans into the direction of travel.
+    expect(BLOCK).toMatch(/\(-ly\)\.toFixed\(1\)/);
+    expect(BLOCK).toMatch(/rotate\(' \+ \(swing \* 180 \/ Math\.PI\)/);
+  });
+
+  it('builds the flicker from the curve these checks replay', () => {
+    expect(functionBody('flicker')).toMatch(/\(Math\.sin\(phase\) \+ Math\.sin\(phase \* 2\.3 \+ 1\.1\)\) \/ 2/);
+    expect(BLOCK).toMatch(/var flame = 1 - litDepth \* \(0\.5 - 0\.5 \* flicker\(p\.flamePhase\)\);/);
+  });
+
+  it('sweeps a semicircle that never dips below the head', () => {
+    const head = 190;
+    let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity;
+    for (let i = 0; i <= 2000; i++) {
+      const { x, y } = arc((i / 2000) * Math.PI * 2);
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    }
+    expect(minY).toBeGreaterThanOrEqual(head);   // never across the face
+    expect(maxY).toBeCloseTo(head + 34, 6);      // straight up at the middle
+    expect(minX).toBeCloseTo(-34, 6);
+    expect(maxX).toBeCloseTo(34, 6);
+  });
+
+  it('keeps every point of the sweep on one circle around the hand', () => {
+    // x^2 + (y - head)^2 = reach^2 at every phase, which is what makes it an arc
+    // rather than an ellipse or a slide.
+    for (let i = 0; i <= 50; i++) {
+      const { x, y } = arc((i / 50) * Math.PI * 2);
+      expect(Math.hypot(x, y - 190)).toBeCloseTo(34, 6);
+    }
+  });
+
+  it('narrows the sweep when the arc is narrowed, down to straight up', () => {
+    expect(Math.abs(arc(Math.PI / 2, 90).x)).toBeCloseTo(34 * Math.sin(Math.PI / 4), 6);
+    const still = arc(Math.PI / 2, 0);
+    expect(still.x).toBe(0);
+    expect(still.y).toBeCloseTo(190 + 34, 6);    // held straight overhead
+  });
+
+  it('scales the reach with the row, so back rows wave proportionally', () => {
+    expect(BLOCK).toMatch(/var reach = litReach \* base\.scale;/);
+    expect(arc(Math.PI / 2, 180, 34, 190, 0.5).x).toBeCloseTo(17, 6);
+  });
+
+  it('accumulates both rates rather than scaling elapsed time', () => {
+    // The hop bug, which this effect could reintroduce twice over.
+    expect(BLOCK).toMatch(/p\.armPhase \+= dt \* litRate;/);
+    expect(BLOCK).toMatch(/p\.flamePhase \+= dt \* litHz;/);
+    expect(BLOCK).not.toMatch(/\bt \*/);
+  });
+
+  it('states both rates in the units the panel promises', () => {
+    // 'seconds for one wave out and back' is a period, 'flickers per second' is a
+    // frequency: both need the 2*PI, and a bare dt * hz would run 6x too slow.
+    expect(FRAME).toMatch(/var litRate = Math\.PI \* 2 \/ Math\.max\(0\.2, num\(lit\.arcSeconds/);
+    expect(FRAME).toMatch(/num\(lit\.flickerHz, 5\)\) \* Math\.PI \* 2/);
+
+    // One full out-and-back per arcSeconds.
+    for (const secs of [1, 3.2, 10]) {
+      const rate = Math.PI * 2 / secs;
+      expect((Math.PI * 2) / rate).toBeCloseTo(secs, 6);
+    }
+  });
+
+  it('flickers within the configured depth and holds steady at zero', () => {
+    const flick = (phase: number) => (Math.sin(phase) + Math.sin(phase * 2.3 + 1.1)) / 2;
+    const brightness = (phase: number, depth: number) => 1 - depth * (0.5 - 0.5 * flick(phase));
+    for (const depth of [0, 0.45, 1]) {
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < 4000; i++) {
+        const b = brightness(i / 100, depth);
+        lo = Math.min(lo, b); hi = Math.max(hi, b);
+      }
+      expect(hi).toBeCloseTo(1, 2);
+      expect(lo).toBeCloseTo(1 - depth, 2);
+      expect(lo).toBeGreaterThanOrEqual(0);      // never inverts
+    }
+  });
+
+  it('rides the eased slow-mode mix rather than popping on', () => {
+    // Multiplied by slowMix, so the lighters come up with the transition and go
+    // down with it; the gate is the same mix, so nothing is written at zero.
+    expect(BLOCK).toMatch(/\(slowMix \* flame\)/);
+    expect(FRAME).toMatch(/slowMix > 0\.01/);
+  });
+
+  it('parks the lighter once slow mode has gone, and only once', () => {
+    // litOn is what stops it writing opacity:0 on every frame of a normal crowd.
+    expect(BLOCK).toMatch(/p\.litOn = true;/);
+    const frame = functionBody('frame');
+    const tail = frame.slice(frame.indexOf('} else if (p.litOn){'));
+    expect(tail).toMatch(/p\.lighter\.style\.opacity = '0';/);
+    expect(tail).toMatch(/p\.litOn = false;/);
+  });
+
+  it('hangs the flame on a zero-size anchor, centred on the arc point', () => {
+    // Shrink-to-fit would make the wrapper one glyph wide, putting the flame half a
+    // glyph right of the arc point and spinning the rotation about a text-box
+    // corner. Zero-size plus flex centring puts it exactly on the point.
+    const css = /\.lighter\{([^}]*)\}/.exec(SRC.replace(/\/\*[\s\S]*?\*\//g, ''));
+    expect(css, '.lighter rule not found').not.toBeNull();
+    expect(css![1]!).toMatch(/width:0/);
+    expect(css![1]!).toMatch(/height:0/);
+    expect(css![1]!).toMatch(/display:flex/);
+    expect(css![1]!).toMatch(/justify-content:center/);
+    expect(css![1]!).toMatch(/align-items:center/);
+
+    // And the glyph must refuse to shrink, or a zero-width line would crush it.
+    const glyph = /\.lighter > span\{([^}]*)\}/.exec(SRC);
+    expect(glyph, '.lighter > span rule not found').not.toBeNull();
+    expect(glyph![1]!).toMatch(/flex:none/);
+  });
+
+  it('separates the arc from the flicker, so neither transform wins', () => {
+    // The wrapper carries the arc, the glyph inside it carries the glow. One
+    // element doing both would have the same fight the beams and the HP bar had.
+    const css = /\.lighter\{([^}]*)\}/.exec(SRC);
+    expect(css, '.lighter rule not found').not.toBeNull();
+    expect(css![1]!).toMatch(/position:absolute/);
+    expect(SRC).toMatch(/\.lighter > span\{/);
+    expect(BLOCK).toMatch(/p\.lighter\.style\.transform =/);
+    expect(BLOCK).toMatch(/p\.lit\.style\.textShadow =/);
+  });
+
+  it('sizes the glyph behind the static guard, not per frame', () => {
+    const stat = functionBody('applyStatic');
+    expect(stat).toMatch(/p\.lit\.style\.fontSize/);
+    expect(stat).toMatch(/p\.lit\.textContent = d\.lighterGlyph/);
+    expect(DEPS).toContain('lighterSize');
+    expect(DEPS).toContain('lighterGlyph');
   });
 });

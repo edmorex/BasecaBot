@@ -462,6 +462,12 @@ const SHARED_STYLE = /* css */ `
   .grid-fields > .field:has(input[type=text]),
   .grid-fields > .field:has(select),
   .grid-fields > .field:has(textarea) { flex: 1 1 13rem; }
+  /* A field that must stay small whatever it holds: a one-glyph text box or a
+     colour swatch, sitting side by side rather than stretched across the row. The
+     first selector carries the :has() argument's specificity so it beats the grow
+     rule above outright, instead of relying on coming after it. */
+  .grid-fields > .field.compact:has(input[type=text]),
+  .grid-fields > .field.compact { flex: 0 1 8.5rem; }
   .field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
   .field > span:first-child { font-size: 0.85rem; font-weight: 600; }
   .field input, .field select, .field textarea, .field .sel { width: 100%; }
@@ -500,6 +506,24 @@ const SHARED_STYLE = /* css */ `
   .anim-group:first-of-type { border-top: 0; padding-top: 0; }
   .anim-group:last-of-type { padding-bottom: 0; }
   .anim-group h4 { margin: 0 0 0.2rem; font-size: 0.92rem; }
+
+  /* A radio set drawn as one segmented control: real radios for the keyboard and
+     for screen readers, with the input itself taken out of the picture and its
+     label styled as the button. Checked wins on pink, like every other active
+     control on the site. */
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--ctl-radius);
+    overflow: hidden; background: var(--bg); }
+  .segmented label { position: relative; display: inline-flex; align-items: center; justify-content: center;
+    min-width: 2.6rem; height: var(--ctl-h); padding: 0 0.6rem; font-size: var(--ctl-font);
+    font-weight: 600; color: var(--muted); cursor: pointer; border-left: 1px solid var(--border);
+    user-select: none; }
+  .segmented label:first-child { border-left: 0; }
+  .segmented label:hover { color: var(--text); background: #ffffff0f; }
+  /* Off-screen rather than display:none, so it stays focusable and announced. */
+  .segmented input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+  .segmented input:checked + span { color: #1a1220; }
+  .segmented label:has(input:checked) { background: var(--pink); color: #1a1220; }
+  .segmented label:has(input:focus-visible) { outline: 2px solid var(--purple); outline-offset: -2px; }
 
   /* Panel heading with its live save state beside it, so both self-saving panels
      report in the same place. */
