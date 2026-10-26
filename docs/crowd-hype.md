@@ -112,6 +112,9 @@ below) unless you have turned them off, and it eases in and out over the **Trans
 time** — while it is easing, the emote spew blends between its two sets of values, so
 nothing changes character in a single frame.
 
+All of these can also be driven from a Stream Deck or a script instead of the
+panel — see [stream-deck.md](stream-deck.md).
+
 The **excitement ceiling** is the one control here that is not a hold. Hold the crowd
 at 4 and keep *5 — Hype* in reserve for a planned finale, then move the radio to 5 to
 let chat off the leash. Because it is a setting rather than a timer it stays where you

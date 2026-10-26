@@ -105,6 +105,7 @@ export function adminPage(): string {
       { id: 'floof', label: 'Pet the Floof' },
       { id: 'boss', label: 'Boss Battle' },
       { id: 'crowd', label: 'Crowd Hype' },
+      { id: 'apicontrol', label: 'API Control' },
     ];
     var section = 'users';
     var users = [];
@@ -395,6 +396,7 @@ export function adminPage(): string {
       else if (section === 'floof') renderFloof();
       else if (section === 'boss') renderBoss();
       else if (section === 'crowd') renderCrowd();
+      else if (section === 'apicontrol') renderApiControl();
       else renderSim();
     }
 
@@ -2064,6 +2066,117 @@ export function adminPage(): string {
         + '.seat-opt:hover{border-color:var(--pink);background:var(--bg)}'
         + '@media (max-width:860px){.seat-row{align-items:flex-start;flex-direction:column;gap:.3rem}'
         + '.seat-label{text-align:left;flex:none;padding-top:0}.seat-row.offset .seat-cells{margin-left:0}}';
+      document.head.appendChild(st);
+    }
+
+    // ── API Control: the control-token surface for Stream Decks and scripts ────
+    function apiToast(msg, ok) { toast('api-toast', msg, ok); }
+
+    async function renderApiControl() {
+      document.getElementById('init-user-btn').style.display = 'none';
+      document.getElementById('admin-sub').textContent =
+        'Let a Stream Deck or a script drive the live controls over HTTP.';
+      var main = document.getElementById('admin-main');
+      main.innerHTML = '<h2>API Control</h2><p class="muted">Loading…</p>';
+
+      var d;
+      try {
+        d = await api('GET', '/api/admin/apicontrol');
+      } catch (e) {
+        main.innerHTML = '<h2>API Control</h2><p class="muted">' + esc(e.message) + '</p>';
+        return;
+      }
+      var st = d.state || {};
+      var endpoints = d.endpoints || [];
+
+      main.innerHTML =
+        '<div class="panel-head"><h2>API Control</h2><span class="save-state" id="api-status"></span></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .5rem">Control API</h3>' +
+          '<div class="toggle-row" style="margin:0 0 .6rem">' +
+            '<label class="switch"><input type="checkbox" id="api-enabled"' + (st.enabled ? ' checked' : '') + '><span class="slider"></span></label>' +
+            '<div><strong>API enabled</strong>' +
+            '<div class="muted" style="font-size:.82rem">The master switch. While this is off every request is refused, <strong>even with the correct token</strong> — so it doubles as a panic button.</div></div></div>' +
+          '<div class="muted" id="api-state-line" style="font-size:.85rem"></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">Control token</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Sent as the <code>X-Control-Token</code> header. It is stored on the server and never shown again after this, so copy it somewhere safe when you generate it. Changing it immediately invalidates the old one.</p>' +
+          '<div class="rowline" style="gap:.6rem; align-items:center; flex-wrap:wrap">' +
+            '<input type="password" id="api-token" placeholder="paste or generate a token" autocomplete="new-password" style="min-width:22rem" />' +
+            '<button type="button" class="pink" id="api-save">Save token</button>' +
+            '<button type="button" class="pink" id="api-gen">Generate</button>' +
+            '<button type="button" id="api-clear">Remove</button></div>' +
+          '<div id="api-reveal" style="margin-top:.8rem"></div></div>' +
+
+        '<div class="card"><h3 style="margin:0 0 .3rem">What the token can reach</h3>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">These ' + endpoints.length + ' endpoints, and nothing else. Saving settings, uploading or deleting files, editing text strings and anything touching user accounts stay logged-in-only, so a leaked token cannot change your configuration.</p>' +
+          '<div class="ep-list">' + endpoints.map(function (e) {
+            return '<div class="ep">' +
+              '<div class="ep-head"><strong>' + esc(e.label) + '</strong>' +
+              '<code class="ep-path">POST ' + esc(e.path) + '</code></div>' +
+              '<div class="muted" style="font-size:.82rem">' + esc(e.summary) + '</div>' +
+              (e.example ? '<pre class="ep-body">' + esc(e.example) + '</pre>' : '<div class="muted" style="font-size:.8rem">No request body.</div>') +
+              '</div>';
+          }).join('') + '</div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.9rem 0 0">Full curl examples are in <code>docs/stream-deck.md</code>.</p></div>' +
+        '<div class="toast" id="api-toast"></div>';
+
+      injectApiCss();
+      showApiState(st);
+
+      document.getElementById('api-enabled').onchange = function () {
+        apiAct({ action: 'enabled', on: this.checked }, this.checked ? 'API enabled.' : 'API disabled — all tokens refused.');
+      };
+      document.getElementById('api-save').onclick = function () {
+        var el = document.getElementById('api-token');
+        apiAct({ action: 'set-token', token: el.value }, 'Token saved.', function () { el.value = ''; });
+      };
+      document.getElementById('api-gen').onclick = function () {
+        apiAct({ action: 'generate' }, 'Token generated — copy it now.');
+      };
+      document.getElementById('api-clear').onclick = function () {
+        apiAct({ action: 'clear-token' }, 'Token removed.');
+      };
+    }
+
+    function showApiState(st) {
+      var el = document.getElementById('api-state-line');
+      if (!el) return;
+      var bits = [];
+      if (!st.configured) bits.push('no token set, so the API is closed however this switch is set');
+      else bits.push('a token ending ' + '…' + esc(st.hint) + ' is in place');
+      if (st.configured && st.updatedAt) bits.push('last changed ' + new Date(st.updatedAt).toLocaleString());
+      el.innerHTML = 'Currently: ' + bits.join(', ') + '.';
+    }
+
+    function apiAct(body, msg, after) {
+      api('POST', '/api/admin/apicontrol', body)
+        .then(function (d) {
+          showApiState(d.state);
+          var en = document.getElementById('api-enabled');
+          if (en) en.checked = !!(d.state && d.state.enabled);
+          // A generated token is returned exactly once; show it until they leave.
+          if (d.token) {
+            document.getElementById('api-reveal').innerHTML =
+              '<div class="ep"><div class="muted" style="font-size:.82rem; margin-bottom:.35rem">Your new token — copy it now, it will not be shown again:</div>' +
+              '<pre class="ep-body" style="user-select:all">' + esc(d.token) + '</pre></div>';
+          }
+          apiToast(msg, true);
+          if (after) after();
+        })
+        .catch(function (e) { apiToast(e.message, false); });
+    }
+
+    function injectApiCss() {
+      if (document.getElementById('api-css')) return;
+      var st = document.createElement('style');
+      st.id = 'api-css';
+      st.textContent = '.ep-list{display:flex;flex-direction:column;gap:.6rem}'
+        + '.ep{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:.6rem .7rem}'
+        + '.ep-head{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;margin-bottom:.2rem}'
+        + '.ep-path{font-size:.8rem;color:var(--muted)}'
+        + '.ep-body{margin:.45rem 0 0;padding:.4rem .5rem;background:var(--panel);border:1px solid var(--border);'
+        + 'border-radius:8px;font-size:.8rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all}';
       document.head.appendChild(st);
     }
 

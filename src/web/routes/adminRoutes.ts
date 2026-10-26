@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebServer } from '../webServer.js';
 import { HttpError, LEVEL_LABELS } from '../httpShared.js';
 import { AliasError } from '../../services/users.js';
+import { ApiControlError, CONTROL_ENDPOINTS } from '../../services/apiControl.js';
 import type { VoiceParams } from '../../services/tts.js';
 import {
   FloofError,
@@ -309,7 +310,7 @@ export async function postAdminFloof(s: WebServer, req: IncomingMessage, res: Se
  * `image` and `style` are each optional; omitting one means "pick at random".
  */
 export async function postAdminFloofFire(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const body = await s.readJson(req);
   const image = String(body.image ?? '').trim() || null;
   const raw = String(body.style ?? '').trim();
@@ -368,7 +369,7 @@ export async function postAdminFloofImageStyle(s: WebServer, req: IncomingMessag
  * announcement, no achievement. Triggers the normal win animation.
  */
 export async function postAdminFloofSimulatePet(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const problem = await s.floof.requestSimulatedPet();
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });
@@ -440,7 +441,7 @@ export async function postAdminBoss(s: WebServer, req: IncomingMessage, res: Ser
 
 /** Queue a real battle behind its countdown. Bypasses the enable switch. */
 export async function postAdminBossStart(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const body = await s.readJson(req);
   const problem = await s.boss.requestStart(bossIdOf(body.bossId), Number(body.delaySeconds ?? 0));
   if (problem) throw new HttpError(409, problem);
@@ -448,7 +449,7 @@ export async function postAdminBossStart(s: WebServer, req: IncomingMessage, res
 }
 
 export async function postAdminBossCancel(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const problem = await s.boss.requestCancel();
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });
@@ -459,7 +460,7 @@ export async function postAdminBossCancel(s: WebServer, req: IncomingMessage, re
  * achievements fire, so the overlay can be tuned without polluting the database.
  */
 export async function postAdminBossSimSpawn(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const body = await s.readJson(req);
   const problem = await s.boss.requestSimSpawn(bossIdOf(body.bossId));
   if (problem) throw new HttpError(409, problem);
@@ -468,7 +469,7 @@ export async function postAdminBossSimSpawn(s: WebServer, req: IncomingMessage, 
 
 /** Stand in for a chatter hitting, missing or healing during a mock battle. */
 export async function postAdminBossSimAction(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const body = await s.readJson(req);
   const action = String(body.action ?? '');
   if (action !== 'hit' && action !== 'miss' && action !== 'heal' && action !== 'dupe') {
@@ -623,7 +624,7 @@ export async function postAdminCrowd(s: WebServer, req: IncomingMessage, res: Se
  * that the plugin picks up on its next tick.
  */
 export async function postAdminCrowdLive(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  s.requireAdmin(req);
+  s.requireAdminOrControl(req);
   const body = await s.readJson(req);
   const action = String(body.action ?? '');
   const seconds = body.seconds === undefined ? undefined : Number(body.seconds);
@@ -700,6 +701,44 @@ export async function postAdminCrowdImageDelete(s: WebServer, req: IncomingMessa
     s.json(res, 200, { ok: true });
   } catch (e) {
     if (e instanceof CrowdError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
+// ── API Control (the control-token surface) ───────────────────────────────────
+
+/**
+ * The panel's view. The token itself is never returned — only whether one is set,
+ * its last four characters and when it changed. The broadcaster sees the full
+ * value exactly once, in the response to generating or setting it.
+ */
+export async function getAdminApiControl(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  s.json(res, 200, { state: s.apiControl.getState(), endpoints: CONTROL_ENDPOINTS });
+}
+
+export async function postAdminApiControl(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  const action = String(body.action ?? '');
+  try {
+    switch (action) {
+      case 'enabled':
+        return s.json(res, 200, { ok: true, state: await s.apiControl.setEnabled(body.on === true) });
+      case 'set-token':
+        return s.json(res, 200, { ok: true, state: await s.apiControl.setToken(String(body.token ?? '')) });
+      case 'generate': {
+        // The one and only time the value is sent back out of the server.
+        const token = await s.apiControl.generateToken();
+        return s.json(res, 200, { ok: true, token, state: s.apiControl.getState() });
+      }
+      case 'clear-token':
+        return s.json(res, 200, { ok: true, state: await s.apiControl.clearToken() });
+      default:
+        throw new HttpError(400, 'Unknown API control action.');
+    }
+  } catch (e) {
+    if (e instanceof ApiControlError) throw new HttpError(400, e.message);
     throw e;
   }
 }

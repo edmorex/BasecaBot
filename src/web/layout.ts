@@ -222,7 +222,8 @@ const SHARED_STYLE = /* css */ `
     border-radius: var(--ctl-radius); padding: var(--ctl-pad); font-size: var(--ctl-font);
     font-family: inherit; line-height: 1.2; appearance: none; -webkit-appearance: none;
   }
-  input[type=text]:hover, input[type=number]:hover, select:hover, textarea:hover { border-color: #3d3d42; }
+  input[type=text]:hover, input[type=number]:hover, input[type=password]:hover,
+  select:hover, textarea:hover { border-color: #3d3d42; }
   textarea { resize: vertical; min-height: 4.5rem; width: 100%; display: block; }
 
   /* One focus treatment for everything, including the faked controls. */

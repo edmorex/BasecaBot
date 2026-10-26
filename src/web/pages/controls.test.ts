@@ -51,6 +51,7 @@ describe('form control styling', () => {
       'input[type=color]',
       'input[type=file]',
       'input[type=number]',
+      'input[type=password]',
       'input[type=radio]',
       'input[type=range]',
       'input[type=text]',

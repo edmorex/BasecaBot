@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AppConfig } from '../services/config.js';
 import { scopedLogger } from '../services/logger.js';
-import { HttpError, LEVEL_LABELS, IMPORT_MAX_BYTES, labelToLevel } from './httpShared.js';
+import { HttpError, LEVEL_LABELS, IMPORT_MAX_BYTES, labelToLevel, secretEquals } from './httpShared.js';
 import type { UsersService } from '../services/users.js';
 import type { CustomCommandService, TargetRef } from '../services/customCommands.js';
 import type { ListsService, ListImportItem } from '../services/lists.js';
@@ -18,6 +18,7 @@ import type { WsHub } from './wsHub.js';
 import type { FloofService } from '../services/floof.js';
 import type { BossBattleService } from '../services/bossBattle.js';
 import type { CrowdHypeService } from '../services/crowdHype.js';
+import type { ApiControlService } from '../services/apiControl.js';
 import type { EventBus } from '../core/eventBus.js';
 import { parseCsv, toCsv, mapCsvRows, type CsvColumn } from '../services/csv.js';
 import { PermissionLevel } from '../core/events.js';
@@ -45,7 +46,7 @@ import { getLists, createList, updateList, deleteList, addListEntry, updateListE
 import { getQuotes, updateQuote, deleteQuote, exportQuotes, importQuotes } from './routes/quotesRoutes.js';
 import { getTimers, createTimer, updateTimer, deleteTimer, setTimerLoop } from './routes/timersRoutes.js';
 import { getFirstOverlayData, getTtsAudio, getAdminOverlays } from './routes/overlayRoutes.js';
-import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, getAdminCrowd, postAdminCrowd, postAdminCrowdLive, postAdminCrowdSeats, postAdminCrowdImage, postAdminCrowdImageDelete, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
+import { getAdminUsers, getAdminStrings, postAdminString, getAdminTts, getAdminTtsPreview, postAdminTts, postAdminTtsSay, getAdminAchievements, postAdminAchievementSimulate, postAdminAchievementBackfill, getAdminFloof, postAdminFloof, postAdminFloofFire, postAdminFloofSimulatePet, postAdminFloofTaunt, postAdminFloofImageStyle, postAdminFloofImageName, postAdminFloofImage, postAdminFloofImageDelete, getAdminBoss, postAdminBoss, postAdminBossStart, postAdminBossCancel, postAdminBossSimSpawn, postAdminBossSimAction, postAdminBossSave, postAdminBossClone, postAdminBossDelete, postAdminBossImage, postAdminBossImageDelete, postAdminBossSound, postAdminBossSoundDelete, getAdminCrowd, postAdminCrowd, postAdminCrowdLive, postAdminCrowdSeats, postAdminCrowdImage, postAdminCrowdImageDelete, getAdminApiControl, postAdminApiControl, initAdminUser, updateAdminUser, deleteAdminUser, simulateEvent } from './routes/adminRoutes.js';
 
 const log = scopedLogger('webServer');
 const PUBLIC_DIR = path.resolve('public');
@@ -78,6 +79,18 @@ const ASSET_TYPES: Record<string, string> = {
  * handlers live in `./routes/*` as free functions that receive this server for
  * its helpers + services — keeping each domain's endpoints in its own file.
  */
+/**
+ * The identity a control-token caller acts as. Not a real Twitch user: it exists
+ * so the opted-in handlers get the SessionData shape they expect. None of them
+ * read it today (only user deletion and achievement simulation use the returned
+ * session, and neither accepts the control token), and the obviously fake login
+ * means it is recognisable if one ever starts logging the caller.
+ */
+const CONTROL_SESSION: SessionData = {
+  user: { id: 'control', login: 'control-token', displayName: 'Control token', avatar: '' },
+  relationship: { broadcaster: false, botAdmin: true, moderator: false, subscriber: false, follower: false },
+};
+
 export class WebServer {
   server?: Server;
 
@@ -100,6 +113,7 @@ export class WebServer {
     readonly floof: FloofService,
     readonly boss: BossBattleService,
     readonly crowd: CrowdHypeService,
+    readonly apiControl: ApiControlService,
   ) {}
 
   start(): void {
@@ -213,6 +227,8 @@ export class WebServer {
           return getAdminFloof(this, req, res);
         case '/api/admin/boss':
           return getAdminBoss(this, req, res);
+        case '/api/admin/apicontrol':
+          return getAdminApiControl(this, req, res);
         case '/api/admin/crowd':
           return getAdminCrowd(this, req, res);
         case '/api/admin/tts/preview':
@@ -336,6 +352,8 @@ export class WebServer {
           return postAdminCrowd(this, req, res);
         case '/api/admin/crowd/live':
           return postAdminCrowdLive(this, req, res);
+        case '/api/admin/apicontrol':
+          return postAdminApiControl(this, req, res);
         case '/api/admin/crowd/seats':
           return postAdminCrowdSeats(this, req, res);
         case '/api/admin/crowd/image':
@@ -367,7 +385,41 @@ export class WebServer {
     const configured = this.config.overlayToken;
     if (!configured) throw new HttpError(503, 'Overlays are not configured (set OVERLAY_TOKEN).');
     const provided = url.searchParams.get('token') ?? req.headers['x-overlay-token'];
-    if (provided !== configured) throw new HttpError(401, 'Invalid overlay token.');
+    if (!secretEquals(provided, configured)) throw new HttpError(401, 'Invalid overlay token.');
+  }
+
+  // ── Control surfaces (Stream Deck, scripts) ───────────────────────────────────
+
+  /**
+   * Accept EITHER an admin session or the control token, for the live-control
+   * endpoints that opt in by calling this instead of `requireAdmin`.
+   *
+   * The opt-in is per handler on purpose. A central list of allowed paths would
+   * mean a stolen token's reach could be widened by adding one string in an
+   * unrelated file; here the capability is visible at the call site, so reading a
+   * handler tells you whether a button on a desk can reach it. Everything that
+   * deletes, uploads, backfills or saves config keeps `requireAdmin`.
+   *
+   * Header only. A token in a query string ends up in access logs, in referrers
+   * and in anything that proxies the URL, which is why the overlay token's query
+   * form is not mirrored here. Requiring a custom header also makes this path
+   * CSRF-safe by construction: a browser will not attach it to a cross-site
+   * request the way it attaches a cookie, so skipping the session path's
+   * same-origin check costs nothing.
+   */
+  requireAdminOrControl(req: IncomingMessage): SessionData {
+    const provided = req.headers['x-control-token'];
+    if (provided !== undefined) {
+      // The master switch is checked first, and separately from the token, so
+      // that turning the API off in the panel refuses a token that is otherwise
+      // perfectly valid. That is the whole point of having a switch.
+      if (!this.apiControl.enabled) throw new HttpError(503, 'The control API is turned off.');
+      const configured = this.apiControl.token;
+      if (!configured) throw new HttpError(503, 'No control token is set (see the API Control panel).');
+      if (!secretEquals(provided, configured)) throw new HttpError(401, 'Invalid control token.');
+      return CONTROL_SESSION;
+    }
+    return this.requireAdmin(req);
   }
 
   // ── Lists API ─────────────────────────────────────────────────────────────────
