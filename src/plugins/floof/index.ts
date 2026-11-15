@@ -2,12 +2,12 @@ import type { Plugin } from '../types.js';
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { CommandEvent } from '../../core/events.js';
 import { PermissionLevel } from '../../core/events.js';
-import { FLOOF_VARIABLES, FloofError, type FloofConfig, type FloofStyle } from '../../services/floof.js';
+import { FLOOF_VARIABLES, FloofError, type FloofConfig, type FloofStyle, type FloofAction } from '../../services/floof.js';
 import { ChatError } from '../../core/chatError.js';
 
 /** WebSocket room the floof overlay subscribes to. */
 const ROOM = 'floof';
-/** Per-user cooldown on a `!pet` that finds no floof, so it can't be spammed. */
+/** Per-user cooldown on a claim that finds no floof, so it can't be spammed. */
 const IDLE_COOLDOWN_MS = 30_000;
 /** How often the scheduler re-checks when it's waiting (also re-checks live state). */
 const TICK_MS = 15_000;
@@ -26,6 +26,8 @@ interface Round {
   /** What to call this floof in chat — its name, or the unnamed stand-in. */
   displayName: string;
   style: FloofStyle;
+  /** Which commands may claim this one; the rest are told there is nothing for them. */
+  actions: FloofAction[];
   startedAt: number;
   /** Set the moment someone claims it, so only the first !pet can win. */
   claimedBy: string | null;
@@ -34,7 +36,7 @@ interface Round {
 
 /**
  * "Pet the Floof" — a floof photo moves across the overlay and the first chatter
- * to type `!pet` wins.
+ * to type `!pet` (or `!spank`, where that photo allows it) wins.
  *
  * Each spawn picks BOTH a random photo and a random movement style (ping pong,
  * roll, hop, peek or ghost), narrowed to the styles that photo is allowed to use.
@@ -99,6 +101,7 @@ export function floofPlugin(): Plugin {
       image: picked.image.name,
       displayName: picked.image.displayName,
       style: picked.style,
+      actions: picked.image.actions,
       startedAt: Date.now(),
       claimedBy: null,
       despawn: setTimeout(despawn, cfg.despawnSeconds * 1000),
@@ -133,7 +136,10 @@ export function floofPlugin(): Plugin {
         ghostWagSeconds: cfg.ghostWagSeconds,
       },
     });
-    ctx.logger.info({ image: picked.image.name, name: picked.image.displayName, style: picked.style, manual }, 'floof: spawned');
+    ctx.logger.info(
+      { image: picked.image.name, name: picked.image.displayName, style: picked.style, actions: picked.image.actions, manual },
+      'floof: spawned',
+    );
     rearm(cfg); // so the next one is scheduled from now even if this is missed
     return null;
   };
@@ -143,16 +149,19 @@ export function floofPlugin(): Plugin {
    * write, no chat, no achievement — so the win animation can be checked without
    * polluting the scoreboard.
    */
-  const simulatePet = async (): Promise<string | null> => {
+  const simulatePet = async (action: FloofAction = 'pet'): Promise<string | null> => {
     if (!round) return 'There is no floof on screen — spawn one first.';
+    // Deliberately NOT gated on round.actions: this is the admin testing the
+    // animation, and refusing to simulate a spank on a pet-only floof would just
+    // be a puzzle. What a real chatter may do is decided in claim().
     clearTimeout(round.despawn);
     round = null;
     // Nothing is scored, but the overlay plays a win, so hold the same quiet
     // period — otherwise chat gets told there is no floof right after seeing one
     // get pet.
     lastWonAt = Date.now();
-    ctx.ws.broadcast(ROOM, 'pet', { user: 'Test' });
-    ctx.logger.info('floof: simulated pet (not scored)');
+    ctx.ws.broadcast(ROOM, 'pet', { user: 'Test', action });
+    ctx.logger.info({ action }, 'floof: simulated claim (not scored)');
     return null;
   };
 
@@ -181,7 +190,9 @@ export function floofPlugin(): Plugin {
 
       const strings: Array<{ key: string; label: string; default: string; placeholders: string[] }> = [
         { key: 'win', label: 'Floof pet (winner)', default: '🐾 {floofName} got a pet from {user}! That is {wins} floof {plural} for them.', placeholders: ['floofName', 'user', 'wins', 'plural'] },
-        { key: 'idle', label: 'No floof active', default: 'There is no floof to pet right now. Keep watching! 👀', placeholders: [] },
+        { key: 'winSpank', label: 'Floof spank (winner)', default: '🐾 {floofName} got a spank from {user}! That is {wins} floof {plural} for them.', placeholders: ['floofName', 'user', 'wins', 'plural'] },
+        { key: 'idle', label: 'No floof to pet', default: 'There is no floof to pet right now. Keep watching! 👀', placeholders: [] },
+        { key: 'idleSpank', label: 'No floof to spank', default: 'There is no floof to spank right now. Keep watching! 👀', placeholders: [] },
         { key: 'stats', label: 'Stats — line', default: '🐾 {name} has pet the floof {wins} {plural} (rank #{rank}).', placeholders: ['name', 'wins', 'plural', 'rank'] },
         { key: 'noStats', label: 'Stats — no wins', default: '{name} has not pet a floof yet.', placeholders: ['name'] },
         { key: 'unknownUser', label: 'Stats — unknown user', default: 'I don’t know a user called {user}.', placeholders: ['user'] },
@@ -190,49 +201,73 @@ export function floofPlugin(): Plugin {
       for (const s of strings) ctx.text.register({ feature: 'floof', ...s });
       sayText = ctx.text.sayer(ctx.chat, 'floof');
 
+      /**
+       * A chatter claiming the floof with `action`. One function for both
+       * commands: the race-safety below is subtle enough that a second copy
+       * would eventually drift from this one.
+       */
+      const claim = async (action: FloofAction, e: CommandEvent) => {
+        const idleKey = action === 'spank' ? 'idleSpank' : 'idle';
+        // A floof this command cannot claim is, as far as this command is
+        // concerned, no floof at all — so it takes the same quiet, rate-limited
+        // path rather than announcing what the photo does and does not allow.
+        const claimable = !!round && !round.claimedBy && round.actions.includes(action);
+        if (!claimable) {
+          // Stragglers still petting the floof someone just won: say nothing at
+          // all rather than contradicting the win we announced moments ago. The
+          // per-user rate limit is deliberately left untouched, so this window
+          // only ever suppresses a message and changes nothing else.
+          if (Date.now() - lastWonAt < POST_WIN_QUIET_MS) return;
+
+          // Nothing to claim — rate-limited so it can't be spammed in chat.
+          const now = Date.now();
+          if (now - (lastIdlePet.get(e.user.id) ?? 0) < IDLE_COOLDOWN_MS) return;
+          lastIdlePet.set(e.user.id, now);
+          await sayText(e.channel, idleKey);
+          return;
+        }
+
+        // Claim synchronously BEFORE any await, so two racing claims can't both
+        // win — including a !pet and a !spank arriving together.
+        const current = round!;
+        current.claimedBy = e.user.id;
+        clearTimeout(current.despawn);
+        round = null;
+        lastWonAt = Date.now();
+
+        await ctx.users.touch(e.user);
+        const wins = await ctx.floof.recordWin(e.user.id);
+        ctx.ws.broadcast(ROOM, 'pet', { user: e.user.displayName, action });
+        ctx.logger.info({ user: e.user.login, image: current.image, style: current.style, action, wins }, 'floof: claimed');
+
+        await sayText(e.channel, action === 'spank' ? 'winSpank' : 'win', {
+          floofName: current.displayName,
+          user: e.user.displayName,
+          wins,
+          // One scoreboard whichever command won it, so the count keeps reading
+          // in pets.
+          plural: wins === 1 ? 'pet' : 'pets',
+        });
+        void ctx.achievements
+          .evaluate(e.user.id, 'floof')
+          .catch((err) => ctx.logger.error({ err }, 'floof: achievements eval failed'));
+      };
+
+      // !spank claims a floof exactly as !pet does, on the photos that allow it.
+      // No subcommands: the scoreboard stays under "!pet stats".
+      ctx.commands.registerGroup('spank', {
+        description: 'Spank the Floof! When a floof that allows it appears, be the first to type "!spank" to win.',
+        permission: PermissionLevel.Viewer,
+        onUnknown: (e: CommandEvent) => claim('spank', e),
+        subcommands: {},
+      });
+
       ctx.commands.registerGroup('pet', {
         description: 'Pet the Floof! When a floof appears on stream, be the first to type "!pet" to win. "!pet stats [user]" shows wins.',
         permission: PermissionLevel.Viewer,
 
         // Bare "!pet" is a claim on the active floof.
-        onUnknown: async (e: CommandEvent) => {
-          if (!round || round.claimedBy) {
-            // Stragglers still petting the floof someone just won: say nothing at
-            // all rather than contradicting the win we announced moments ago. The
-            // per-user rate limit is deliberately left untouched, so this window
-            // only ever suppresses a message and changes nothing else.
-            if (Date.now() - lastWonAt < POST_WIN_QUIET_MS) return;
-
-            // Nothing to pet — rate-limited so it can't be spammed in chat.
-            const now = Date.now();
-            if (now - (lastIdlePet.get(e.user.id) ?? 0) < IDLE_COOLDOWN_MS) return;
-            lastIdlePet.set(e.user.id, now);
-            await sayText(e.channel, 'idle');
-            return;
-          }
-
-          // Claim synchronously BEFORE any await, so two racing !pets can't both win.
-          round.claimedBy = e.user.id;
-          clearTimeout(round.despawn);
-          const current = round;
-          round = null;
-          lastWonAt = Date.now();
-
-          await ctx.users.touch(e.user);
-          const wins = await ctx.floof.recordWin(e.user.id);
-          ctx.ws.broadcast(ROOM, 'pet', { user: e.user.displayName });
-          ctx.logger.info({ user: e.user.login, image: current.image, style: current.style, wins }, 'floof: pet');
-
-          await sayText(e.channel, 'win', {
-            floofName: current.displayName,
-            user: e.user.displayName,
-            wins,
-            plural: wins === 1 ? 'pet' : 'pets',
-          });
-          void ctx.achievements
-            .evaluate(e.user.id, 'floof')
-            .catch((err) => ctx.logger.error({ err }, 'floof: achievements eval failed'));
-        },
+        onUnknown: (e: CommandEvent) => claim('pet', e),
 
         subcommands: {
           stats: {

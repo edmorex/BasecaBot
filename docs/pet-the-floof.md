@@ -1,7 +1,7 @@
 # Pet the Floof
 
 A photo of one of the floofs appears on the overlay and the first chatter to type
-**`!pet`** wins. Every spawn picks a random photo *and* a random animation style —
+**`!pet`** — or **`!spank`**, on the floofs that allow it — wins. Every spawn picks a random photo *and* a random animation style —
 it might drift, roll, hop, peek up from the bottom edge, or fade in like a ghost.
 Wins are tracked, ranked, and feed the **Floof Friend I/II/III** achievements.
 
@@ -11,6 +11,7 @@ Wins are tracked, ranked, and feed the **Floof Friend I/II/III** achievements.
 | Command | Who | What |
 |---|---|---|
 | `!pet` | everyone | Claim the floof currently on screen (or hear that there isn't one) |
+| `!spank` | everyone | The same, on a floof whose **Spank?** box is ticked |
 | `!pet stats [user]` | everyone | Wins + rank (aliases: `!pet rank`) |
 | `!pet set <variable> <value>` | broadcaster | Change a setting from chat (`!pet set` lists the variables) |
 
@@ -136,8 +137,33 @@ Upload **square PNGs** in the admin panel (max 2 MB). The server validates both
 the PNG signature and squareness from the file's own header, so a non-square or
 non-PNG upload is rejected up front. Images live in `public/assets/floofs/`.
 
-Each photo has a **Name**, a **checkbox per animation style** (all ticked by
-default) and its own **taunt list** (starting with `!pet me`).
+Each photo has a **Name**, a **Pet?** and **Spank?** checkbox, a **checkbox per
+animation style** (all ticked by default) and its own **taunt list** (starting with
+`!pet me`).
+
+### Pet? and Spank?
+
+These decide which commands can win that particular floof. **Every floof starts
+Pet-only** — the two boxes are how you opt a photo in to `!spank`, and a library
+that predates the command keeps behaving exactly as it did, with nothing to
+migrate.
+
+| Pet? | Spank? | Behaviour |
+|---|---|---|
+| ✓ | — | `!pet` wins it; `!spank` is told there is no floof to spank |
+| ✓ | ✓ | Either command wins it, whichever arrives first |
+| — | ✓ | Only `!spank` wins it; `!pet` is told there is no floof to pet |
+| — | — | Nobody can win it, so **it stops spawning** (see below) |
+
+A chatter using the wrong command on a floof is not told why — they get the same
+quiet, rate-limited "there is nothing to pet/spank right now" reply as if the
+screen were empty. Announcing which commands a photo allows would both spam chat
+and give away the answer.
+
+Unticking **both** leaves a floof nothing can claim, so it drops out of the random
+rotation rather than crossing the screen as an unwinnable decoration — the same
+rule as a photo with every animation switched off, and the table marks it the same
+way. You can still spawn it by name from **Spawn Floof** to look at it.
 
 Naming a floof is optional — the bot uses the name when it announces a win
 (*"🐾 Mochi got a pet from Alice!"*). Leave it blank and the floof is simply
@@ -173,12 +199,14 @@ floof photographed lying down looks odd rolling like a tyre).
    taunts, then fades the bubble and carries on. It keeps doing this until pet or
    until it despawns. (Ping Pong, Roll and Hop stop to speak; Peek and Ghost carry
    on with their cycle.)
-4. The first `!pet` wins: the floof stops, blooms pink, resolves into a heart, and
-   floats away. The bot congratulates the winner in chat and records the win.
+4. The first claim wins — `!pet`, or `!spank` where that photo allows it: the floof
+   stops, blooms pink, resolves into a heart, and floats away. The bot congratulates
+   the winner in chat and records the win.
 5. If nobody pets it within **despawn** seconds it quietly fades out.
 
 Only the *first* claim counts — the winner is locked in synchronously, so two
-`!pet`s in the same instant can't both win. The "no floof right now" reply is
+claims in the same instant can't both win, including a `!pet` and a `!spank`
+arriving together. The "no floof right now" reply is
 rate-limited per user so it can't be spammed.
 
 For **15 seconds after a win** that reply is suppressed entirely. Chat carries on
@@ -194,8 +222,11 @@ Its two dropdowns let you force a specific photo and/or animation style rather
 than taking what you are given, which is what makes tuning a single style
 practical.
 
-**Simulate !pet** then stands in for a chatter and plays the win animation. It is
-not scored: no win recorded, no chat announcement, no achievement.
+**Simulate !pet** and **Simulate !spank** then stand in for a chatter and play the
+win animation. Neither is scored: no win recorded, no chat announcement, no
+achievement. Both work on whatever floof is on screen even if it does not allow
+that command in chat — the buttons are for checking the animation, and refusing
+would just be a puzzle.
 
 ## Upgrading from the shared taunt list
 
@@ -215,10 +246,18 @@ directly and the standard backfill picks them up:
 ## Chat messages
 
 Every line the game says is editable under **Admin → Text Strings** (feature
-`floof`) — winner announcement, the idle reply, stats, and the setter
-confirmation. Blanking a string disables it.
+`floof`) — the two winner announcements, the two idle replies, stats, and the
+setter confirmation. Blanking a string disables it.
 
-The winner line is `🐾 {floofName} got a pet from {user}! That is {wins} floof
-{plural} for them.` — `{floofName}` is that floof's name, or "The floof" if it has
-none. If you had already customised this string your version is kept as-is; add
-`{floofName}` to it when you want the name included.
+The winner lines are `🐾 {floofName} got a pet from {user}! That is {wins} floof
+{plural} for them.` and the same with *spank*. `{floofName}` is that floof's name,
+or "The floof" if it has none. If you had already customised the pet line your
+version is kept as-is; add `{floofName}` to it when you want the name included.
+
+`!pet` and `!spank` score on the **same board**, so `{plural}` reads in pets
+("that is 3 floof pets for them") whichever command won — there is one win total,
+not two. Reword the spank line if that bothers you.
+
+`!spank` has its own idle reply, so "there is no floof to spank right now" is what
+a chatter hears both when the screen is empty *and* when the floof on it is
+Pet-only — which is true either way, from that command's point of view.

@@ -6,11 +6,11 @@ import { PermissionLevel, type ChatEvent, type EventUser } from '../../core/even
 import type { ServiceContext } from '../../core/serviceContext.js';
 import type { ChatService } from '../../services/chat.js';
 import { TextStringsService } from '../../services/textStrings.js';
-import { FLOOF_DEFAULTS, FloofError, DEFAULT_FLOOF_NAME, type FloofStyle } from '../../services/floof.js';
+import { FLOOF_DEFAULTS, FloofError, DEFAULT_FLOOF_NAME, type FloofStyle, type FloofAction } from '../../services/floof.js';
 
 const IMAGE = {
   name: 'mochi.png', url: '/assets/floofs/mochi.png', bytes: 1,
-  styles: ['pingpong'] as FloofStyle[], taunts: ['!pet me'],
+  styles: ['pingpong'] as FloofStyle[], actions: ['pet'] as FloofAction[], taunts: ['!pet me'],
   label: 'Mochi', displayName: 'Mochi',
 };
 /** The same photo, never named — the game should fall back to the stand-in. */
@@ -32,7 +32,7 @@ describe('floof plugin', () => {
   let isLive: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof floofPlugin>;
   let spawner: (image: string | null, style: FloofStyle | null) => Promise<string | null>;
-  let simulatePet: () => Promise<string | null>;
+  let simulatePet: (action?: FloofAction) => Promise<string | null>;
 
   beforeEach(async () => {
     vi.useFakeTimers();
@@ -86,6 +86,15 @@ describe('floof plugin', () => {
     await bus.publish(chat('!pet', u));
     await vi.advanceTimersByTimeAsync(0);
   };
+  const spank = async (u = user()) => {
+    await bus.publish(chat('!spank', u));
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  /** Put a floof on screen that allows exactly these commands. */
+  const spawnAllowing = async (...actions: FloofAction[]) => {
+    pickSpawn.mockResolvedValue({ image: { ...IMAGE, actions }, style: 'pingpong' as FloofStyle });
+    await spawner(null, null);
+  };
   const said = () => say.mock.calls.map((c) => String(c[1]));
   const last = () => said().at(-1) ?? '';
 
@@ -94,7 +103,7 @@ describe('floof plugin', () => {
     await pet();
     expect(recordWin).toHaveBeenCalledWith('u1');
     expect(last()).toBe('🐾 Mochi got a pet from Alice! That is 1 floof pet for them.');
-    expect(broadcast).toHaveBeenCalledWith('floof', 'pet', { user: 'Alice' });
+    expect(broadcast).toHaveBeenCalledWith('floof', 'pet', { user: 'Alice', action: 'pet' });
   });
 
   it('calls an unnamed floof "The floof" rather than leaving a gap', async () => {
@@ -217,5 +226,89 @@ describe('floof plugin', () => {
 
   it('reports when there is nothing to simulate', async () => {
     expect(await simulatePet()).toMatch(/no floof on screen/i);
+  });
+
+  describe('!spank', () => {
+    it('wins a floof that allows it, scoring on the same board as !pet', async () => {
+      await spawnAllowing('pet', 'spank');
+      await spank();
+      expect(recordWin).toHaveBeenCalledWith('u1');
+      // One shared scoreboard whichever command won it, so the count stays in
+      // "pets" — the unit the game has always counted in, and the broadcaster can
+      // reword either line under Text Strings.
+      expect(last()).toBe('🐾 Mochi got a spank from Alice! That is 1 floof pet for them.');
+      expect(broadcast).toHaveBeenCalledWith('floof', 'pet', { user: 'Alice', action: 'spank' });
+    });
+
+    it('cannot win a floof that only allows petting', async () => {
+      // Requirement 4. Nothing is scored, nothing is announced as a win, and the
+      // floof stays on screen for whoever pets it.
+      await spawnAllowing('pet');
+      await spank();
+      expect(recordWin).not.toHaveBeenCalled();
+      expect(said().some((m) => m.includes('got a spank'))).toBe(false);
+
+      // ...and it really is still there.
+      await pet();
+      expect(recordWin).toHaveBeenCalledWith('u1');
+      expect(last()).toContain('got a pet from Alice');
+    });
+
+    it('cannot be petted when the floof only allows spanking', async () => {
+      await spawnAllowing('spank');
+      await pet();
+      expect(recordWin).not.toHaveBeenCalled();
+      await spank();
+      expect(recordWin).toHaveBeenCalledWith('u1');
+      expect(last()).toContain('got a spank from Alice');
+    });
+
+    it('tells a chatter there is nothing to spank, in its own words', async () => {
+      // A pet-only floof is, to !spank, no floof at all — so it takes the quiet,
+      // rate-limited path rather than explaining the photo's settings.
+      await spawnAllowing('pet');
+      await spank();
+      expect(last()).toBe('There is no floof to spank right now. Keep watching! 👀');
+    });
+
+    it('says nothing at all with no floof on screen after the first time', async () => {
+      await spank();
+      expect(last()).toContain('no floof to spank');
+      const before = say.mock.calls.length;
+      await spank();
+      expect(say.mock.calls.length).toBe(before); // per-user cooldown
+    });
+
+    it('stays silent for stragglers right after a win', async () => {
+      await spawnAllowing('pet', 'spank');
+      await spank();
+      const after = say.mock.calls.length;
+      await spank(user({ id: 'u2', login: 'bob', displayName: 'Bob' }));
+      await pet(user({ id: 'u3', login: 'cara', displayName: 'Cara' }));
+      expect(say.mock.calls.length).toBe(after);
+    });
+
+    it('lets only one of a racing !pet and !spank win', async () => {
+      // Both claim the same round, and the claim is taken synchronously before any
+      // await — so a dead heat cannot score twice.
+      await spawnAllowing('pet', 'spank');
+      await Promise.all([bus.publish(chat('!pet', user())), bus.publish(chat('!spank', user({ id: 'u2', login: 'bob', displayName: 'Bob' })))]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recordWin).toHaveBeenCalledTimes(1);
+      expect(said().filter((m) => m.includes('got a'))).toHaveLength(1);
+    });
+
+    it('simulates either command on whatever is on screen', async () => {
+      // The admin button is for checking the animation, so it is not gated on
+      // what the photo allows in chat.
+      await spawnAllowing('pet');
+      expect(await simulatePet('spank')).toBeNull();
+      expect(broadcast).toHaveBeenCalledWith('floof', 'pet', { user: 'Test', action: 'spank' });
+      expect(recordWin).not.toHaveBeenCalled();
+    });
+
+    it('still needs a floof to simulate', async () => {
+      expect(await simulatePet('spank')).toMatch(/no floof on screen/);
+    });
   });
 });

@@ -13,7 +13,7 @@ import { chatStatsOverlayPage } from './pages/overlayChatStats.js';
 import { achievementOverlayPage } from './pages/overlayAchievement.js';
 import { floofOverlayPage } from './pages/overlayFloof.js';
 import { BOSS_DEFAULTS, BOSS_RANGES, SOUND_SLOTS, SIZES, STYLES } from '../services/bossBattle.js';
-import { FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, DEFAULT_TAUNT, DEFAULT_FLOOF_NAME, MAX_FLOOF_NAME } from '../services/floof.js';
+import { FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, FLOOF_ACTIONS, FLOOF_ACTION_LABELS, DEFAULT_FLOOF_ACTIONS, DEFAULT_TAUNT, DEFAULT_FLOOF_NAME, MAX_FLOOF_NAME } from '../services/floof.js';
 import { CROWD_DEFAULTS, CROWD_RANGES, CROWD_ANIM_RANGES, LEVELS as CROWD_LEVELS, HOLD_FOREVER } from '../services/crowdHype.js';
 import { bossBattleOverlayPage } from './pages/overlayBossBattle.js';
 import { crowdHypeOverlayPage } from './pages/overlayCrowdHype.js';
@@ -252,11 +252,11 @@ const previewTtsSpeakers = [
 
 // Mock "Pet the Floof" state (exercises the admin panel's settings + gallery).
 const previewFloofConfig: Record<string, unknown> = { ...FLOOF_DEFAULTS, enabled: true, padRight: 24, padBottom: 12 };
-interface MockFloof { name: string; url: string; bytes: number; styles: string[]; taunts: string[]; label: string; displayName: string }
+interface MockFloof { name: string; url: string; bytes: number; styles: string[]; actions: string[]; taunts: string[]; label: string; displayName: string }
 const previewFloofImages: MockFloof[] = [
-  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, styles: [...FLOOF_STYLES], taunts: [DEFAULT_TAUNT, 'i can haz !pet?'], label: 'Mochi', displayName: 'Mochi' },
-  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044, styles: ['pingpong', 'hop', 'ghost'], taunts: [DEFAULT_TAUNT], label: '', displayName: DEFAULT_FLOOF_NAME },
-  { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, styles: ['ghost'], taunts: [], label: 'Dread Floof', displayName: 'Dread Floof' },
+  { name: 'mochi.png', url: '/assets/logo.png', bytes: 48210, styles: [...FLOOF_STYLES], actions: [...DEFAULT_FLOOF_ACTIONS], taunts: [DEFAULT_TAUNT, 'i can haz !pet?'], label: 'Mochi', displayName: 'Mochi' },
+  { name: 'biscuit.png', url: '/assets/logo.png', bytes: 51044, styles: ['pingpong', 'hop', 'ghost'], actions: ['pet', 'spank'], taunts: [DEFAULT_TAUNT], label: '', displayName: DEFAULT_FLOOF_NAME },
+  { name: 'dread-floof.png', url: '/assets/logo.png', bytes: 62110, styles: ['ghost'], actions: ['spank'], taunts: [], label: 'Dread Floof', displayName: 'Dread Floof' },
 ];
 
 // Mock Crowd Hype state (exercises the three panel sections + the gallery).
@@ -449,6 +449,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
         images: previewFloofImages,
         styles: FLOOF_STYLES,
         styleLabels: FLOOF_STYLE_LABELS,
+        actions: FLOOF_ACTIONS,
+        actionLabels: FLOOF_ACTION_LABELS,
         maxNameLength: MAX_FLOOF_NAME,
         defaultName: DEFAULT_FLOOF_NAME,
         maxBytes: 2 * 1024 * 1024,
@@ -771,6 +773,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<unknow
       im.label = String(body.label ?? '').trim().replace(/\s+/g, ' ').slice(0, MAX_FLOOF_NAME);
       im.displayName = im.label || DEFAULT_FLOOF_NAME;
       return json(200, { ok: true, label: im.label, displayName: im.displayName });
+    }
+    if (p === '/api/admin/floof/image/action') {
+      const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));
+      const action = String(body.action ?? '');
+      if (!im) return json(400, { error: 'No such floof photo.' });
+      if (!(FLOOF_ACTIONS as readonly string[]).includes(action)) return json(400, { error: 'Unknown floof command.' });
+      const set = new Set(im.actions);
+      if (body.on) set.add(action);
+      else set.delete(action);
+      im.actions = FLOOF_ACTIONS.filter((a) => set.has(a));
+      return json(200, { ok: true, actions: im.actions });
     }
     if (p === '/api/admin/floof/image/style') {
       const im = previewFloofImages.find((x) => x.name === String(body.name ?? ''));

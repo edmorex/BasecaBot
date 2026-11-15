@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { readPngSize, safeImageName, FLOOF_VARIABLES, FLOOF_DEFAULTS, FLOOF_RANGES, FLOOF_STYLES, FLOOF_STYLE_LABELS, isFloofStyle } from './floof.js';
+import {
+  readPngSize, safeImageName, FLOOF_VARIABLES, FLOOF_DEFAULTS, FLOOF_RANGES,
+  FLOOF_STYLES, FLOOF_STYLE_LABELS, isFloofStyle,
+  FLOOF_ACTIONS, FLOOF_ACTION_LABELS, DEFAULT_FLOOF_ACTIONS, isFloofAction,
+  FloofService, FloofError, type FloofImage, type FloofAction,
+} from './floof.js';
+import type { Storage } from './storage/index.js';
+import type { Logger } from './logger.js';
 
 /** Build a minimal PNG header with the given dimensions. */
 function pngHeader(width: number, height: number): Buffer {
@@ -113,5 +120,187 @@ describe('floof animation styles', () => {
     expect(isFloofStyle('Hop')).toBe(false); // ids are lower-case
     expect(isFloofStyle('boss')).toBe(false);
     expect(isFloofStyle(undefined)).toBe(false);
+  });
+});
+
+/**
+ * Which commands can claim a floof. The property that matters most is the
+ * DEFAULT: a library uploaded before !spank existed has no stored preference, and
+ * every one of those photos has to keep behaving exactly as it did — pet only,
+ * with no migration and no backfill.
+ */
+const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as unknown as Logger;
+
+/** A one-row settings table, optionally seeded with a stored actions blob. */
+function storage(seed?: string) {
+  const rows: Record<string, string> = {};
+  if (seed !== undefined) rows['floof.imageActions'] = seed;
+  return {
+    saved: () => rows['floof.imageActions'],
+    storage: {
+      prisma: {
+        setting: {
+          findMany: async () => Object.entries(rows).map(([key, value]) => ({ key, value })),
+          upsert: async (a: { where: { key: string }; create: { value: string }; update: { value: string } }) => {
+            rows[a.where.key] = a.update.value ?? a.create.value;
+          },
+        },
+      },
+    } as unknown as Storage,
+  };
+}
+
+/** A service with its settings loaded, but no image directory touched. */
+async function service(seed?: string) {
+  const db = storage(seed);
+  const svc = new FloofService(db.storage, logger);
+  await svc.init();
+  return { svc, db };
+}
+
+function image(name: string, over: Partial<FloofImage> = {}): FloofImage {
+  return {
+    name, url: '/assets/floofs/' + name, bytes: 1,
+    styles: [...FLOOF_STYLES], actions: ['pet'], taunts: [],
+    label: '', displayName: 'The floof', ...over,
+  };
+}
+
+describe('floof claim commands', () => {
+  it('lists the two commands, each with a column heading', () => {
+    expect(FLOOF_ACTIONS).toEqual(['pet', 'spank']);
+    expect(FLOOF_ACTION_LABELS.pet).toBe('Pet?');
+    expect(FLOOF_ACTION_LABELS.spank).toBe('Spank?');
+  });
+
+  it('recognises only real command names', () => {
+    expect(isFloofAction('pet')).toBe(true);
+    expect(isFloofAction('spank')).toBe(true);
+    expect(isFloofAction('Spank')).toBe(false); // ids are lower-case
+    expect(isFloofAction('boop')).toBe(false);
+    expect(isFloofAction(undefined)).toBe(false);
+  });
+
+  it('defaults to pet only, which is how every photo behaved before', () => {
+    expect([...DEFAULT_FLOOF_ACTIONS]).toEqual(['pet']);
+  });
+});
+
+describe('per-photo claim commands', () => {
+  it('gives a photo nobody has configured Pet on and Spank off', async () => {
+    // Requirements 2 and 3 in one: an existing photo and a brand-new upload are
+    // indistinguishable here, because neither has a stored preference.
+    const { svc } = await service();
+    expect(svc.getImageActions('mochi.png')).toEqual(['pet']);
+    expect(svc.getImageActions('just-uploaded.png')).toEqual(['pet']);
+  });
+
+  it('turns spank on and off for one photo without touching another', async () => {
+    const { svc } = await service();
+    expect(await svc.setImageAction('mochi.png', 'spank', true)).toEqual(['pet', 'spank']);
+    expect(svc.getImageActions('mochi.png')).toEqual(['pet', 'spank']);
+    expect(svc.getImageActions('biscuit.png')).toEqual(['pet']);
+
+    expect(await svc.setImageAction('mochi.png', 'pet', false)).toEqual(['spank']);
+    expect(svc.getImageActions('mochi.png')).toEqual(['spank']);
+  });
+
+  it('keeps the canonical order however the boxes are ticked', async () => {
+    // The panel renders columns in FLOOF_ACTIONS order; a stored ['spank','pet']
+    // would make the table and the data disagree about nothing in particular.
+    const { svc } = await service();
+    await svc.setImageAction('m.png', 'pet', false);
+    expect(await svc.setImageAction('m.png', 'spank', true)).toEqual(['spank']);
+    expect(await svc.setImageAction('m.png', 'pet', true)).toEqual(['pet', 'spank']);
+  });
+
+  it('allows unticking both, and says so plainly', async () => {
+    const { svc } = await service();
+    await svc.setImageAction('m.png', 'pet', false);
+    expect(svc.getImageActions('m.png')).toEqual([]);
+  });
+
+  it('refuses a command it does not have', async () => {
+    const { svc } = await service();
+    await expect(svc.setImageAction('m.png', 'boop', true)).rejects.toBeInstanceOf(FloofError);
+    await expect(svc.setImageAction('m.png', '', true)).rejects.toBeInstanceOf(FloofError);
+    expect(svc.getImageActions('m.png')).toEqual(['pet']);
+  });
+
+  it('hands out a copy, so a caller cannot edit the stored list', async () => {
+    const { svc } = await service();
+    const list = svc.getImageActions('m.png');
+    list.push('spank');
+    expect(svc.getImageActions('m.png')).toEqual(['pet']);
+  });
+
+  it('persists the choice and reads it back', async () => {
+    const { svc, db } = await service();
+    await svc.setImageAction('m.png', 'spank', true);
+    const again = new FloofService(storage(db.saved()).storage, logger);
+    await again.init();
+    expect(again.getImageActions('m.png')).toEqual(['pet', 'spank']);
+    // And a photo that was never configured still defaults, not inherits.
+    expect(again.getImageActions('other.png')).toEqual(['pet']);
+  });
+
+  it('persists an emptied list, rather than falling back to the default', async () => {
+    // THE case a naive "absent means default" store gets wrong: a deliberately
+    // unwinnable floof must not quietly become pet-able again on restart.
+    const { svc, db } = await service();
+    await svc.setImageAction('m.png', 'pet', false);
+    const again = new FloofService(storage(db.saved()).storage, logger);
+    await again.init();
+    expect(again.getImageActions('m.png')).toEqual([]);
+  });
+
+  it('ignores junk in a hand-edited row', async () => {
+    const { svc } = await service(JSON.stringify({
+      'a.png': ['spank', 'boop', 'pet', 'pet'],
+      'b.png': 'not a list',
+      'c.png': [],
+    }));
+    expect(svc.getImageActions('a.png')).toEqual(['pet', 'spank']); // deduped, ordered
+    expect(svc.getImageActions('b.png')).toEqual(['pet']);          // unreadable -> default
+    expect(svc.getImageActions('c.png')).toEqual([]);               // a real empty choice
+  });
+});
+
+describe('spawning and claim commands', () => {
+  it('never puts a floof nobody can win on screen at random', async () => {
+    // It would just cross the screen and time out. Same reasoning as a photo with
+    // every animation switched off.
+    const { svc } = await service();
+    svc.listImages = async () => [image('dead.png', { actions: [] }), image('live.png')];
+    for (let i = 0; i < 40; i++) {
+      expect((await svc.pickSpawn()).image.name).toBe('live.png');
+    }
+  });
+
+  it('still spawns one by name, so it can be tested', async () => {
+    const { svc } = await service();
+    svc.listImages = async () => [image('dead.png', { actions: [] })];
+    expect((await svc.pickSpawn('dead.png')).image.name).toBe('dead.png');
+  });
+
+  it('explains itself when nothing is winnable', async () => {
+    const { svc } = await service();
+    svc.listImages = async () => [image('a.png', { actions: [] }), image('b.png', { actions: [] })];
+    await expect(svc.pickSpawn()).rejects.toThrow(/both !pet and !spank switched off/);
+  });
+
+  it('still reports an animation problem as an animation problem', async () => {
+    // The two exclusions must not be confused: a winnable photo with no styles
+    // left has to keep its own message.
+    const { svc } = await service();
+    svc.listImages = async () => [image('a.png', { styles: [] })];
+    await expect(svc.pickSpawn()).rejects.toThrow(/animations switched off/);
+  });
+
+  it('passes the allowed commands to whoever spawns it', async () => {
+    const { svc } = await service();
+    const only: FloofAction[] = ['spank'];
+    svc.listImages = async () => [image('a.png', { actions: only })];
+    expect((await svc.pickSpawn()).image.actions).toEqual(['spank']);
   });
 });

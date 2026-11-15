@@ -184,3 +184,48 @@ describe('admin panel autosave', () => {
     expect(unwatched, `edits to these would not save: ${unwatched.join(', ')}`).toEqual([]);
   });
 });
+
+/**
+ * The floof photo table gained two checkbox columns, "Pet?" and "Spank?". They
+ * are wired by data-attribute like the animation ones, so a typo in an attribute
+ * or a stale colspan is silent: the box renders and either does nothing or the
+ * folded-away taunt editor stops lining up.
+ */
+describe('floof claim columns', () => {
+  it('renders a column per command, from the server list and not hard-coded', () => {
+    expect(ADMIN).toMatch(/actions\.map\(function \(a\) \{ return '<th class="mid st">' \+ esc\(actionLabel\(a\)\)/);
+    expect(ADMIN).toMatch(/var actions = floofData\.actions \|\| \[\];/);
+    expect(ADMIN).toMatch(/function actionLabel\(id\)/);
+  });
+
+  it('ticks a box from the photo\u2019s own list', () => {
+    expect(ADMIN).toMatch(/data-faction="' \+ esc\(a\) \+ '" data-fname="' \+ esc\(im\.name\)/);
+    expect(ADMIN).toMatch(/\(im\.actions \|\| \[\]\)\.indexOf\(a\) !== -1 \? ' checked' : ''/);
+  });
+
+  it('posts a change to the endpoint the server routes', () => {
+    expect(ADMIN).toMatch(/'\/api\/admin\/floof\/image\/action', \{ name: name, action: cb\.getAttribute\('data-faction'\), on: cb\.checked \}/);
+    const SERVER = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'webServer.ts'), 'utf8');
+    expect(SERVER).toContain("case '/api/admin/floof/image/action':");
+  });
+
+  it('counts the new columns in the taunt row\u2019s colspan', () => {
+    // The taunt editor spans the whole table; miss these two and it stops short,
+    // which only shows up once somebody expands a floof.
+    expect(ADMIN).toMatch(/var colspan = styles\.length \+ actions\.length \+ 5;/);
+  });
+
+  it('marks a floof nothing can win as shelved, for its own reason', () => {
+    expect(ADMIN).toMatch(/var noAction = !\(im\.actions \|\| \[\]\)\.length;/);
+    expect(ADMIN).toMatch(/var none = noStyle \|\| noAction;/);
+    expect(ADMIN).toContain('never spawns — nothing can win it');
+    expect(ADMIN).toContain('never spawns — no animations enabled');
+  });
+
+  it('offers a simulate button per command, each naming its own action', () => {
+    expect(ADMIN).toContain('Simulate !pet');
+    expect(ADMIN).toContain('Simulate !spank');
+    expect(ADMIN).toMatch(/\[\['floof-sim', 'pet'\], \['floof-sim-spank', 'spank'\]\]/);
+    expect(ADMIN).toMatch(/'\/api\/admin\/floof\/simulate-pet', \{ action: pair\[1\] \}/);
+  });
+});

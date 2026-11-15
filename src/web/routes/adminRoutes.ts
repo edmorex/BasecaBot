@@ -13,6 +13,9 @@ import {
   FLOOF_STYLES,
   FLOOF_STYLE_LABELS,
   DEFAULT_FLOOF_NAME,
+  FLOOF_ACTIONS,
+  FLOOF_ACTION_LABELS,
+  isFloofAction,
   MAX_FLOOF_NAME,
   isFloofStyle,
   type FloofConfig,
@@ -292,6 +295,8 @@ export async function getAdminFloof(s: WebServer, req: IncomingMessage, res: Ser
     images,
     styles: FLOOF_STYLES,
     styleLabels: FLOOF_STYLE_LABELS,
+    actions: FLOOF_ACTIONS,
+    actionLabels: FLOOF_ACTION_LABELS,
     maxNameLength: MAX_FLOOF_NAME,
     defaultName: DEFAULT_FLOOF_NAME,
     maxBytes: MAX_IMAGE_BYTES,
@@ -352,6 +357,18 @@ export async function postAdminFloofImageName(s: WebServer, req: IncomingMessage
 }
 
 /** Allow or forbid one animation style for one floof photo. */
+export async function postAdminFloofImageAction(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  s.requireAdmin(req);
+  const body = await s.readJson(req);
+  try {
+    const actions = await s.floof.setImageAction(String(body.name ?? ''), String(body.action ?? ''), !!body.on);
+    s.json(res, 200, { ok: true, actions });
+  } catch (e) {
+    if (e instanceof FloofError) throw new HttpError(400, e.message);
+    throw e;
+  }
+}
+
 export async function postAdminFloofImageStyle(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdmin(req);
   const body = await s.readJson(req);
@@ -370,7 +387,10 @@ export async function postAdminFloofImageStyle(s: WebServer, req: IncomingMessag
  */
 export async function postAdminFloofSimulatePet(s: WebServer, req: IncomingMessage, res: ServerResponse): Promise<void> {
   s.requireAdminOrControl(req);
-  const problem = await s.floof.requestSimulatedPet();
+  const body = await s.readJson(req);
+  const raw = String(body.action ?? 'pet');
+  if (!isFloofAction(raw)) throw new HttpError(400, 'Unknown floof command.');
+  const problem = await s.floof.requestSimulatedPet(raw);
   if (problem) throw new HttpError(409, problem);
   s.json(res, 200, { ok: true });
 }

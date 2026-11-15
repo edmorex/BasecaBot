@@ -842,6 +842,10 @@ export function adminPage(): string {
       return (floofData && floofData.styleLabels && floofData.styleLabels[id]) || id;
     }
 
+    function actionLabel(id) {
+      return (floofData && floofData.actionLabels && floofData.actionLabels[id]) || id;
+    }
+
     async function renderFloof() {
       document.getElementById('init-user-btn').style.display = 'none';
       document.getElementById('admin-sub').textContent = 'Pet the Floof — timing, animation styles, and the floof photo library.';
@@ -855,25 +859,36 @@ export function adminPage(): string {
       }
       var c = floofData.config;
       var styles = floofData.styles || [];
+      var actions = floofData.actions || [];
 
-      // Photos as a table: one row each, with a checkbox per animation style.
-      var colspan = styles.length + 5;
+      // Photos as a table: one row each, with a checkbox per command that can
+      // claim it and one per animation style.
+      var colspan = styles.length + actions.length + 5;
       var photoRows = (floofData.images || []).length
         ? '<table class="floof-table"><thead><tr><th></th><th>Photo</th><th>Name</th>' +
+            actions.map(function (a) { return '<th class="mid st">' + esc(actionLabel(a)) + '</th>'; }).join('') +
             styles.map(function (s) { return '<th class="mid st">' + esc(styleLabel(s)) + '</th>'; }).join('') +
             '<th class="mid">Taunts</th><th></th></tr></thead><tbody>' +
           floofData.images.map(function (im, idx) {
-            var none = !(im.styles || []).length;
+            var noStyle = !(im.styles || []).length;
+            var noAction = !(im.actions || []).length;
+            // Either one alone makes the floof unspawnable, for different reasons.
+            var none = noStyle || noAction;
             var taunts = im.taunts || [];
             return '<tr' + (none ? ' class="shelved"' : '') + '>' +
               '<td><img src="' + esc(im.url) + '" alt="" /></td>' +
               '<td class="nm">' + esc(im.name) +
-                (none ? '<div class="muted" style="font-size:.75rem">never spawns — no animations enabled</div>' : '') +
+                (noStyle ? '<div class="muted" style="font-size:.75rem">never spawns — no animations enabled</div>' : '') +
+                (noAction && !noStyle ? '<div class="muted" style="font-size:.75rem">never spawns — nothing can win it</div>' : '') +
                 '<div class="muted" id="ftq-' + idx + '" style="font-size:.75rem' +
                   (taunts.length ? ';display:none' : '') + '">stays silent — no taunts</div>' + '</td>' +
               '<td><input type="text" class="floof-name" data-fnamefor="' + esc(im.name) + '" maxlength="' +
                 (floofData.maxNameLength || 40) + '" value="' + esc(im.label || '') + '" placeholder="' +
                 esc(floofData.defaultName || 'The floof') + '" /></td>' +
+              actions.map(function (a) {
+                return '<td class="mid st"><input type="checkbox" data-faction="' + esc(a) + '" data-fname="' + esc(im.name) + '"' +
+                  ((im.actions || []).indexOf(a) !== -1 ? ' checked' : '') + ' /></td>';
+              }).join('') +
               styles.map(function (s) {
                 return '<td class="mid st"><input type="checkbox" data-fstyle="' + esc(s) + '" data-fname="' + esc(im.name) + '"' +
                   ((im.styles || []).indexOf(s) !== -1 ? ' checked' : '') + ' /></td>';
@@ -918,8 +933,9 @@ export function adminPage(): string {
 
         '<div class="card"><h3 style="margin:0 0 .5rem">Simulate</h3>' +
           '<div class="rowline" style="gap:.6rem; flex-wrap:wrap">' +
-          '<button type="button" class="pink" id="floof-sim">Simulate !pet</button></div>' +
-          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">Stands in for a chatter and plays the win animation. Records nothing — no win, no chat announcement, no achievement.</p>' +
+          '<button type="button" class="pink" id="floof-sim">Simulate !pet</button>' +
+          '<button type="button" class="pink" id="floof-sim-spank">Simulate !spank</button></div>' +
+          '<p class="muted" style="font-size:.8rem; margin:.7rem 0 0">Stands in for a chatter and plays the win animation. Records nothing — no win, no chat announcement, no achievement. Either button works on whatever floof is on screen, even one that does not allow that command in chat.</p>' +
           '<div class="toast" id="floof-toast"></div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .6rem">Timing</h3>' +
@@ -942,7 +958,7 @@ export function adminPage(): string {
           }).join('') + '</div></div>' +
 
         '<div class="card"><h3 style="margin:0 0 .3rem">Floof photos</h3>' +
-          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Square PNGs up to ' + Math.floor(floofData.maxBytes / 1048576) + 'MB, rendered at 128×128. Untick an animation to stop a photo using it — handy when a pose only reads well one way. A photo with none ticked is never spawned at random. Give a floof a <strong>Name</strong> and the bot uses it when announcing a win; leave it blank and it is just &ldquo;The floof&rdquo;. Each floof also has <strong>its own taunts</strong>: hit the number in the Taunts column to edit them.</p>' +
+          '<p class="muted" style="font-size:.85rem; margin:0 0 .8rem">Square PNGs up to ' + Math.floor(floofData.maxBytes / 1048576) + 'MB, rendered at 128×128. <strong>Pet?</strong> and <strong>Spank?</strong> decide which commands can win that floof; untick both and it stops spawning, since nobody could claim it. Untick an animation to stop a photo using it — handy when a pose only reads well one way. A photo with none ticked is never spawned at random. Give a floof a <strong>Name</strong> and the bot uses it when announcing a win; leave it blank and it is just &ldquo;The floof&rdquo;. Each floof also has <strong>its own taunts</strong>: hit the number in the Taunts column to edit them.</p>' +
           '<div class="rowline" style="gap:.6rem; align-items:center"><input type="file" id="floof-file" accept="image/png" />' +
           '<button type="button" class="pink" id="floof-upload">Upload</button></div>' +
           '<div style="margin-top:.9rem; overflow-x:auto">' + photoRows + '</div></div>';
@@ -970,11 +986,13 @@ export function adminPage(): string {
           .then(function () { toast('floof-toast', 'A floof is on the way!', true); })
           .catch(function (e) { toast('floof-toast', e.message, false); });
       };
-      document.getElementById('floof-sim').onclick = function () {
-        api('POST', '/api/admin/floof/simulate-pet', {})
-          .then(function () { toast('floof-toast', 'Simulated a !pet (not scored).', true); })
-          .catch(function (e) { toast('floof-toast', e.message, false); });
-      };
+      [['floof-sim', 'pet'], ['floof-sim-spank', 'spank']].forEach(function (pair) {
+        document.getElementById(pair[0]).onclick = function () {
+          api('POST', '/api/admin/floof/simulate-pet', { action: pair[1] })
+            .then(function () { toast('floof-toast', 'Simulated a !' + pair[1] + ' (not scored).', true); })
+            .catch(function (e) { toast('floof-toast', e.message, false); });
+        };
+      });
       // Per-floof taunts: show/hide the editor, then add/remove lines on that floof.
       Array.prototype.forEach.call(document.querySelectorAll('[data-ftoggle]'), function (b) {
         b.onclick = function () {
@@ -1014,6 +1032,21 @@ export function adminPage(): string {
         };
         inp.onchange = save;
         inp.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-faction]'), function (cb) {
+        cb.onchange = function () {
+          var name = cb.getAttribute('data-fname');
+          api('POST', '/api/admin/floof/image/action', { name: name, action: cb.getAttribute('data-faction'), on: cb.checked })
+            .then(function (d) {
+              // Re-render when it crosses into or out of unwinnable, so the
+              // "nothing can win it" note and the shelved styling keep up.
+              var left = (d.actions || []).length;
+              renderFloof();
+              toast('floof-toast', left ? 'Commands updated for ' + name + '.'
+                : name + ' can no longer be won — it will not spawn.', true);
+            })
+            .catch(function (e) { cb.checked = !cb.checked; toast('floof-toast', e.message, false); });
+        };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-fstyle]'), function (cb) {
         cb.onchange = function () {

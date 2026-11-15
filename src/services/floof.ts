@@ -14,6 +14,25 @@ export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const FLOOF_STYLES = ['pingpong', 'roll', 'hop', 'peek', 'ghost'] as const;
 export type FloofStyle = (typeof FLOOF_STYLES)[number];
 
+/** The chat commands that can claim a floof. */
+export const FLOOF_ACTIONS = ['pet', 'spank'] as const;
+export type FloofAction = (typeof FLOOF_ACTIONS)[number];
+
+/** Column headings in the admin table. */
+export const FLOOF_ACTION_LABELS: Record<FloofAction, string> = {
+  pet: 'Pet?',
+  spank: 'Spank?',
+};
+
+/**
+ * What a photo allows when nothing has been chosen for it.
+ *
+ * Pet only, which is what every floof could do before !spank existed — so photos
+ * already in the library keep behaving exactly as they did, and a new upload
+ * starts the same way, with no migration and no per-photo backfill.
+ */
+export const DEFAULT_FLOOF_ACTIONS: readonly FloofAction[] = ['pet'];
+
 /** Human labels for the admin panel and chat messages. */
 export const FLOOF_STYLE_LABELS: Record<FloofStyle, string> = {
   pingpong: 'Ping Pong',
@@ -25,6 +44,17 @@ export const FLOOF_STYLE_LABELS: Record<FloofStyle, string> = {
 
 export function isFloofStyle(v: unknown): v is FloofStyle {
   return (FLOOF_STYLES as readonly string[]).includes(String(v));
+}
+
+/** Narrow an unknown to a FloofAction. */
+export function isFloofAction(v: unknown): v is FloofAction {
+  return (FLOOF_ACTIONS as readonly string[]).includes(String(v));
+}
+
+/** Keep only real actions, de-duplicated and in the canonical order. */
+function cleanActions(list: unknown[]): FloofAction[] {
+  const set = new Set(list.filter(isFloofAction));
+  return FLOOF_ACTIONS.filter((a) => set.has(a));
 }
 
 /** Tunable game settings (persisted in the Setting table as one JSON blob). */
@@ -184,6 +214,8 @@ export interface FloofImage {
   bytes: number;
   /** Movement styles this photo is allowed to spawn with (all of them by default). */
   styles: FloofStyle[];
+  /** Which commands can claim this floof (pet only, by default). */
+  actions: FloofAction[];
   /** This photo's own speech-bubble lines. */
   taunts: string[];
   /** The floof's name, or '' when it has not been named. */
@@ -250,10 +282,13 @@ export class FloofService {
   /** Per-photo allowed movement styles. A photo absent from this map allows all
    *  of them, so uploading a floof needs no extra step. */
   private imageStyles = new Map<string, FloofStyle[]>();
+  /** Per-photo claimable commands. Absent means the default (pet only), which is
+   *  how every photo behaved before !spank existed. */
+  private imageActions = new Map<string, FloofAction[]>();
   /** Set by the floof plugin; lets the admin panel trigger a spawn on demand. */
   private spawner?: (image: string | null, style: FloofStyle | null) => Promise<string | null>;
   /** Set by the floof plugin; stands in for a chatter's !pet without scoring it. */
-  private petSimulator?: () => Promise<string | null>;
+  private petSimulator?: (action: FloofAction) => Promise<string | null>;
 
   constructor(
     private readonly storage: Storage,
@@ -273,7 +308,7 @@ export class FloofService {
     let hadPerImage = false;
     try {
       const rows = await this.db.setting.findMany({
-        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.imageStyles', 'floof.imageTaunts', 'floof.imageNames'] } },
+        where: { key: { in: ['floof.config', 'floof.taunts', 'floof.imageStyles', 'floof.imageTaunts', 'floof.imageNames', 'floof.imageActions'] } },
       });
       for (const row of rows) {
         if (row.key === 'floof.config') {
@@ -292,6 +327,11 @@ export class FloofService {
           for (const [file, label] of Object.entries(map ?? {})) {
             const clean = cleanFloofName(label);
             if (clean) this.imageNames.set(file, clean);
+          }
+        } else if (row.key === 'floof.imageActions') {
+          const map = safeJson(row.value) as Record<string, unknown>;
+          for (const [name, list] of Object.entries(map ?? {})) {
+            if (Array.isArray(list)) this.imageActions.set(name, cleanActions(list));
           }
         } else if (row.key === 'floof.imageStyles') {
           const map = safeJson(row.value) as Record<string, unknown>;
@@ -338,7 +378,7 @@ export class FloofService {
   }
 
   /** Register the plugin's simulated-`!pet` hook. */
-  setPetSimulator(fn: () => Promise<string | null>): void {
+  setPetSimulator(fn: (action: FloofAction) => Promise<string | null>): void {
     this.petSimulator = fn;
   }
 
@@ -347,9 +387,9 @@ export class FloofService {
    * recorded, no chat announcement, no achievement — so the broadcaster can step
    * trigger the win animation without polluting the scoreboard.
    */
-  async requestSimulatedPet(): Promise<string | null> {
+  async requestSimulatedPet(action: FloofAction = 'pet'): Promise<string | null> {
     if (!this.petSimulator) return 'The floof game is not running.';
-    return this.petSimulator();
+    return this.petSimulator(action);
   }
 
   getConfig(): FloofConfig {
@@ -475,6 +515,39 @@ export class FloofService {
     return list;
   }
 
+  /**
+   * Which commands can claim a photo. Pet only unless it has been changed, so a
+   * library that predates !spank behaves exactly as it did.
+   */
+  getImageActions(name: string): FloofAction[] {
+    return [...(this.imageActions.get(safeImageName(name)) ?? DEFAULT_FLOOF_ACTIONS)];
+  }
+
+  /**
+   * Allow or forbid one command for one photo.
+   *
+   * A photo with NEITHER left can never be won, so — like a photo with no
+   * animations — it drops out of the random rotation rather than spawning as an
+   * unclaimable decoration. It can still be spawned by name for testing.
+   */
+  async setImageAction(name: string, action: string, on: boolean): Promise<FloofAction[]> {
+    if (!isFloofAction(action)) throw new FloofError(`"${action}" is not a floof command.`);
+    const key = safeImageName(name);
+    const set = new Set(this.getImageActions(key));
+    if (on) set.add(action);
+    else set.delete(action);
+    const list = cleanActions([...set]);
+    this.imageActions.set(key, list);
+    await this.saveImageActions();
+    return list;
+  }
+
+  private async saveImageActions(): Promise<void> {
+    const obj: Record<string, FloofAction[]> = {};
+    for (const [name, list] of this.imageActions) obj[name] = list;
+    await this.saveSetting('floof.imageActions', JSON.stringify(obj));
+  }
+
   private async saveImageStyles(): Promise<void> {
     const obj: Record<string, FloofStyle[]> = {};
     for (const [name, list] of this.imageStyles) obj[name] = list;
@@ -491,7 +564,8 @@ export class FloofService {
           const buf = await readFile(path.join(FLOOF_DIR, name));
           out.push({
             name, url: FLOOF_URL + name, bytes: buf.length,
-            styles: this.getImageStyles(name), taunts: this.getImageTaunts(name),
+            styles: this.getImageStyles(name), actions: this.getImageActions(name),
+            taunts: this.getImageTaunts(name),
             label: this.getImageName(name), displayName: this.getImageDisplayName(name),
           });
         } catch {
@@ -525,13 +599,18 @@ export class FloofService {
       return { image: found, style: style ?? randomOf(found.styles) ?? 'pingpong' };
     }
 
-    // Only photos that allow the requested style (or allow anything at all).
-    const pool = images.filter((i) => (style ? i.styles.includes(style) : i.styles.length > 0));
+    // Only photos that allow the requested style (or allow anything at all), and
+    // that at least one command can still claim — a floof nobody can win would
+    // just cross the screen and time out.
+    const winnable = images.filter((i) => i.actions.length > 0);
+    const pool = winnable.filter((i) => (style ? i.styles.includes(style) : i.styles.length > 0));
     if (!pool.length) {
       throw new FloofError(
-        style
-          ? `No floof photos have the ${FLOOF_STYLE_LABELS[style]} animation enabled.`
-          : 'Every floof photo has all of its animations switched off.',
+        !winnable.length
+          ? 'Every floof photo has both !pet and !spank switched off.'
+          : style
+            ? `No floof photos have the ${FLOOF_STYLE_LABELS[style]} animation enabled.`
+            : 'Every floof photo has all of its animations switched off.',
       );
     }
     const image = randomOf(pool)!;
@@ -556,7 +635,8 @@ export class FloofService {
     this.logger.info({ name, bytes: buf.length, size: size.width }, 'floof: image uploaded');
     return {
       name, url: FLOOF_URL + name, bytes: buf.length,
-      styles: this.getImageStyles(name), taunts: this.getImageTaunts(name),
+      styles: this.getImageStyles(name), actions: this.getImageActions(name),
+      taunts: this.getImageTaunts(name),
       label: this.getImageName(name), displayName: this.getImageDisplayName(name),
     };
   }
@@ -569,6 +649,7 @@ export class FloofService {
       if (this.imageStyles.delete(name)) await this.saveImageStyles();
       if (this.imageTaunts.delete(name)) await this.saveImageTaunts();
       if (this.imageNames.has(name)) await this.setImageName(name, '');
+      if (this.imageActions.delete(name)) await this.saveImageActions();
       this.logger.info({ name }, 'floof: image deleted');
     } catch {
       throw new FloofError(`No image called "${name}".`);
