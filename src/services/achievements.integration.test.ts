@@ -105,6 +105,28 @@ run('AchievementService (integration)', () => {
     expect(keys(await svc.evaluate(fast, 'first'))).toContain('first.speed');
   });
 
+  it('grants The Last Shall Be First for 10th place, however it was taken', async () => {
+    // The place is what is earned, not the command: being the 10th to !first and
+    // being the first to !last both land on place 10.
+    const viaFirst = await mkUser(20);
+    const viaLast = await mkUser(21);
+    const ninth = await mkUser(22);
+    await prisma.firstCheckin.create({ data: { userId: viaFirst, streamKey: 'tenth.a', place: 10, timeSeconds: 90 } });
+    await prisma.firstCheckin.create({ data: { userId: viaLast, streamKey: 'tenth.b', place: 10, timeSeconds: 3 } });
+    await prisma.firstCheckin.create({ data: { userId: ninth, streamKey: 'tenth.c', place: 9, timeSeconds: 3 } });
+
+    expect(keys(await svc.evaluate(viaFirst, 'first'))).toContain('first.lastShallBeFirst');
+    expect(keys(await svc.evaluate(viaLast, 'first'))).toContain('first.lastShallBeFirst');
+    // Ninth is close but not it, and neither is 11th.
+    expect(keys(await svc.evaluate(ninth, 'first'))).not.toContain('first.lastShallBeFirst');
+  });
+
+  it('does not grant it for a place outside the board', async () => {
+    const eleventh = await mkUser(23);
+    await prisma.firstCheckin.create({ data: { userId: eleventh, streamKey: 'tenth.d', place: 11, timeSeconds: 5 } });
+    expect(keys(await svc.evaluate(eleventh, 'first'))).not.toContain('first.lastShallBeFirst');
+  });
+
   // ── Quotes ────────────────────────────────────────────────────────────────
   it('counts being quoted and adding quotes separately', async () => {
     const subject = await mkUser(5);

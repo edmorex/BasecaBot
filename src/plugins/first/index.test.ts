@@ -19,6 +19,7 @@ describe('first plugin', () => {
   let say: ReturnType<typeof vi.fn>;
   let first: {
     checkIn: ReturnType<typeof vi.fn>;
+    claimLast: ReturnType<typeof vi.fn>;
     topFirsts: ReturnType<typeof vi.fn>;
     topPoints: ReturnType<typeof vi.fn>;
     topTime: ReturnType<typeof vi.fn>;
@@ -29,6 +30,7 @@ describe('first plugin', () => {
   let broadcast: ReturnType<typeof vi.fn>;
   let plugin: ReturnType<typeof firstPlugin>;
   let text: TextStringsService;
+  let evaluate: ReturnType<typeof vi.fn>;
 
   const LIVE = { startDate: new Date(Date.now() - 42_000) }; // 42s ago
 
@@ -37,6 +39,7 @@ describe('first plugin', () => {
     say = vi.fn(async () => {});
     first = {
       checkIn: vi.fn(),
+      claimLast: vi.fn(),
       topFirsts: vi.fn(async () => []),
       topPoints: vi.fn(async () => []),
       topTime: vi.fn(async () => []),
@@ -45,13 +48,14 @@ describe('first plugin', () => {
     };
     liveStream = vi.fn(async () => LIVE);
     broadcast = vi.fn();
+    evaluate = vi.fn(async () => []);
 
     const chatSvc = { say, reply: vi.fn(), whisper: vi.fn(), join: vi.fn(), part: vi.fn() } as unknown as ChatService;
     const commands = new CommandRouter(bus, chatSvc);
     text = new TextStringsService({ prisma: { textString: { findMany: async () => [], upsert: async () => {}, deleteMany: async () => {} } } } as never);
     await text.init();
     const ctx = {
-      achievements: { evaluate: vi.fn(async () => []) },
+      achievements: { evaluate },
       bus,
       commands,
       chat: chatSvc,
@@ -227,5 +231,99 @@ describe('first plugin', () => {
     first.statsFor.mockResolvedValue(null);
     await run('!first stats');
     expect(last()).toContain('hasn’t cracked the top 10');
+  });
+
+  /**
+   * `!last` claims the lowest place still free. The plugin's own job is narrow —
+   * the live check, the cooldown, picking the right thing to say, and keeping the
+   * overlay and achievements in step — so that is what these cover; which place
+   * gets handed out is the service's, and is tested against a real database.
+   */
+  describe('!last', () => {
+    const claimed = (place: number) => ({ outcome: 'claimed', place, timeSeconds: 42, points: 11 - place });
+
+    it('announces the place it claimed', async () => {
+      first.claimLast.mockResolvedValue(claimed(10));
+      await run('!last');
+      expect(first.claimLast).toHaveBeenCalledWith('u1', LIVE.startDate.toISOString(), 42);
+      expect(last()).toBe('🔚 Alice comes in at number 10 — the last place still up for grabs! Clocked in at 42 seconds.');
+    });
+
+    it('says nothing at all when every place is taken', async () => {
+      // The command is specified to do nothing, so the string ships blank — and a
+      // blank string is silent rather than an empty chat message.
+      first.claimLast.mockResolvedValue({ outcome: 'full' });
+      await run('!last');
+      expect(say).not.toHaveBeenCalled();
+    });
+
+    it('can be given something to say when the board is full', async () => {
+      await text.set('first', 'lastFull', 'Too slow — every place is gone!');
+      first.claimLast.mockResolvedValue({ outcome: 'full' });
+      await run('!last');
+      expect(last()).toBe('Too slow — every place is gone!');
+    });
+
+    it('tells someone who already holds a place, however they got it', async () => {
+      first.claimLast.mockResolvedValue({ outcome: 'repeat' });
+      await run('!last');
+      expect(last()).toContain('already have claimed to be first');
+    });
+
+    it('sasses a !last before the stream is live, and claims nothing', async () => {
+      liveStream.mockResolvedValue(null);
+      await run('!last');
+      expect(first.claimLast).not.toHaveBeenCalled();
+      expect(last()).toContain('Very naughty');
+    });
+
+    it('shares one attempt cooldown with !first', async () => {
+      // The cooldown exists to stop one person hammering the bot before the
+      // stream is live; a second budget per command would double that.
+      first.checkIn.mockResolvedValue({ repeat: false, place: 1, timeSeconds: 42, points: 10 });
+      first.claimLast.mockResolvedValue(claimed(10));
+      await run('!first');
+      await run('!last');
+      expect(first.claimLast).not.toHaveBeenCalled();
+
+      // ...and the other way round, for a user who starts with !last.
+      const bob = user({ id: 'u2', login: 'bob', displayName: 'Bob' });
+      await run('!last', bob);
+      expect(first.claimLast).toHaveBeenCalledTimes(1);
+      await run('!first', bob);
+      expect(first.checkIn).toHaveBeenCalledTimes(1);
+    });
+
+    it('puts the claim on the overlay with the stored display name', async () => {
+      first.claimLast.mockResolvedValue(claimed(10));
+      await run('!last');
+      await new Promise((r) => setTimeout(r, 0)); // the broadcast is fired off the hot path
+      expect(broadcast).toHaveBeenCalledWith('first', 'checkin', {
+        streamKey: LIVE.startDate.toISOString(),
+        place: 10,
+        name: 'AliceCustom',
+        avatarUrl: 'https://cdn/pic.png',
+        timeSeconds: 42,
+      });
+    });
+
+    it('re-evaluates achievements, so 10th place unlocks on the spot', async () => {
+      first.claimLast.mockResolvedValue(claimed(10));
+      await run('!last');
+      expect(evaluate).toHaveBeenCalledWith('u1', 'first');
+    });
+
+    it('evaluates nothing when there was no place to claim', async () => {
+      first.claimLast.mockResolvedValue({ outcome: 'full' });
+      await run('!last');
+      expect(evaluate).not.toHaveBeenCalled();
+      expect(broadcast).not.toHaveBeenCalled();
+    });
+
+    it('points the overlay at this race, like a check-in does', async () => {
+      first.claimLast.mockResolvedValue(claimed(9));
+      await run('!last');
+      expect(first.setActiveStream).toHaveBeenCalledWith(LIVE.startDate.toISOString());
+    });
   });
 });

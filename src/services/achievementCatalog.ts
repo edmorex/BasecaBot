@@ -33,6 +33,9 @@ export const METRICS: Record<string, MetricFn> = {
   'first.topTens': async (db, userId) =>
     (await db.firstStat.findUnique({ where: { userId }, select: { topTens: true } }))?.topTens ?? 0,
   // Boolean metric (0/1): fastest-ever check-in under the threshold.
+  // Place 10 exactly — reached either by being the 10th to !first or by being the
+  // first to !last. The claim path is irrelevant: the place is what is earned.
+  'first.tenthPlace': async (db, userId) => db.firstCheckin.count({ where: { userId, place: 10 } }),
   'first.speedDemon': async (db, userId) => {
     const r = await db.firstCheckin.aggregate({ where: { userId }, _min: { timeSeconds: true } });
     const best = r._min.timeSeconds;
@@ -110,6 +113,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: 'first.podium2', name: 'Podium Regular II', description: 'Finish in the top 10 of !first 50 times.', emoji: '🥈', tier: 'silver', group: 'first', metric: 'first.topTens', target: 50 },
   { key: 'first.podium3', name: 'Podium Regular III', description: 'Finish in the top 10 of !first 100 times.', emoji: '🥇', tier: 'gold', group: 'first', metric: 'first.topTens', target: 100 },
   { key: 'first.speed', name: 'Speed Demon', description: `Check in to !first in under ${SPEED_DEMON_SECONDS} seconds.`, emoji: '⚡', tier: 'silver', group: 'first', metric: 'first.speedDemon', target: 1 },
+  { key: 'first.lastShallBeFirst', name: 'The Last Shall Be First', description: 'Take 10th place in a !first race — the 10th to !first, or the first to !last.', emoji: '🔟', tier: 'bronze', group: 'first', metric: 'first.tenthPlace', target: 1 },
 
   // ── Quotes ────────────────────────────────────────────────────────────────
   { key: 'quote.quoted1', name: 'Quotable I', description: 'Be quoted for the first time.', emoji: '💬', tier: 'bronze', group: 'quote', metric: 'quote.quoted', target: 1 },

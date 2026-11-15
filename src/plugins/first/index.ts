@@ -30,6 +30,10 @@ export function firstPlugin(): Plugin {
         { key: 'eleventhPlus', label: 'Check-in — 11th+', default: 'Congratulations {name}! You are FIRST… {others}. Let’s just keep this between us.', placeholders: ['name', 'others'] },
         { key: 'repeat', label: 'Check-in — already claimed', default: 'Did you forget you already have claimed to be first? Don’t worry, you are not the first to make this mistake.', placeholders: [] },
         { key: 'notLive', label: 'Check-in — before stream is live', default: 'Very naughty! You are not the first person to try and claim first before the stream has started.', placeholders: [] },
+        { key: 'lastClaim', label: '!last — claimed a place', default: '🔚 {name} comes in at number {place} — the last place still up for grabs! Clocked in at {time}.', placeholders: ['name', 'place', 'time'] },
+        // Blank by default, so a !last with nothing left to claim says nothing at
+        // all. Fill it in on the dashboard if you would rather chat heard why.
+        { key: 'lastFull', label: '!last — no places left', default: '', placeholders: [] },
         { key: 'unknownBoard', label: 'Leaderboard — unknown option', default: 'Unknown leaderboard. Use: firsts, points, or time.', placeholders: [] },
         { key: 'noResults', label: 'Leaderboard — no results', default: 'No !first results yet — be the FIRST!', placeholders: [] },
         { key: 'leaderboard', label: 'Leaderboard — line', default: '🏆 {title}: {list}', placeholders: ['title', 'list'] },
@@ -109,6 +113,55 @@ export function firstPlugin(): Plugin {
         const name = stored?.displayName ?? u.displayName;
         ctx.ws.broadcast('first', 'checkin', { streamKey, place, name, avatarUrl, timeSeconds });
       };
+
+      /**
+       * `!last` — take the lowest place still free on the board, so the first
+       * caller gets 10th, the next 9th, and so on until it meets the places
+       * `!first` has taken from the top. Once the board is full it does nothing.
+       *
+       * It shares the check-in cooldown map with `!first` on purpose: the limit is
+       * there to stop a user hammering the bot before the stream is live, and two
+       * separate budgets would just double what one person can provoke.
+       */
+      ctx.commands.registerGroup('last', {
+        description:
+          'Claim the LAST place still available in the !first race — the first person to use it takes 10th, the next 9th, and so on.',
+        permission: PermissionLevel.Viewer,
+        subcommands: {},
+
+        onUnknown: async (e: CommandEvent) => {
+          const now = Date.now();
+          if (now - (lastAttempt.get(e.user.id) ?? 0) < CHECKIN_COOLDOWN_MS) return; // silent cooldown
+          lastAttempt.set(e.user.id, now);
+
+          const stream = await currentStream();
+          if (!stream) {
+            await sayText(e.channel, 'notLive');
+            return;
+          }
+          await ctx.users.touch(e.user);
+          const streamKey = stream.startDate.toISOString();
+          ctx.first.setActiveStream(streamKey);
+          lastKey = streamKey;
+          const seconds = Math.max(0, Math.floor((Date.now() - stream.startDate.getTime()) / 1000));
+          const result = await ctx.first.claimLast(e.user.id, streamKey, seconds);
+
+          if (result.outcome === 'repeat') {
+            // Already holds a place — whether they took it with !first or !last.
+            await sayText(e.channel, 'repeat');
+            return;
+          }
+          if (result.outcome === 'full') {
+            await sayText(e.channel, 'lastFull');
+            return;
+          }
+
+          const time = `${result.timeSeconds} ${plural(result.timeSeconds, 'second', 'seconds')}`;
+          await sayText(e.channel, 'lastClaim', { name: e.user.displayName, place: result.place, time });
+          void broadcastCheckin(streamKey, result.place, result.timeSeconds, e.user);
+          void ctx.achievements.evaluate(e.user.id, 'first').catch((err) => ctx.logger.error({ err }, 'achievements eval failed'));
+        },
+      });
 
       ctx.commands.registerGroup('first', {
         description:

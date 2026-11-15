@@ -39,7 +39,7 @@ overlay `src/web/pages/overlayAchievement.ts`.
 
 | Group | Runs when | Why |
 |---|---|---|
-| `first` | after a successful `!first` check-in | hooked in the first plugin |
+| `first` | after a successful `!first` check-in or `!last` claim | hooked in the first plugin |
 | `quote` | after `!quote add` (for **both** the adder and the person quoted) | hooked in the quotes plugin |
 | `sub` | after a sub / resub / gift-sub is logged | hooked in the events plugin |
 | `bits` | after a cheer is logged | hooked in the events plugin |
@@ -59,7 +59,7 @@ fires while they're actually present instead of at 4am.
 
 | Group | Achievements |
 |---|---|
-| **!first** | First Blood · Champion I/II/III (10/50/100 wins) · Podium Regular I/II/III (10/50/100 top-10s) · Speed Demon (check in under 10s) |
+| **!first** | First Blood · Champion I/II/III (10/50/100 wins) · Podium Regular I/II/III (10/50/100 top-10s) · Speed Demon (check in under 10s) · The Last Shall Be First (take 10th place) |
 | **Quotes** | Quotable I/II/III (quoted 1/10/50) · Scribe I/II/III (added 1/10/50) |
 | **Subs** | Welcome to the Club · Loyal I–IV (3/6/12/24 months) · Santa I/II/III (gifted 1/5/25) |
 | **Bits** | First Cheer · Sparkler (100) · Fireworks (1k) · Supernova (10k) |

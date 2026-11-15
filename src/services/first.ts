@@ -1,8 +1,11 @@
 import type { Storage } from './storage/index.js';
 
+/** How many places make up the board everything is scored against. */
+export const TOP_N = 10;
+
 /** Ranking points for a place: 1st = 10 … 10th = 1, nothing past 10th. */
 export function pointsForPlace(place: number): number {
-  return place >= 1 && place <= 10 ? 11 - place : 0;
+  return place >= 1 && place <= TOP_N ? TOP_N + 1 - place : 0;
 }
 
 /** A user's cumulative "!first" stats plus computed averages. */
@@ -57,13 +60,30 @@ export type CheckInResult =
   | { repeat: false; place: number; timeSeconds: number; points: number };
 
 /**
+ * The outcome of a `!last` claim. 'full' is its own case rather than an error:
+ * every top-10 place is taken, so there is nothing to claim and the command is
+ * meant to do nothing.
+ */
+export type LastClaimResult =
+  | { outcome: 'repeat' }
+  | { outcome: 'full' }
+  | { outcome: 'claimed'; place: number; timeSeconds: number; points: number };
+
+/**
  * The "!first" race + all-time scoreboard. A race is scoped to a live stream via
  * `streamKey` (its start time); cumulative stats persist across streams.
  *
- * Concurrency: several `!first`s can arrive at once, so place assignment is a
- * single atomic `INSERT … SELECT COUNT(*)+1 … WHERE NOT EXISTS`. SQLite
- * serializes writers, so each check-in sees the prior ones and gets a unique,
- * ordered place; the `(streamKey, userId)` unique index makes a repeat a no-op.
+ * Concurrency: several claims can arrive at once, so place assignment is a single
+ * atomic `INSERT … SELECT … WHERE NOT EXISTS`. SQLite serializes writers, so each
+ * claim sees the prior ones and gets a unique place; the `(streamKey, userId)`
+ * unique index makes a repeat a no-op — which is also what stops anyone holding
+ * two places by mixing `!first` and `!last`.
+ *
+ * Places are no longer handed out as `COUNT(*) + 1`. `!first` takes the LOWEST
+ * free place and `!last` the HIGHEST free one at or below `TOP_N`, so the two
+ * commands fill the board from opposite ends and meet in the middle. Counting
+ * rows would have put the first `!first` after a `!last` in place 2 with place 1
+ * standing empty.
  */
 export class FirstService {
   constructor(private readonly storage: Storage) {}
@@ -90,37 +110,101 @@ export class FirstService {
    * user first (UsersService.touch) — check-ins reference User by foreign key.
    */
   async checkIn(userId: string, streamKey: string, timeSeconds: number): Promise<CheckInResult> {
+    // The lowest place nobody holds. Identical to COUNT(*) + 1 while only !first
+    // is in play, but it also steps over the places !last has taken from the top
+    // end — and fills a gap left by a deleted account rather than colliding with
+    // a place that is still held.
+    //
+    // The slot list is bounded by MAX(TOP_N, COUNT + 1): among that many slots at
+    // least one must be free, because COUNT rows cannot fill COUNT + 1 places.
     const inserted = await this.db.$executeRaw`
+      WITH RECURSIVE slot(x) AS (
+        SELECT 1
+        UNION ALL
+        SELECT x + 1 FROM slot
+        WHERE x < (SELECT MAX(${TOP_N}, COUNT(*) + 1) FROM "FirstCheckin" WHERE "streamKey" = ${streamKey})
+      )
       INSERT INTO "FirstCheckin" ("streamKey", "userId", "place", "timeSeconds", "createdAt")
       SELECT ${streamKey}, ${userId},
-             (SELECT COUNT(*) FROM "FirstCheckin" WHERE "streamKey" = ${streamKey}) + 1,
+             (SELECT MIN(x) FROM slot
+               WHERE x NOT IN (SELECT "place" FROM "FirstCheckin" WHERE "streamKey" = ${streamKey})),
              ${timeSeconds}, CURRENT_TIMESTAMP
       WHERE NOT EXISTS (SELECT 1 FROM "FirstCheckin" WHERE "streamKey" = ${streamKey} AND "userId" = ${userId})
     `;
-    if (inserted === 0) return { repeat: true }; // already checked in this stream
+    if (inserted === 0) return { repeat: true }; // already claimed a place this stream
 
+    const { place, timeSeconds: at } = await this.readPlace(streamKey, userId);
+    await this.applyStats(userId, place, at);
+    return { repeat: false, place, timeSeconds: at, points: pointsForPlace(place) };
+  }
+
+  /**
+   * Claim the LAST place still free on the board — the highest number at or below
+   * `TOP_N` that nobody holds, so the first caller takes 10th, the next 9th, and
+   * so on until it meets the places `!first` has taken from the other end.
+   *
+   * Does nothing at all once the board is full; that is the point of the command
+   * rather than a failure.
+   */
+  async claimLast(userId: string, streamKey: string, timeSeconds: number): Promise<LastClaimResult> {
+    const inserted = await this.db.$executeRaw`
+      WITH RECURSIVE slot(x) AS (
+        SELECT 1 UNION ALL SELECT x + 1 FROM slot WHERE x < ${TOP_N}
+      )
+      INSERT INTO "FirstCheckin" ("streamKey", "userId", "place", "timeSeconds", "createdAt")
+      SELECT ${streamKey}, ${userId},
+             (SELECT MAX(x) FROM slot
+               WHERE x NOT IN (SELECT "place" FROM "FirstCheckin" WHERE "streamKey" = ${streamKey})),
+             ${timeSeconds}, CURRENT_TIMESTAMP
+      WHERE NOT EXISTS (SELECT 1 FROM "FirstCheckin" WHERE "streamKey" = ${streamKey} AND "userId" = ${userId})
+        AND (SELECT MAX(x) FROM slot
+              WHERE x NOT IN (SELECT "place" FROM "FirstCheckin" WHERE "streamKey" = ${streamKey})) IS NOT NULL
+    `;
+    if (inserted === 0) {
+      // Two reasons to insert nothing, and chat deserves different answers. Asked
+      // after the fact rather than before, so the decision above stays atomic: a
+      // row for this user means they already hold a place, and anything else
+      // means there was none left.
+      const held = await this.db.firstCheckin.findUnique({
+        where: { streamKey_userId: { streamKey, userId } },
+        select: { place: true },
+      });
+      return held ? { outcome: 'repeat' } : { outcome: 'full' };
+    }
+
+    const { place, timeSeconds: at } = await this.readPlace(streamKey, userId);
+    await this.applyStats(userId, place, at);
+    return { outcome: 'claimed', place, timeSeconds: at, points: pointsForPlace(place) };
+  }
+
+  /** The place a user just took, read back from the row the insert created. */
+  private async readPlace(streamKey: string, userId: string): Promise<{ place: number; timeSeconds: number }> {
     const row = await this.db.firstCheckin.findUnique({
       where: { streamKey_userId: { streamKey, userId } },
       select: { place: true, timeSeconds: true },
     });
-    const place = row!.place;
+    return { place: row!.place, timeSeconds: row!.timeSeconds };
+  }
+
+  /**
+   * Fold a claim into the cumulative scoreboard. Only top-10 places count, and
+   * only place 1 is a literal "first" — so a 10th taken with !last is a top-10
+   * finish worth one point, exactly as the same place reached with !first.
+   */
+  private async applyStats(userId: string, place: number, timeSeconds: number): Promise<void> {
+    if (place > TOP_N) return;
     const points = pointsForPlace(place);
-
-    // Only top-10 finishes touch the cumulative stats.
-    if (place <= 10) {
-      await this.db.$executeRaw`
-        INSERT INTO "FirstStat" ("userId", "firsts", "topTens", "sumTimeSeconds", "sumPlace", "points")
-        VALUES (${userId}, ${place === 1 ? 1 : 0}, 1, ${timeSeconds}, ${place}, ${points})
-        ON CONFLICT ("userId") DO UPDATE SET
-          "firsts" = "firsts" + ${place === 1 ? 1 : 0},
-          "topTens" = "topTens" + 1,
-          "sumTimeSeconds" = "sumTimeSeconds" + ${timeSeconds},
-          "sumPlace" = "sumPlace" + ${place},
-          "points" = "points" + ${points}
-      `;
-    }
-
-    return { repeat: false, place, timeSeconds: row!.timeSeconds, points };
+    const firsts = place === 1 ? 1 : 0;
+    await this.db.$executeRaw`
+      INSERT INTO "FirstStat" ("userId", "firsts", "topTens", "sumTimeSeconds", "sumPlace", "points")
+      VALUES (${userId}, ${firsts}, 1, ${timeSeconds}, ${place}, ${points})
+      ON CONFLICT ("userId") DO UPDATE SET
+        "firsts" = "firsts" + ${firsts},
+        "topTens" = "topTens" + 1,
+        "sumTimeSeconds" = "sumTimeSeconds" + ${timeSeconds},
+        "sumPlace" = "sumPlace" + ${place},
+        "points" = "points" + ${points}
+    `;
   }
 
   /**

@@ -60,3 +60,37 @@ describe('overlay pages', () => {
     expect(new Set(rooms).size, 'two overlays share a room').toBe(rooms.length);
   });
 });
+
+/**
+ * The !first board can now be SPARSE. `!last` claims places from the bottom up,
+ * so a race can legitimately hold places 1, 2, 9 and 10 with a hole in the
+ * middle — something that could never happen when places were handed out by
+ * counting rows. The overlay has to put each claim in its own numbered row rather
+ * than listing them in order, or a 10th place would be drawn in the 3rd slot.
+ */
+describe('first overlay with a sparse board', () => {
+  const SRC = readFileSync(path.join(PAGE_DIR, 'overlayFirst.ts'), 'utf8');
+
+  it('keys entries by place, not by arrival order', () => {
+    expect(SRC).toMatch(/var entries = \{\}; *\/\/ place -> /);
+    // Every renderer walks the places and looks each one up, so a gap is drawn as
+    // an empty row instead of pulling the next claim up into it.
+    expect(SRC).toMatch(/for\(var p=1;p<=LIMIT;p\+\+\)\{\s*var e=entries\[p\];/);
+    expect(SRC).toMatch(/\(e\?'filled':'empty'\)/);
+    expect(SRC).toMatch(/entries\[d\.place\]=/);
+    expect(SRC).toMatch(/entries\[e\.place\]=/);
+  });
+
+  it('accepts any place on the board, not just the next one', () => {
+    // A 10th place arriving while the board is otherwise empty must be accepted.
+    expect(SRC).toMatch(/if\(d\.place>=1 && d\.place<=LIMIT\)/);
+  });
+
+  it('replays the maths the overlay does, over a sparse board', () => {
+    const LIMIT = 10;
+    const entries: Record<number, { name: string }> = { 1: { name: 'A' }, 2: { name: 'B' }, 9: { name: 'C' }, 10: { name: 'D' } };
+    const rows: string[] = [];
+    for (let p = 1; p <= LIMIT; p++) rows.push(entries[p] ? entries[p]!.name : '-');
+    expect(rows).toEqual(['A', 'B', '-', '-', '-', '-', '-', '-', 'C', 'D']);
+  });
+});

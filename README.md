@@ -56,6 +56,7 @@ Required Twitch setup (two accounts, two tokens):
 | `!list` | mod | Manage named lists (`new`/`add`/`all`/…) |
 | `!wheel` | everyone | Drive the BasecaWheel web app (`add`/`spin`/`title`/…) |
 | `!first` | everyone | Race to be FIRST when the stream goes live; `top [firsts\|points\|time]` (alias `leaderboard`) and `stats [user]` (alias `rank`) show the all-time scoreboard |
+| `!last` | everyone | Claim the LAST place still free in the `!first` race — first caller takes 10th, next 9th, and so on |
 | `!timer` | mod | Named timers that fire a bound `!command` once (`start`) or every period (`loop`): `add`/`start`/`loop`/`stop`/`status`/`delete`/`edit`. Also `$(timer.start <name>)` / `$(timer.status <name>)` variables |
 
 Anywhere a command takes `<user>`, you can type the person's `@handle`, their
